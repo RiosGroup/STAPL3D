@@ -14,7 +14,7 @@
    :alt: GitHub Badge
 
 .. |License Badge| image:: https://img.shields.io/github/license/RiosGroup/stapl3d
-   :target: https://github.com/RiosGroup/stapl3d
+   :target: https://github.com/RiosGroup/STAPL3D
    :alt: License Badge
 
 ################################################################################
