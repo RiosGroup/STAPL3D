@@ -1,0 +1,444 @@
+projectdir:
+    datadir:
+        blockdir: blocks
+        channeldir: channels
+        shadingdir: shading
+        biasfielddir: biasfield
+        profdir:
+            base: profiling
+            featdir: features
+        jobfiles: jobfiles
+
+dataset:
+    alias: HFK16w
+    ims_ref_postfix: _ref_uint16
+    reslev: 4
+    dsr: 16
+    dsa: 4
+    dst: 64
+    dapi_chan: 0
+    dapi_thr: 0
+    dapi_shift: 0
+    memb_idxs: 3 5 6 7
+    memb_weights: 0.5 0.5 1.0 1.0
+    nucl_idxs: 0 1 2 4
+    nucl_weights: 1.0 1.0 1.0 1.0
+    mean_idxs: 0 1 2 3 4 5 6 7
+    mean_weights: 1.0 1.0 1.0 1.0 1.0 1.0 1.0 1.0
+
+
+
+shading_correction:
+    postfix: _corr
+    file_format: czi
+    noise_threshold: 1000
+    metric: median
+    quantile_threshold: 0.9
+    polynomial_order: 3
+
+shading_estimation:
+    conda:
+        env: stapl3d
+    submit:
+        array: channel
+        nodes: 1
+        tasks: 1
+        mem: 20G
+        wtime: 02:00:00
+
+shading_process:
+    conda:
+        env: segmentation
+    submit:
+        array: no
+        nodes: 1
+        tasks: 1
+        mem: 2G
+        wtime: 00:30:00
+
+shading_apply:
+    conda:
+        env: segmentation
+    submit:
+        array: channel
+        nodes: 1
+        tasks: 1
+        mem: 20G
+        wtime: 02:00:00
+
+stitching:
+    postfix: _stitching
+
+generate_mask:
+    sigma: 48.0
+    abs_threshold: 1000
+    mask_postfix: _mask
+    conda:
+        env: segmentation
+    submit:
+        array: no
+        nodes: 1
+        tasks: 1
+        mem: 60G
+        wtime: 02:00:00
+
+biasfield_correction:
+    bias_postfix: _bfc
+    downsample_factors:
+        - 1
+        - 1
+        - 1
+        - 1
+        - 1
+    n_iterations: 5
+    n_fitlevels: 4
+    n_bspline_cps:
+        z: 5
+        y: 5
+        x: 5
+    conda:
+        env: stapl3d
+    submit:
+        array: channel
+        nodes: 1
+        tasks: 24
+        mem: 20G
+        wtime: 02:00:00
+
+bias_estimation:
+    bias_postfix: _bfc
+    n_iterations: 50
+    n_fitlevels: 4
+    n_bspline_cps:
+        z: 5
+        y: 5
+        x: 5
+    conda:
+        env: simpleitk
+    submit:
+        array: channel
+        nodes: 1
+        tasks: 24
+        mem: 20G
+        wtime: 02:00:00
+
+bias_stack:
+    conda:
+        env: simpleitk
+    submit:
+        array: no
+        nodes: 1
+        tasks: 1
+        mem: 20G
+        wtime: 00:30:00
+
+bias_apply:
+    conda:
+        env: simpleitk
+    submit:
+        array: channel
+        nodes: 1
+        tasks: 1
+        mem: 60G
+        wtime: 10:00:00
+
+ims_aggregate:
+    conda:
+        env: segmentation
+    submit:
+        array: no
+        nodes: 1
+        tasks: 1
+        mem: 20G
+        wtime: 00:30:00
+
+block_segmentation:
+    conda:
+        env: segmentation
+    submit:
+        array: block
+        nodes: 1
+        tasks: 1
+        mem: 60G
+        wtime: 05:00:00
+
+splitblocks:
+    bias_apply: true
+    conda:
+        env: segmentation
+    submit:
+        array: block
+        nodes: 1
+        tasks: 1
+        mem: 20G
+        wtime: 00:30:00
+
+membrane_enhancement:
+    median_filter_par: 0.5
+    membrane_filter_par: 1.1
+    conda:
+        env: segmentation
+    submit:
+        array: block
+        nodes: 1
+        tasks: 1
+        mem: 60G
+        wtime: 01:00:00
+
+segmentation:
+    ids_memb_mask: memb/planarity
+    ids_memb_chan: memb/mean
+    ids_nucl_chan: chan/ch00
+    ids_dset_mean: mean
+    param_postfix: _params.yml
+    segments_ods: labels_memb_del
+    conda:
+        env: segmentation
+    submit:
+        array: block
+        nodes: 1
+        tasks: 1
+        mem: 60G
+        wtime: 02:00:00
+    dapi_shift_planes: 3
+    nucl_opening_footprint:
+        - 3
+        - 7
+        - 7
+    dapi_filter: 'median'
+    dapi_sigma: 1
+    dapi_dog_sigma1: 2
+    dapi_dog_sigma2: 4
+    dapi_thr: 5000
+    sauvola_window_size:
+        - 19
+        - 75
+        - 75
+    sauvola_k: 0.2
+    dapi_absmin: 1000
+    dapi_erodisk: 3
+    dist_max: 5
+    peaks_size:
+        - 11
+        - 19
+        - 19
+    peaks_thr: 1.16
+    peaks_dil_footprint:
+        - 3
+        - 7
+        - 7
+    compactness: 0.80
+    memb_filter: 'median'
+    memb_sigma: 3.0
+    planarity_thr: 0.0005
+    dset_mask_filter: 'gaussian'
+    dset_mask_sigma: 50
+    dset_mask_thr: 1000
+    steps:
+        - 0
+        - 1
+        - 2
+        - 3
+        - 4
+        - 5
+        - 6
+        - 7
+        - 8
+
+segmentation_postproc:
+    postfix:
+    conda:
+        env: segmentation
+    submit:
+        array: no
+        nodes: 1
+        tasks: 1
+        mem: 1G
+        wtime: 00:10:00
+
+segmentation_gather:
+    postfix:
+    conda:
+        env: segmentation
+    submit:
+        array: no
+        nodes: 1
+        tasks: 1
+        mem: 1G
+        wtime: 00:10:00
+
+relabel:
+    postfix: relabeled
+    conda:
+        env: segmentation
+    submit:
+        array: block
+        nodes: 1
+        tasks: 1
+        mem: 10G
+        wtime: 00:10:00
+
+relabel_gather:
+    postfix: _relabeled
+    conda:
+        env: segmentation
+    submit:
+        array: no
+        nodes: 1
+        tasks: 1
+        mem: 1G
+        wtime: 00:10:00
+
+copyblocks:
+    postfix: _relabeled
+    conda:
+        env: segmentation
+    submit:
+        array: block
+        nodes: 1
+        tasks: 1
+        mem: 10G
+        wtime: 00:10:00
+
+copyblocks_gather:
+    postfix: _relabeled_fix
+    conda:
+        env: segmentation
+    submit:
+        array: no
+        nodes: 1
+        tasks: 1
+        mem: 1G
+        wtime: 00:10:00
+
+zipping:
+    postfix: _relabeled_fix
+
+zipping_gather:
+    postfix: _relabeled_fix
+    conda:
+        env: segmentation
+    submit:
+        array: no
+        nodes: 1
+        tasks: 1
+        mem: 1G
+        wtime: 00:10:00
+
+ziplines:
+    conda:
+        env: segmentation
+    submit:
+        array: zipline
+        nodes: 1
+        tasks: 1
+        mem: 60G
+        wtime: 05:00:00
+
+zipquads:
+    axis: 0
+    conda:
+        env: segmentation
+    submit:
+        array: zipquad
+        nodes: 1
+        tasks: 1
+        mem: 60G
+        wtime: 05:00:00
+
+zipping_postproc:
+    conda:
+        env: segmentation
+    submit:
+        array: no
+        nodes: 1
+        tasks: 1
+        mem: 1G
+        wtime: 00:10:00
+
+copydataset:
+    ids: /segm/labels_memb_del_relabeled_fix
+    ods: /segm/labels_memb_del_relabeled_fix_full
+    conda:
+        env: segmentation
+    submit:
+        array: block
+        nodes: 1
+        tasks: 1
+        mem: 10G
+        wtime: 00:10:00
+
+splitsegments:
+    ids: /segm/labels_memb_del_relabeled_fix
+    conda:
+        env: segmentation
+    submit:
+        array: block
+        nodes: 1
+        tasks: 1
+        mem: 10G
+        wtime: 01:00:00
+
+mergeblocks:
+    ids00:
+        ids: segm/labels_memb_del_relabeled_fix_full
+        format: h5
+        postfix: segm-labels_memb_del_relabeled_fix_full
+    ids01:
+        ids: segm/labels_memb_del_relabeled_fix_memb
+        format: h5
+        postfix: segm-labels_memb_del_relabeled_fix_memb
+    ids02:
+        ids: segm/labels_memb_del_relabeled_fix_nucl
+        format: h5
+        postfix: segm-labels_memb_del_relabeled_fix_nucl
+    ids03:
+        ids: nucl/dapi_mask_nuclei
+        format: ims
+        postfix:
+    ids04:
+        ids: nucl/dapi_shifted
+        format: ims
+        postfix:
+    ids05:
+        ids: memb/mean
+        format: ims
+        postfix:
+    conda:
+        env: segmentation
+    submit:
+        array: idss
+        nodes: 1
+        tasks: 1
+        mem: 20G
+        wtime: 01:00:00
+
+features:
+    ids: segm/labels_memb_del_relabeled_fix
+    segm00: full
+    segm01: memb
+    segm02: nucl
+    min_labelsize: 50
+    featset_morph: maximal
+    featset_intens: maximal
+    conda:
+        env: segmentation
+    submit:
+        array: block
+        nodes: 1
+        tasks: 1
+        mem: 60G
+        wtime: 02:00:00
+
+
+features_postproc:
+    conda:
+        env: segmentation
+    submit:
+        array: no
+        nodes: 1
+        tasks: 1
+        mem: 60G
+        wtime: 01:00:00
+
+# leave <>:submit:array empty for non-array job
