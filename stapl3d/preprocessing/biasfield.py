@@ -12,7 +12,6 @@ import numpy as np
 import pickle
 from glob import glob
 
-import yaml
 from types import SimpleNamespace
 import multiprocessing
 
@@ -23,6 +22,7 @@ import matplotlib.gridspec as gridspec
 from skimage.transform import resize, downscale_local_mean
 from skimage.measure import block_reduce
 
+from stapl3d import get_params
 from stapl3d import Image, get_image, wmeMPI
 #from wmem.stack2stack import stack2stack
 
@@ -82,15 +82,7 @@ def biasfield_correction(
     ):
     """Perform N4 bias field correction."""
 
-    params = locals()
-
-    file_params = {}
-    if parameter_file:
-        with open(parameter_file, 'r') as ymlfile:
-            cfg = yaml.safe_load(ymlfile)
-            file_params = cfg['biasfield_correction']
-
-    params.update(file_params)
+    params = get_params(locals(), parameter_file, 'biasfield_correction')
 
     if not params['channels']:
         im = Image(image_in, permission='r')

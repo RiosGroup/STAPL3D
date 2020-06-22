@@ -12,7 +12,6 @@ import numpy as np
 import pickle
 import czifile
 
-import yaml
 from types import SimpleNamespace
 import multiprocessing
 
@@ -24,6 +23,7 @@ import matplotlib.gridspec as gridspec
 
 import logging
 
+from stapl3d import get_params
 from stapl3d.reporting import generate_report_page
 logger = logging.getLogger(__name__)
 
@@ -196,22 +196,6 @@ def get_n_workers(n_workers, params):
         pass
 
     return n_workers
-
-
-def get_params(params, parameter_file, pfile_entry):
-    """Merge parameters from arguments and parameterfile(=leading)."""
-
-    params = locals()
-
-    file_params = {}
-    if parameter_file:
-        with open(parameter_file, 'r') as ymlfile:
-            cfg = yaml.safe_load(ymlfile)
-            file_params = cfg[pfile_entry]
-
-    params.update(file_params)
-
-    return params
 
 
 def select_z_range(data, z_range=[], quant_thr=0.8):
