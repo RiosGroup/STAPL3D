@@ -97,7 +97,8 @@ Demos
 *****
 `Jupyter notebooks <https://jupyter-notebook-beginner-guide.readthedocs.io/en/latest/index.html>`_ are provided in the demos directory to showcase the basic functionality of STAPL-3D. The data for the demo (~6GB) can be downloaded `here <https://surfdrive.surf.nl/files/index.php/s/Q9wRT5cyKGERxI5>`_.
  - preprocessing_demo (runtime: 20 min)
- - segmentation_demo generates inline (runtime 20 min)
+ - segmentation_demo (runtime: 20 min)
+ - feature_extraction_demo (runtime: 10 min)
 
 If you installed STAPL-3D using conda, you can start a notebook in the stapl3d enviroment as follows:
 
