@@ -258,6 +258,31 @@ def gen_orthoplot(f, gs):
     return axs
 
 
+def gen_orthoplot_with_colorbar(f, gs):
+    """Create axes on a subgrid to fit three orthogonal projections."""
+
+    axs = []
+    size_xy = 10
+    size_z = 2
+    size_c = 1
+    size_t = size_xy + size_z + size_c
+
+    gs_sub = gs.subgridspec(size_xy + size_z + size_c, size_xy + size_z)
+
+    # central: yx-image
+    axs.append(f.add_subplot(gs_sub[:size_xy, :size_xy]))
+    # middle-bottom: zx-image
+    axs.append(f.add_subplot(gs_sub[size_xy:, :size_xy], sharex=axs[0]))
+    # right-middle: zy-image
+    axs.append(f.add_subplot(gs_sub[:size_xy, size_xy:], sharey=axs[0]))
+    # right colorbar
+    #axs.append(f.add_subplot(gs_sub[:, -size_c:]))
+    # bottom colorbar
+    axs.append(f.add_subplot(gs_sub[-size_c:, :]))
+
+    return axs
+
+
 def gen_orthoplot_with_profiles(f, gs):
     """Create axes on a subgrid to fit three orthogonal projections."""
 
