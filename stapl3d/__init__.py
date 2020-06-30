@@ -2033,8 +2033,6 @@ def split_filename(filename, blockoffset=[0, 0, 0]):
 def get_params(params, parameter_file, pfile_entry):
     """Merge parameters from arguments and parameterfile(=leading)."""
 
-    params = locals()
-
     file_params = {}
     if parameter_file:
         with open(parameter_file, 'r') as ymlfile:
