@@ -152,3 +152,22 @@ def make_aggregate(inputfiles, outputfile, ref_path):
 
     shutil.copy2(ref_path, outputfile)
     aggregate_file(outputfile, channels, ch_offset=0)
+
+
+def ims_to_zeros(image_in):
+    """Set imaris datasets to all-zeros."""
+
+    im = h5py.File(image_in, 'r+')
+    n_reslev = len(im['/DataSet'])
+    n_timepoints = len(im['/DataSet/ResolutionLevel 0'])
+    n_channels = len(im['/DataSet/ResolutionLevel 0/TimePoint 0'])
+    for rl in range(n_reslev):
+        for tp in range(n_timepoints):
+            for ch in range(n_channels):
+                tploc = '/DataSet/ResolutionLevel {}/TimePoint {}'.format(rl, tp)
+                chloc = '{}/Channel {}'.format(tploc, ch)
+                dsloc = '{}/Data'.format(chloc)
+                ds = im[dsloc]
+                ds[:] = np.zeros(ds.shape, dtype=ds.dtype)
+
+    im.close()
