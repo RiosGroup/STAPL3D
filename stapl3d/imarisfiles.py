@@ -3,7 +3,7 @@ import pathlib
 import h5py
 import shutil
 import numpy as np
-from wmem import Image
+from stapl3d import Image
 
 
 def split_channels(ims_path, ref_path, channels=[], outputpat=''):
