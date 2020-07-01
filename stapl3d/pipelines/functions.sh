@@ -52,12 +52,12 @@ function load_parameters {
     [[ "$2" == '-v' ]] &&
         echo "### dataset details provided:" && parse_yaml "${parfile}"
 
-    parfile="${datadir}/${dataset}_params.yml"
-    eval $( parse_yaml "${parfile}" "" )
-    [[ "$2" == '-v' ]] && {
-        echo "### using parameters:" && parse_yaml "${parfile}"
-        echo "###==========================================================================###"
-        echo "" ; }
+    #parfile="${datadir}/${dataset}_params.yml"
+    #eval $( parse_yaml "${parfile}" "" )
+    #[[ "$2" == '-v' ]] && {
+    #    echo "### using parameters:" && parse_yaml "${parfile}"
+    #    echo "###==========================================================================###"
+    #    echo "" ; }
     # TODO: exit on missing parameterfile [or revert to a default one in the package]
     # cp <package/pipelines/params.yml ${datadir}/${dataset}_params.yml
 
@@ -609,7 +609,7 @@ function base_cmds {
     echo ''
     echo source "${STAPL3D}/pipelines/functions.sh"
     echo load_dataset "\${projectdir}" "\${dataset}"
-    echo load_parameters "${dataset}" -v
+    echo load_parameters "${dataset}"
     echo ''
 
 }
