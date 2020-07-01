@@ -943,7 +943,7 @@ function get_cmd_bias_apply {
     eval get_py_${stage} > "${pyfile}"
 
     local rpf="${dataset__ims_ref_postfix}"
-    local bpf="${biasfield_estimation__postfix}"
+    local bpf="${biasfield__postfix}"
 
     echo python "${pyfile}" \
         "\${filestem}.ims" \
