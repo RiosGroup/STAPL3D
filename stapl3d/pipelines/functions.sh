@@ -930,7 +930,7 @@ function get_py_bias_apply {
     echo "biasfield.apply_channel(
         image_in,
         bias_in,
-        outputpath
+        outputpath,
         channel=channel,
         downsample_factors=[${biasfield_apply__downsample_factors__z}, ${biasfield_apply__downsample_factors__y}, ${biasfield_apply__downsample_factors__x}, ${biasfield_apply__downsample_factors__c}, ${biasfield_apply__downsample_factors__t}],
         blocksize_xy=${biasfield_apply__blocksize_xy},

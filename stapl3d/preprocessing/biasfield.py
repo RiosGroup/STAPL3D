@@ -414,7 +414,7 @@ def apply_channel(
     bias_in,
     image_out,
     channel=None,
-    dsfacs=[1, 1, 1, 1, 1],
+    downsample_factors=[1, 1, 1, 1, 1],
     blocksize_xy=1280,
     ):
     """Correct inhomogeneity of a channel."""
@@ -467,7 +467,7 @@ def apply_channel(
         data = im.slice_dataset().astype('float')
 
         # get the upsampled bias field
-        bias = get_bias_field_block(bf, im.slices, data.shape)
+        bias = get_bias_field_block(bf, im.slices, data.shape, downsample_factors)
         data /= bias
         data = np.nan_to_num(data, copy=False)
 
@@ -481,7 +481,7 @@ def apply_channel(
     mo.close()
 
 
-def get_bias_field_block(bf, slices, outdims, dsfacs=[1, 64, 64, 1]):
+def get_bias_field_block(bf, slices, outdims, dsfacs):
 
     bf.slices = [slice(int(slc.start / ds), int(slc.stop / ds), 1)
                  for slc, ds in zip(slices, dsfacs)]
