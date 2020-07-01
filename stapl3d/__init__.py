@@ -15,6 +15,7 @@ import h5py
 import glob
 import pickle
 import random
+import multiprocessing
 import numpy as np
 from xml import etree as et
 from itertools import islice
