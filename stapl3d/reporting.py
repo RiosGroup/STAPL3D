@@ -336,9 +336,9 @@ def zip_parameters(filestem, report_type='bfc'):
 
     import zipfile
     from glob import glob
-    zips = glob('{}_*_{}-params.pickle'.format(filestem, report_type))
+    zips = glob('{}_*_{}.pickle'.format(filestem, report_type))
     zips.sort()
-    outputpath = '{}_{}-params.zip'.format(filestem, report_type)
+    outputpath = '{}_{}.zip'.format(filestem, report_type)
     zf = zipfile.ZipFile(outputpath, mode='w')
     for pfile in zips:
         zf.write(pfile, basename(pfile))

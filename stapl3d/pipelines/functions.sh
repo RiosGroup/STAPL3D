@@ -793,12 +793,16 @@ function get_py_shading_estimation {
     echo 'inputfile = sys.argv[1]'
     echo 'channel = int(sys.argv[2])'
     echo ''
-    echo "from stapl3d.preprocessing.shading import estimate_channel_shading"
-    echo "estimate_channel_shading(inputfile, channel,
-            noise_threshold=${shading_correction__noise_threshold},
-            metric='${shading_correction__metric}',
-            quantile_threshold=${shading_correction__quantile_threshold},
-            polynomial_order=${shading_correction__polynomial_order})"
+    echo "from stapl3d.preprocessing import shading"
+    echo "shading.estimate_channel(
+        inputfile,
+        channel,
+        noise_threshold=${shading__noise_threshold},
+        metric='${shading__metric}',
+        quantile_threshold=${shading__quantile_threshold},
+        polynomial_order=${shading__polynomial_order},
+        outputdir='${datadir}/${dirtree__datadir__shading}',
+        )"
 
 }
 function get_cmd_shading_estimation {
@@ -806,38 +810,62 @@ function get_cmd_shading_estimation {
     pyfile="${datadir}/${jobname}.py"
     eval get_py_${stage} > "${pyfile}"
 
-    local file_format="${shading_correction__file_format}"
+    local file_format="${shading__file_format}"
     echo python "${pyfile}" "\${filestem}.${file_format}" "\${idx}"
 
 }
 
 
+function get_py_generate_mask {
+
+    echo '#!/usr/bin/env python'
+    echo ''
+    echo 'import sys'
+    echo 'inputfile = sys.argv[1]'
+    echo 'parameterfile = sys.argv[2]'
+    echo ''
+    echo "from stapl3d.preprocessing import masking"
+    echo "masking.estimate(inputfile, parameterfile)"
+
+}
 function get_cmd_generate_mask {
 
-    echo python -W ignore "${STAPL3D}/preprocessing/masking.py" \
-        -i "\${filestem}.ims" \
-        -r "${dataset__reslev}" \
-        -s "${generate_mask__sigma}" \
-        -a "${generate_mask__abs_threshold}" \
-        -m -S -o "\${filestem}${generate_mask__mask_postfix}"
+    pyfile="${datadir}/${jobname}.py"
+    eval get_py_${stage} > "${pyfile}"
+
+    echo python "${pyfile}" "\${filestem}.ims" "\${filestem}.yml"
 
 }
 
 
+function get_py_bias_estimation {
+
+    echo '#!/usr/bin/env python'
+    echo ''
+    echo 'import sys'
+    echo 'inputfile = sys.argv[1]'
+    echo 'channel = int(sys.argv[2])'
+    echo ''
+    echo "from stapl3d.preprocessing import biasfield"
+    echo "biasfield.estimate_channel(
+        inputfile,
+        channel,
+        mask_in=\${filestem}${generate_mask__mask_postfix}.h5/mask_thr00000,
+        resolution_level=${dataset__reslev},
+        downsample_factors=[1, ${dataset__dsa}, ${dataset__dsa}, 1, 1],
+        n_iterations=${bias_estimation__n_iterations},
+        n_fitlevels=${bias_estimation__n_fitlevels},
+        n_bspline_cps=[${bias_estimation__n_bspline_cps__x}, ${bias_estimation__n_bspline_cps__y}, ${bias_estimation__n_bspline_cps__z}],
+        outputdir='${datadir}/${dirtree__datadir__biasfield}',
+        )"
+
+}
 function get_cmd_bias_estimation {
 
-    echo python -W ignore "${STAPL3D}/preprocessing/biasfield.py" \
-        -i "\${filestem}.ims" \
-        -r "${dataset__reslev}" \
-        -d 1 "${dataset__dsa}" "${dataset__dsa}" 1 1 \
-        --channel "\${idx}" \
-        -m "\${filestem}${generate_mask__mask_postfix}.h5/mask_thr00000" \
-        -n "${bias_estimation__n_iterations}" \
-        -f "${bias_estimation__n_fitlevels}" \
-        -b "${bias_estimation__n_bspline_cps__x}" \
-           "${bias_estimation__n_bspline_cps__y}" \
-           "${bias_estimation__n_bspline_cps__z}" \
-        -S -o "\${channelstem}${bias_estimation_bias_postfix}"
+    pyfile="${datadir}/${jobname}.py"
+    eval get_py_${stage} > "${pyfile}"
+
+    echo python "${pyfile}" "\${filestem}.ims" "\${idx}"
 
 }
 
@@ -854,7 +882,7 @@ function get_py_bias_stack {
     echo "stack_bias(inputfiles, outputstem)"
     echo ''
     echo "from stapl3d.reporting import zip_parameters"
-    echo "zip_parameters('${channeldir}/${dataset}', '${datadir}/${dataset}', 'bfc')"
+    echo "zip_parameters('${channeldir}/${dataset}', '${datadir}/${dataset}', 'biasfield')"
 
 }
 function get_cmd_bias_stack {
@@ -873,10 +901,10 @@ function get_cmd_bias_stack {
     # TODO: also replace by python equiv
     echo ''
     echo pdfunite \
-        "${channeldir}/${dataset}_ch??${bpf}-report.pdf" \
-        "${datadir}/${dataset}${bpf}-report.pdf"
-    # echo rm "${channeldir}/${dataset}_ch??${bpf}-report.pdf"
-    # echo "    rm ${datadir}/${dataset}_ch??${bpf}-params.pickle"
+        "${channeldir}/${dataset}_ch??${bpf}.pdf" \
+        "${datadir}/${dataset}${bpf}.pdf"
+    # echo rm "${channeldir}/${dataset}_ch??${bpf}.pdf"
+    # echo "    rm ${datadir}/${dataset}_ch??${bpf}.pickle"
 
 }
 
@@ -896,7 +924,7 @@ function get_py_bias_apply {
     echo 'import shutil'
     echo 'shutil.copy2(ref_path, outputpath)'
     echo ''
-    echo "from stapl3d.preprocessing.biasfield import apply_bias_field_full"
+    echo "from stapl3d.preprocessing import biasfield"
     echo "apply_bias_field_full(image_in, bias_in, dsfacs=[1, ${dataset__dst}, ${dataset__dst}, 1], write_to_single_file=True, blocksize_xy=${bs}, outputpath=outputpath, channel=channel)"
 
 }
