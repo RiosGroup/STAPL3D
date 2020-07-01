@@ -109,7 +109,8 @@ mask:
         - 5000
         - 10000
     distance_to_edge: true
-    mask_postfix: _mask
+
+generate_mask:
     conda:
         env: stapl3d
     submit:
