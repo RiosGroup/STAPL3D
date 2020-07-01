@@ -163,10 +163,10 @@ function set_dirtree {
     biasfielddir="${datadir}/${dirtree__datadir__biasfield}"
     mkdir -p "${biasfielddir}"
 
-    profdir="${datadir}/${dirtree__datadir__profdir__base}"
+    profdir="${datadir}/${dirtree__datadir__profiling__base}"
     mkdir -p "${profdir}"
 
-    featdir="${profdir}/${dirtree__datadir__profdir__featdir}"
+    featdir="${profdir}/${dirtree__datadir__profiling__featdir}"
     mkdir -p "${featdir}"
 
     jobdir="${datadir}/${dirtree__datadir__jobfiles}"
