@@ -95,7 +95,7 @@ stitching:
 
 mask:
     postfix: _mask
-    resolution_level: 0
+    resolution_level: 1
     sigma: 48.0
     use_median_thresholds: true
     median_factor: 3
@@ -122,11 +122,11 @@ generate_mask:
 
 biasfield:
     postfix: _biasfield
-    resolution_level: -1
+    resolution_level: 1
     downsample_factors:
         z: 1
-        y: 1
-        x: 1
+        y: 2
+        x: 2
         c: 1
         t: 1
     n_iterations: 5
@@ -135,23 +135,8 @@ biasfield:
         z: 5
         y: 5
         x: 5
-    conda:
-        env: stapl3d
-    submit:
-        array: channel
-        nodes: 1
-        tasks: 2
-        mem: 20G
-        wtime: 02:00:00
 
 bias_estimation:
-    bias_postfix: _biasfield
-    n_iterations: 50
-    n_fitlevels: 4
-    n_bspline_cps:
-        z: 5
-        y: 5
-        x: 5
     conda:
         env: stapl3d
     submit:
@@ -170,6 +155,15 @@ bias_stack:
         tasks: 1
         mem: 20G
         wtime: 00:30:00
+
+biasfield_apply:
+    downsample_factors:
+        z: 1
+        y: 4
+        x: 4
+        c: 1
+        t: 1
+    blocksize_xy: 1280
 
 bias_apply:
     conda:

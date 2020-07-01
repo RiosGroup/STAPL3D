@@ -852,11 +852,11 @@ function get_py_bias_estimation {
         inputfile,
         channel,
         mask_in=maskfile,
-        resolution_level=${dataset__reslev},
-        downsample_factors=[1, ${dataset__dsa}, ${dataset__dsa}, 1, 1],
-        n_iterations=${bias_estimation__n_iterations},
-        n_fitlevels=${bias_estimation__n_fitlevels},
-        n_bspline_cps=[${bias_estimation__n_bspline_cps__x}, ${bias_estimation__n_bspline_cps__y}, ${bias_estimation__n_bspline_cps__z}],
+        resolution_level=${biasfield__resolution_level},
+        downsample_factors=[${biasfield__downsample_factors__z}, ${biasfield__downsample_factors__y}, ${biasfield__downsample_factors__x}, ${biasfield__downsample_factors__c}, ${biasfield__downsample_factors__t}],
+        n_iterations=${biasfield__n_iterations},
+        n_fitlevels=${biasfield__n_fitlevels},
+        n_bspline_cps=[${biasfield__n_bspline_cps__x}, ${biasfield__n_bspline_cps__y}, ${biasfield__n_bspline_cps__z}],
         outputdir='${datadir}/${dirtree__datadir__biasfield}',
         )"
 
@@ -927,7 +927,14 @@ function get_py_bias_apply {
     echo 'shutil.copy2(ref_path, outputpath)'
     echo ''
     echo "from stapl3d.preprocessing import biasfield"
-    echo "apply_bias_field_full(image_in, bias_in, dsfacs=[1, ${dataset__dst}, ${dataset__dst}, 1], write_to_single_file=True, blocksize_xy=${bs}, outputpath=outputpath, channel=channel)"
+    echo "biasfield.apply_channel(
+        image_in,
+        bias_in,
+        outputpath
+        channel=channel,
+        downsample_factors=[${biasfield_apply__downsample_factors__z}, ${biasfield_apply__downsample_factors__y}, ${biasfield_apply__downsample_factors__x}, ${biasfield_apply__downsample_factors__c}, ${biasfield_apply__downsample_factors__t}],
+        blocksize_xy=${biasfield_apply__blocksize_xy},
+        )"
 
 }
 function get_cmd_bias_apply {
@@ -936,7 +943,7 @@ function get_cmd_bias_apply {
     eval get_py_${stage} > "${pyfile}"
 
     local rpf="${dataset__ims_ref_postfix}"
-    local bpf="${bias_estimation__bias_postfix}"
+    local bpf="${biasfield_estimation__postfix}"
 
     echo python "${pyfile}" \
         "\${filestem}.ims" \
