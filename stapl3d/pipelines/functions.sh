@@ -866,7 +866,7 @@ function get_cmd_bias_estimation {
     pyfile="${datadir}/${jobname}.py"
     eval get_py_${stage} > "${pyfile}"
 
-    local maskfile="\${filestem}${mask__postfix}.h5/mask_thr00000"
+    local maskfile="\${filestem}${mask__postfix}.h5/mask"
     echo python "${pyfile}" "\${filestem}.ims" "\${idx}" "${maskfile}"
 
 }
