@@ -609,6 +609,7 @@ function base_cmds {
     echo ''
     echo source "${STAPL3D}/pipelines/functions.sh"
     echo load_dataset "\${projectdir}" "\${dataset}"
+    echo load_parameters "${dataset}" -v
     echo ''
 
 }
@@ -950,7 +951,7 @@ function get_cmd_bias_apply {
         "\${filestem}${bpf}.h5/bias" \
         "\${filestem}${rpf}.ims" \
         "\${channelstem}${bpf}.ims" \
-        "\$idx"
+        "\${idx}"
 
 }
 
@@ -974,7 +975,7 @@ function get_cmd_ims_aggregate {
     eval get_py_${stage} > "${pyfile}"
 
     local rpf="${dataset__ims_ref_postfix}"
-    local bpf="${bias_estimation__bias_postfix}"
+    local bpf="${biasfield__postfix}"
 
     echo python "${pyfile}" \
         "\${filestem}${bpf}.ims" \
