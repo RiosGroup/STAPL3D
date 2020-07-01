@@ -2030,6 +2030,19 @@ def split_filename(filename, blockoffset=[0, 0, 0]):
     return dset_info, x, X, y, Y, z, Z
 
 
+def get_n_workers(n_workers, params):
+    """Determine the number of workers."""
+
+    n_workers = min(n_workers, multiprocessing.cpu_count())
+
+    try:
+        n_workers = min(n_workers, params['n_workers'])
+    except:
+        pass
+
+    return n_workers
+
+
 def get_params(params, parameter_file, pfile_entry):
     """Merge parameters from arguments and parameterfile(=leading)."""
 
@@ -2042,3 +2055,28 @@ def get_params(params, parameter_file, pfile_entry):
     params.update(file_params)
 
     return params
+
+
+def prep_outputdir(outputdir, image_in='', subdir=''):
+    """"""
+
+    if not outputdir:
+        paths = get_paths(image_in)
+        datadir, filename = os.path.split(paths['base'])
+        outputdir = os.path.join(datadir, subdir)
+
+    os.makedirs(outputdir, exist_ok=True)
+
+    return outputdir
+
+
+def get_paths(image_in, resolution_level=-1, channel=0, outputstem='', step='', save_steps=False):
+    """Get split path from inputfile."""
+
+    if resolution_level != -1:  # we should have an Imaris pyramid
+        image_in = '{}/DataSet/ResolutionLevel {}'.format(image_in, resolution_level)
+    im = Image(image_in, permission='r')
+    paths = im.split_path()
+    im.close()
+
+    return paths

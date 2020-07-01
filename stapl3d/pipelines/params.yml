@@ -1,10 +1,11 @@
-projectdir:
+dirtree:
     datadir:
-        blockdir: blocks
-        channeldir: channels
-        shadingdir: shading
-        biasfielddir: biasfield
-        profdir:
+        blocks: blocks
+        channels: channels
+        shading: shading
+        mask:
+        biasfield: biasfield
+        profiling:
             base: profiling
             featdir: features
         jobfiles: jobfiles
@@ -25,14 +26,57 @@ dataset:
     nucl_weights: 1.0 1.0 1.0 1.0
     mean_idxs: 0 1 2 3 4 5 6 7
     mean_weights: 1.0 1.0 1.0 1.0 1.0 1.0 1.0 1.0
+    blocksize: 200
 
+channels:
+    n: 8
+    memb_idxs:
+        - 3
+        - 5
+        - 6
+        - 7
+    memb_weights:
+        - 0.5
+        - 0.5
+        - 1.0
+        - 1.0
+    nucl_idxs:
+        - 0
+        - 1
+        - 2
+        - 4
+    nucl_weights:
+        - 1.0
+        - 1.0
+        - 1.0
+        - 1.0
+    mean_idxs:
+        - 0
+        - 1
+        - 2
+        - 3
+        - 4
+        - 5
+        - 6
+        - 7
+    mean_weights:
+        - 1.0
+        - 1.0
+        - 1.0
+        - 1.0
+        - 1.0
+        - 1.0
+        - 1.0
+        - 1.0
+    output_channels:
+        - 0
 
-
-shading_correction:
-    postfix: _corr
+shading:
+    postfix: _shading
     file_format: czi
     noise_threshold: 1000
     metric: median
+    z_range:
     quantile_threshold: 0.9
     polynomial_order: 3
 
@@ -46,32 +90,25 @@ shading_estimation:
         mem: 20G
         wtime: 02:00:00
 
-shading_process:
-    conda:
-        env: segmentation
-    submit:
-        array: no
-        nodes: 1
-        tasks: 1
-        mem: 2G
-        wtime: 00:30:00
-
-shading_apply:
-    conda:
-        env: segmentation
-    submit:
-        array: channel
-        nodes: 1
-        tasks: 1
-        mem: 20G
-        wtime: 02:00:00
-
 stitching:
     postfix: _stitching
 
-generate_mask:
+mask:
+    postfix: _mask
+    resolution_level: 0
     sigma: 48.0
+    use_median_thresholds: true
+    median_factor: 3
     abs_threshold: 1000
+    thresholds:
+        - 500
+        - 1000
+        - 2000
+        - 3000
+        - 4000
+        - 5000
+        - 10000
+    distance_to_edge: true
     mask_postfix: _mask
     conda:
         env: segmentation
@@ -82,14 +119,15 @@ generate_mask:
         mem: 60G
         wtime: 02:00:00
 
-biasfield_correction:
-    bias_postfix: _bfc
+biasfield:
+    postfix: _biasfield
+    resolution_level: -1
     downsample_factors:
-        - 1
-        - 1
-        - 1
-        - 1
-        - 1
+        z: 1
+        y: 1
+        x: 1
+        c: 1
+        t: 1
     n_iterations: 5
     n_fitlevels: 4
     n_bspline_cps:
@@ -101,12 +139,12 @@ biasfield_correction:
     submit:
         array: channel
         nodes: 1
-        tasks: 24
+        tasks: 2
         mem: 20G
         wtime: 02:00:00
 
 bias_estimation:
-    bias_postfix: _bfc
+    bias_postfix: _biasfield
     n_iterations: 50
     n_fitlevels: 4
     n_bspline_cps:
@@ -440,5 +478,3 @@ features_postproc:
         tasks: 1
         mem: 60G
         wtime: 01:00:00
-
-# leave <>:submit:array empty for non-array job

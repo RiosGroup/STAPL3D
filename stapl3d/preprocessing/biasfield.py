@@ -4,39 +4,44 @@
 
 """
 
+import os
 import sys
 import argparse
-
-import os
-import numpy as np
+import logging
 import pickle
-from glob import glob
-
-from types import SimpleNamespace
+import shutil
 import multiprocessing
 
 import matplotlib
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 
+import numpy as np
+
+from glob import glob
+
 from skimage.transform import resize, downscale_local_mean
 from skimage.measure import block_reduce
 
-from stapl3d import get_params
-from stapl3d import Image, get_image, wmeMPI
-#from wmem.stack2stack import stack2stack
-
+from stapl3d import (
+    get_n_workers,
+    prep_outputdir,
+    get_params,
+    get_paths,
+    Image,
+    wmeMPI,
+    )
 
 from stapl3d.preprocessing.masking import (write_data)
 from stapl3d.reporting import (
     gen_orthoplot,
     gen_orthoplot_with_profiles,
-    load_parameters,
-    get_paths,
     get_centreslice,
     get_centreslices,
     get_zyx_medians,
     )
+
+logger = logging.getLogger(__name__)
 
 
 def main(argv):
@@ -47,42 +52,50 @@ def main(argv):
         formatter_class=argparse.ArgumentDefaultsHelpFormatter
         )
     parser.add_argument(
-        'inputfile',
-        help='path to ims file',
+        '-i', '--image_in',
+        required=True,
+        help='path to image file',
         )
     parser.add_argument(
-        'parameter_file',
+        '-p', '--parameter_file',
+        required=True,
         help='path to yaml parameter file',
         )
     parser.add_argument(
         '-o', '--outputdir',
-        help='output directory',
+        required=False,
+        help='path to output directory',
         )
 
     args = parser.parse_args()
 
-    biasfield_correction(
-        args.inputfile,
-        args.parameter_file,
-        args.outputdir,
-        )
+    estimate(args.image_in, args.parameter_file, args.outputdir)
 
 
-def biasfield_correction(
+def estimate(
     image_in,
-    parameter_file='',
+    parameter_file,
     outputdir='',
     channels=[],
     mask_in='',
     resolution_level=-1,
-    downsample_factors=[1, 1, 1, 1, 1],
+    downsample_factors={'z': 1, 'y': 1, 'x': 1, 'c': 1, 't': 1},
     n_iterations=50,
     n_fitlevels=4,
-    n_bspline_cps=[5, 5, 5],
+    n_bspline_cps={'z': 5, 'y': 5, 'x': 5},
     ):
     """Perform N4 bias field correction."""
 
-    params = get_params(locals(), parameter_file, 'biasfield_correction')
+    step_id = 'biasfield'
+
+    dirs = get_params(dict(), parameter_file, 'dirtree')
+    try:
+        subdir = dirs['datadir'][step_id] or ''
+    except KeyError:
+        subdir = step_id
+    outputdir = prep_outputdir(outputdir, image_in, subdir)
+
+    params = get_params(locals(), parameter_file, step_id)
 
     if not params['channels']:
         im = Image(image_in, permission='r')
@@ -97,65 +110,74 @@ def biasfield_correction(
         (
             image_in,
             ch,
+            params['submit']['tasks'],
             params['mask_in'],
             params['resolution_level'],
-            params['downsample_factors'],
+            [params['downsample_factors'][dim] for dim in 'zyxct'],
             params['n_iterations'],
             params['n_fitlevels'],
-            params['n_bspline_cps'],
+            [params['n_bspline_cps'][dim] for dim in 'zyx'],
             outputdir,
         )
         for ch in params['channels']]
 
     with multiprocessing.Pool(processes=n_workers) as pool:
-        pool.starmap(estimate_biasfield, arglist)
+        pool.starmap(estimate_channel, arglist)
 
 
-def estimate_biasfield(
+def estimate_channel(
     image_in,
     channel,
+    n_threads=1,
     mask_in='',
     resolution_level=-1,
-    downsample_factors=[1, 4, 4, 1, 1],
+    downsample_factors=[1, 1, 1, 1, 1],
     n_iterations=50,
     n_fitlevels=4,
     n_bspline_cps=[5, 5, 5],
-    outputstem='',
+    outputdir='',
     ):
     """Estimate the x- and y-profiles for a channel in a czi file.
 
     """
 
-    step = 'bfc'
-    paths = get_paths(image_in, resolution_level, channel, outputstem, step, save_steps=True)
-    print(paths)
-    report = {
-        'parameters': locals(),
-        'paths': paths,
-        'medians': {},
-        'centreslices': {}
-        }
+    # Prepare the output.
+    step_id = 'biasfield'
+    postfix = 'ch{:02d}_{}'.format(channel, step_id)
 
-    ds_im, report, m = downsample_channel(image_in, channel, resolution_level,
-                                          downsample_factors, False,
-                                          paths['steps'], report)
+    outputdir = prep_outputdir(outputdir, image_in, subdir=step_id)
 
-    ds_ma, report, _ = downsample_channel(mask_in, channel, resolution_level,
-                                          downsample_factors, True,
-                                          paths['steps'], report)
+    paths = get_paths(image_in, resolution_level, channel)
+    datadir, filename = os.path.split(paths['base'])
+    dataset, ext = os.path.splitext(filename)
 
-    ds_bf, report = calculate_bias_field(ds_im, ds_ma,
-                                         n_iterations, n_fitlevels, n_bspline_cps,
-                                         paths['main'], report, m)
+    filestem = '{}_{}'.format(dataset, postfix)
+    outputstem = os.path.join(outputdir, filestem)
+    outputpat = '{}.h5/{}'.format(outputstem, '{}')
 
-    ds_cr, report = divide_bias_field(ds_im, ds_bf, paths['steps'], report, m)
+    logging.basicConfig(filename='{}.log'.format(outputstem), level=logging.INFO)
+    report = {'parameters': locals()}
 
-    with open(paths['params'], 'wb') as f:
-        pickle.dump(report['parameters'], f)
 
-    #outputdir = os.path.dirname(outputstem)
-    #filestem = os.path.basename(outputstem)
-    #generate_report(outputdir, filestem, channel)
+    ds_im = downsample_channel(image_in, channel, resolution_level,
+                               downsample_factors, False, outputpat)
+
+    ds_ma = downsample_channel(mask_in, channel, resolution_level,
+                               downsample_factors, True, outputpat)
+
+    ds_bf = calculate_bias_field(ds_im, ds_ma,
+                                 n_iterations, n_fitlevels, n_bspline_cps,
+                                 n_threads, outputpat)
+
+    ds_cr = divide_bias_field(ds_im, ds_bf, outputpat)
+
+
+    # Save medians and parameters.
+    with open('{}.pickle'.format(outputstem), 'wb') as f:
+        pickle.dump(report['parameters'], f, pickle.HIGHEST_PROTOCOL)
+
+    # Print a report page to pdf.
+    generate_report(outputdir, dataset, channel=channel, ioff=True)
 
     ds_im.close()
     ds_bf.close()
@@ -163,31 +185,16 @@ def estimate_biasfield(
     if mask_in:
         ds_ma.close()
 
-    return ds_bf
 
-
-def get_n_workers(n_workers, params):
-    """Determine the number of workers."""
-
-    n_workers = min(n_workers, multiprocessing.cpu_count())
-
-    try:
-        n_workers = min(n_workers, params['n_workers'])
-    except:
-        pass
-
-    return n_workers
-
-
-def downsample_channel(image_in, ch, resolution_level=-1, dsfacs=[1, 4, 4, 1, 1],
-                       ismask=False, output='', report={}):
+def downsample_channel(image_in, ch, resolution_level=-1,
+                       dsfacs=[1, 4, 4, 1, 1], ismask=False, output=''):
     """Downsample an image."""
 
     ods = 'data' if not ismask else 'mask'
 
     # return in case no mask provided
     if not image_in:
-        return None, report, ''
+        return None
 
     if resolution_level != -1 and not ismask:  # we should have an Imaris pyramid
         image_in = '{}/DataSet/ResolutionLevel {}'.format(image_in, resolution_level)
@@ -219,19 +226,12 @@ def downsample_channel(image_in, ch, resolution_level=-1, dsfacs=[1, 4, 4, 1, 1]
     props['slices'] = None
     mo = write_data(data, props, output, ods)
 
-    # report data
-    thr = 1000
-    meds_mask = data < thr
-    report['medians'][ods] = get_zyx_medians(data, meds_mask)
-
-    c_slcs = {dim: get_centreslice(mo, '', dim) for dim in 'zyx'}
-    report['centreslices'][ods] = c_slcs
-
-    return mo, report, meds_mask
+    return mo
 
 
-def calculate_bias_field(im, mask=None, n_iter=50, n_fitlev=4, n_cps=[5, 5, 5],
-                         output='', report={}, meds_mask=''):
+def calculate_bias_field(im, mask=None,
+                         n_iter=50, n_fitlev=4, n_cps=[5, 5, 5],
+                         n_threads=1, output=''):
     """Calculate the bias field."""
 
     import SimpleITK as sitk
@@ -249,6 +249,7 @@ def calculate_bias_field(im, mask=None, n_iter=50, n_fitlev=4, n_cps=[5, 5, 5],
 
     # run the N4 correction
     corrector = sitk.N4BiasFieldCorrectionImageFilter();
+    #corrector.SetNumberOfThreads(n_threads)
     corrector.SetDebug(True)
     corrector.SetMaximumNumberOfIterations([n_iter] * n_fitlev)
     corrector.SetNumberOfControlPoints(n_cps)
@@ -266,16 +267,10 @@ def calculate_bias_field(im, mask=None, n_iter=50, n_fitlev=4, n_cps=[5, 5, 5],
     props = im.get_props()
     mo = write_data(data, props, output, ods)
 
-    # report data
-    report['medians'][ods] = get_zyx_medians(data, meds_mask)
-
-    c_slcs = {dim: get_centreslice(mo, '', dim) for dim in 'zyx'}
-    report['centreslices'][ods] = c_slcs
-
-    return mo, report
+    return mo
 
 
-def divide_bias_field(im, bf, output='', report={}, meds_mask=''):
+def divide_bias_field(im, bf, output=''):
     """Apply bias field correction."""
 
     ods = 'corr'
@@ -287,12 +282,7 @@ def divide_bias_field(im, bf, output='', report={}, meds_mask=''):
     props = im.get_props()
     mo = write_data(data, props, output, ods)
 
-    report['medians'][ods] = get_zyx_medians(data, meds_mask)
-
-    c_slcs = {dim: get_centreslice(mo, '', dim) for dim in 'zyx'}
-    report['centreslices'][ods] = c_slcs
-
-    return mo, report
+    return mo
 
 
 def apply_bias_field(filestem, channels=[], outputpath=''):
@@ -354,27 +344,88 @@ def stack_bias(inputfiles, outputstem, idss=['data', 'bias', 'corr']):
         outputpath = '{}.h5/{}'.format(outputstem, ids)
         outputpath_nii = '{}_{}.nii.gz'.format(outputstem, ids)
         stack_channels(images_in, outputpath)
-        # stack2stack(outputpath, inlayout='zyxc', outlayout='xyzc', outputpath=outputpath_nii)
 
 
-def apply_bias_field_full(image_in, bias_in, dsfacs=[1, 64, 64, 1],
-                          in_place=False, write_to_single_file=False,
-                          blocksize_xy=1280, outputpath='', channel=None):
-    """single-core in ~200 blocks"""
+def apply(
+    image_in,
+    parameter_file,
+    outputdir='',
+    channels=[],
+    downsample_factors={'z': 1, 'y': 1, 'x': 1, 'c': 1, 't': 1},
+    blocksize_xy=1280,
+    ):
+    """Perform N4 bias field correction."""
 
-    perm = 'r+' if in_place else 'r'
-    im = Image(image_in, permission=perm)
+    step_id = 'biasfield'
+
+    dirs = get_params(dict(), parameter_file, 'dirtree')
+    try:
+        subdir = dirs['datadir'][step_id] or ''
+    except KeyError:
+        subdir = step_id
+    outputdir = prep_outputdir(outputdir, image_in, subdir)
+
+    params = get_params(locals(), parameter_file, 'biasfield_apply')
+
+    if not params['channels']:
+        im = Image(image_in, permission='r')
+        im.load()
+        n_channels = im.dims[im.axlab.index('c')]
+        params['channels'] = list(range(n_channels))
+        im.close()
+
+    n_workers = get_n_workers(len(params['channels']), params)
+
+    try:
+        subdir = dirs['datadir']['channels'] or ''
+    except KeyError:
+        subdir = 'channels'
+    channeldir = prep_outputdir('', image_in, subdir)
+
+    paths = get_paths(image_in)
+    datadir, filename = os.path.split(paths['base'])
+    filestem = os.path.splitext(filename)[0]
+    dataset = filestem.split('_shading')[0]
+    postfix = filestem.split(dataset)[-1]
+    chstem_pat = '{}{}{}'.format(dataset, '_ch{:02d}', postfix)
+
+    arglist = []
+    for ch in params['channels']:
+        chstem = chstem_pat.format(ch)
+        os.path.join(channeldir, chstem)
+        bias_fname = '{}{}_ch{:02d}_{}.h5/bias'.format(dataset, postfix, ch, step_id)
+        arglist.append(
+            (
+                os.path.join(channeldir, '{}.ims'.format(chstem)),
+                os.path.join(outputdir, bias_fname),
+                os.path.join(channeldir, '{}_{}.ims'.format(chstem, step_id)),
+                [params['downsample_factors'][dim] for dim in 'zyxct'],
+                params['blocksize_xy'],
+            )
+        )
+
+    with multiprocessing.Pool(processes=n_workers) as pool:
+        pool.starmap(apply_channel, arglist)
+
+
+def apply_channel(
+    image_in,
+    bias_in,
+    image_out,
+    dsfacs=[1, 1, 1, 1, 1],
+    blocksize_xy=1280,
+    ):
+    """Correct inhomogeneity of a channel."""
+
+    print(image_in, bias_in, image_out)
+    im = Image(image_in, permission='r')
     im.load(load_data=False)
 
     bf = Image(bias_in, permission='r')
     bf.load(load_data=False)
 
-    if channel is not None:
-        im.slices[3] = slice(channel, channel + 1)
-    if write_to_single_file:  # assuming single-channel copied file here
-        mo = Image(outputpath)
-        mo.load()
-        mo.slices[3] = slice(0, 1, 1)
+    mo = Image(image_out)
+    mo.load()
 
     mpi = wmeMPI(usempi=False)
     mpi_nm = wmeMPI(usempi=False)
@@ -413,34 +464,14 @@ def apply_bias_field_full(image_in, bias_in, dsfacs=[1, 64, 64, 1],
         data /= bias
         data = np.nan_to_num(data, copy=False)
 
-        if in_place:
-            im.slices = block_nm['slices']
-            data = data[tuple(data_slices[:3])].astype(im.dtype)
-            im.write(data)
-        elif write_to_single_file:
-            mo.slices = block_nm['slices']
-            mo.slices[3] = slice(0, 1, 1)
-            data = data[tuple(data_slices[:3])].astype(mo.dtype)
-            mo.write(data)
-        else:
-            props = im.get_props()
-            if len(im.dims) > 4:
-                props = im.squeeze_props(props, dim=4)
-            if len(im.dims) > 3:
-                props = im.squeeze_props(props, dim=3)
-            props['axlab'] = 'zyx'  # FIXME: axlab return as string-list
-            props['shape'] = bias.shape
-            props['slices'] = None
-            props['dtype'] = bias.dtype
-            mo = Image(block['path'], **props)  # FIXME: needs channel
-            mo.create(comm=mpi.comm)
-            mo.slices = None
-            mo.set_slices()
-            mo.write(data=bias)
-            mo.close()
+        mo.slices = block_nm['slices']
+        mo.slices[3] = slice(0, 1, 1)
+        data = data[tuple(data_slices[:3])].astype(mo.dtype)
+        mo.write(data)
 
     im.close()
     bf.close()
+    mo.close()
 
 
 def get_bias_field_block(bf, slices, outdims, dsfacs=[1, 64, 64, 1]):
@@ -600,10 +631,11 @@ def plot_images(f, axdict, info_dict={}, res=10000, add_profiles=True):
         for k, v in bf_dict.items():
 
             img, dims = get_img(centreslices[k][dim], ax_idx, dims)
+            im = axdict[k][ax_idx].imshow(img, cmap='gray', aspect=aspect)
+
+            axdict[k][ax_idx].axis('off')
             y_min = min(y_min, np.floor(np.amin(img) / res) * res)
             y_max = max(y_max, np.ceil(np.amax(img) / res) * res)
-            im = axdict[k][ax_idx].imshow(img, cmap='gray', aspect=aspect)
-            axdict[k][ax_idx].axis('off')
 
             if add_profiles:
                 ax = axdict[k][ax_idx+3]
@@ -642,107 +674,6 @@ def plot_images(f, axdict, info_dict={}, res=10000, add_profiles=True):
                 im.set_clim(y_min, y_max)
         for im in axdict['bias'][i].get_images():
             im.set_clim(0, 3)
-
-"""
-    # set axis limits
-    for i in [3, 5]:  # zx
-        for k in ['data', 'corr']:
-            axdict[k][i].set_ylim(y_min, y_max)
-        axdict['bias'][i].set_ylim(0, 3)
-    for k in ['data', 'corr']:
-        axdict[k][4].set_xlim(y_min, y_max)
-        axdict[k][4].invert_xaxis()
-    axdict['bias'][4].set_xlim(0, 3)
-    axdict['bias'][4].invert_xaxis()
-"""
-
-"""
-    ax = axdict['bias'][1]  # zx-image
-    ax.axis('on')
-    ax.set_xticks([0, dims[2]])
-    ax.set_yticks([0, dims[0]])
-    for s in ['right', 'top']:
-        ax.spines[s].set_visible(False)
-
-    ax = axdict['bias'][2]  # zy-image
-    ax.axis('on')
-    ax.set_xticks([0, dims[0]])
-    ax.set_yticks([0, dims[1]])
-    ax.yaxis.tick_right()
-    for s in ['right', 'top']:
-        ax.spines[s].set_visible(False)
-
-    ax = axdict['bias'][5]  # x-profiles
-    ax.axis('on')
-    ax.set_xticks([])
-    ax.set_yticks([y_max])
-    for s in ['right', 'top']:
-        ax.spines[s].set_visible(False)
-
-    ax = axdict['bias'][4]  # y-profiles
-    ax.axis('on')
-    ax.set_xticks([])
-    ax.set_yticks([y_max])
-    ax.yaxis.tick_right()
-    for s in ['left', 'top']:
-        ax.spines[s].set_visible(False)
-
-    ax = axdict['bias'][3]  # z-profiles
-    ax.axis('on')
-    ax.set_xticks([])
-    ax.set_yticks([y_max])
-    ax.yaxis.tick_right()
-    for s in ['left', 'top']:
-        ax.spines[s].set_visible(False)
-"""
-    # # PLot colorbar.
-    # cbar = f.colorbar(im, cax=axdict[k][3], orientation='horizontal')
-    # axdict[k][i].axis('off')
-
-    # ax = axdict['data'][0]
-    # ax_idxs = [0, 1, 5]
-    # for k in ['bias', 'corr']:
-    #     for i in ax_idxs:
-    #         ax1 = axdict[k][i]
-    #         ax1.get_shared_x_axes().join(ax1, ax)
-    #
-    # ax = axdict['data'][3]
-    # ax_idxs = [3, 2]
-    # for k in ['bias', 'corr']:
-    #     for i in ax_idxs:
-    #         ax1 = axdict[k][i]
-    #         ax1.get_shared_x_axes().join(ax1, ax)
-
-    # ax = axdict['data'][3]
-    # ax_idxs = [3, 2]
-    # for k in ['bias', 'corr']:
-    #     for i in ax_idxs:
-    #         ax1 = axdict[k][i]
-    #         ax1.get_shared_x_axes().join(ax1, ax)
-
-
-# def tmp():
-#
-#     import matplotlib.pyplot as plt
-#
-#     def set_size(w, h, ax=None):
-#         """ w, h: width, height in inches """
-#         if not ax: ax=plt.gca()
-#         l = ax.figure.subplotpars.left
-#         r = ax.figure.subplotpars.right
-#         t = ax.figure.subplotpars.top
-#         b = ax.figure.subplotpars.bottom
-#         figw = float(w)/(r-l)
-#         figh = float(h)/(t-b)
-#         ax.figure.set_size_inches(figw, figh)
-#
-#     fig, ax=plt.subplots()
-#
-#     ax.plot([1, 3, 2])
-#
-#     set_size(5, 5)
-#
-#     plt.show()
 
 
 def add_titles(axs, info_dict):
@@ -794,7 +725,6 @@ def gen_subgrid_with_profiles(f, gs, fsize=7, channel=None, metric='median'):
 
     gs0 = gs.subgridspec(2, 1, height_ratios=[1, 10])
 
-
     gs00 = gs0[0].subgridspec(10, 1)
     gs01 = gs0[1].subgridspec(3, 2)
 
@@ -802,8 +732,7 @@ def gen_subgrid_with_profiles(f, gs, fsize=7, channel=None, metric='median'):
               for i, k in enumerate(['data', 'corr', 'bias'])}
 
     axdict['p'] = f.add_subplot(gs00[0, 0])
-    title = 'parameters'
-    axdict['p'].set_title(title, fdict, fontweight='bold')
+    axdict['p'].set_title('parameters', fdict, fontweight='bold')
     axdict['p'].tick_params(axis='both', labelsize=fsize, direction='in')
     # axdict['p'].imshow(np.zeros([100, 100]))  # test dummy for constrained layout
 
@@ -874,7 +803,7 @@ def get_info_dict(image_in, info_dict={}, report_type='bfc', channel=0):
     return info_dict
 
 
-def generate_report(outputdir, dataset, channel=None):
+def generate_report(outputdir, dataset, channel=None, ioff=False):
     """Generate a QC report of the bias field correction process."""
 
     # chsize = [12, 7]  # FIXME:affect aspect of images
@@ -912,7 +841,9 @@ def generate_report(outputdir, dataset, channel=None):
         info_dict.clear()
 
     f.suptitle(figtitle, fontsize=14, fontweight='bold')
-    f.savefig('{}_bfc-report.pdf'.format(outputstem))
+    f.savefig('{}_biasfield.pdf'.format(outputstem))
+    if ioff:
+        plt.close(f)
 
 
 if __name__ == "__main__":

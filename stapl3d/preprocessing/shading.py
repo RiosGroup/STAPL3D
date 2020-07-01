@@ -4,27 +4,31 @@
 
 """
 
+import os
 import sys
 import argparse
-
-import os
-import numpy as np
+import logging
 import pickle
-import czifile
-
-from types import SimpleNamespace
+import shutil
 import multiprocessing
-
-from skimage.io import imread, imsave
 
 import matplotlib
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 
-import logging
+import numpy as np
 
-from stapl3d import get_params
-from stapl3d.reporting import generate_report_page
+from skimage.io import imread, imsave
+
+import czifile
+
+from stapl3d import (
+    get_n_workers,
+    prep_outputdir,
+    get_params,
+    get_paths,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -36,30 +40,29 @@ def main(argv):
         formatter_class=argparse.ArgumentDefaultsHelpFormatter
         )
     parser.add_argument(
-        'inputfile',
-        help='path to czi file',
+        '-i', '--image_in',
+        required=True,
+        help='path to image file',
         )
     parser.add_argument(
-        'parameter_file',
+        '-p', '--parameter_file',
+        required=True,
         help='path to yaml parameter file',
         )
     parser.add_argument(
         '-o', '--outputdir',
-        help='output directory',
+        required=False,
+        help='path to output directory',
         )
 
     args = parser.parse_args()
 
-    shading_correction(
-        args.inputfile,
-        args.parameter_file,
-        args.outputdir,
-        )
+    estimate(args.image_in, args.parameter_file, args.outputdir)
 
 
-def shading_correction(
-    filepath,
-    parameter_file='',
+def estimate(
+    image_in,
+    parameter_file,
     outputdir='',
     channels=[],
     metric='median',
@@ -70,17 +73,26 @@ def shading_correction(
     ):
     """Correct z-stack shading."""
 
-    params = get_params(locals(), parameter_file, 'shading_correction')
+    step_id = 'shading'
 
-    if 'channels' not in params.keys():
-        czi = czifile.CziFile(filepath)
+    dirs = get_params(dict(), parameter_file, 'dirtree')
+    try:
+        subdir = dirs['datadir'][step_id] or ''
+    except KeyError:
+        subdir = step_id
+    outputdir = prep_outputdir(outputdir, image_in, subdir)
+
+    params = get_params(locals(), parameter_file, step_id)
+
+    if not params['channels']:
+        czi = czifile.CziFile(image_in)
         params['channels'] = list(range(czi.shape[czi.axes.index('C')]))
 
     n_workers = get_n_workers(len(params['channels']), params)
 
     arglist = [
         (
-            filepath,
+            image_in,
             ch,
             params['noise_threshold'],
             params['metric'],
@@ -92,11 +104,11 @@ def shading_correction(
         for ch in params['channels']]
 
     with multiprocessing.Pool(processes=n_workers) as pool:
-        pool.starmap(estimate_channel_shading, arglist)
+        pool.starmap(estimate_channel, arglist)
 
 
-def estimate_channel_shading(
-    filepath,
+def estimate_channel(
+    image_in,
     channel,
     noise_threshold=None,
     metric='median',
@@ -115,9 +127,27 @@ def estimate_channel_shading(
     # TODO: try getting median over 4D concatenation directly (forego xy)
     """
 
+    # Prepare the output.
+    step_id = 'shading'
+    postfix = 'ch{:02d}_{}'.format(channel, step_id)
+
+    outputdir = prep_outputdir(outputdir, image_in, subdir=step_id)
+
+    paths = get_paths(image_in, channel=channel)
+    datadir, filename = os.path.split(paths['base'])
+    dataset, ext = os.path.splitext(filename)
+
+    filestem = '{}_{}'.format(dataset, postfix)
+    outputstem = os.path.join(outputdir, filestem)
+    outputpat = '{}.h5/{}'.format(outputstem, '{}')
+
+    logging.basicConfig(filename='{}.log'.format(outputstem), level=logging.INFO)
+    report = {'parameters': locals()}
+
+
     # Get the list of subblocks for the channel.
-    if filepath.endswith('.czi'):  # order of subblock_directory: CZM
-        czi = czifile.CziFile(filepath)
+    if image_in.endswith('.czi'):  # order of subblock_directory: CZM
+        czi = czifile.CziFile(image_in)
         zstack0 = czi.subblock_directory[0]
         dtype = zstack0.dtype
         tilesize = [zstack0.shape[zstack0.axes.index('Y')],
@@ -128,15 +158,6 @@ def estimate_channel_shading(
     else:
         print('Sorry, only czi implemented for now...')
         return
-
-    # Prepare the output directory.
-    datadir, filename = os.path.split(filepath)
-    dataset, ext = os.path.splitext(filename)
-    outputdir = outputdir or os.path.join(datadir, 'shading')
-    os.makedirs(outputdir, exist_ok=True)
-    fstem = '{}_ch{:02d}_{}'.format(dataset, channel, metric)
-    filepath = os.path.join(outputdir, '{}.log'.format(fstem))
-    logging.basicConfig(filename=filepath, level=logging.INFO)
 
     # Compute median values per plane for X and Y concatenation.
     meds_X, meds_Y = [], []
@@ -169,33 +190,17 @@ def estimate_channel_shading(
         elif dim == 'Y':
             img_fitted *= data_fitted_norm[:, np.newaxis]
 
-    # Save medians and parameters.
-    fstem = '{}_ch{:02d}'.format(dataset, channel)
-    filepath = os.path.join(outputdir, '{}_shading.pickle'.format(fstem))
-    with open(filepath, 'wb') as f:
-        pickle.dump(out, f, pickle.HIGHEST_PROTOCOL)
 
     # Save estimated shading image.
     img = np.array(img_fitted * np.iinfo(dtype).max, dtype=dtype)
-    filepath = os.path.join(outputdir, '{}_shading.tif'.format(fstem))
-    imsave(filepath, img)
+    imsave('{}.tif'.format(outputstem), img)
+
+    # Save parameters.
+    with open('{}.pickle'.format(outputstem), 'wb') as f:
+        pickle.dump(out, f, pickle.HIGHEST_PROTOCOL)
 
     # Print a report page to pdf.
-    generate_report(outputdir, dataset, channel=channel)
-    #generate_report_page(outputdir, dataset, 'shading', channel=channel)
-
-
-def get_n_workers(n_workers, params):
-    """Determine the number of workers."""
-
-    n_workers = min(n_workers, multiprocessing.cpu_count())
-
-    try:
-        n_workers = min(n_workers, params['n_workers'])
-    except:
-        pass
-
-    return n_workers
+    generate_report(outputdir, dataset, channel=channel, ioff=True)
 
 
 def select_z_range(data, z_range=[], quant_thr=0.8):
@@ -236,7 +241,7 @@ def fit_profile(data, order=3):
 
 def plot_profiles(f, axdict, filestem, clip_threshold=0.75, res=10000, fac=0.05):
 
-    with open('{}_shading.pickle'.format(filestem), 'rb') as f:
+    with open('{}.pickle'.format(filestem), 'rb') as f:
         metric, z_range, quant_thr, order, data_X, data_Y = pickle.load(f)
 
     for dim, vals in {'X': [data_X, 'g'], 'Y': [data_Y, 'b']}.items():
@@ -313,7 +318,7 @@ def plot_images(f, ax, filestem, clip_threshold=0.75, clip_color=[1, 0, 0, 1], n
 
     clipped = clip_colormap(clip_threshold, clip_color, n_colors)
 
-    img = imread('{}_shading.tif'.format(filestem))
+    img = imread('{}.tif'.format(filestem))
     img = img.transpose() / int(np.iinfo(img.dtype).max)
     im = ax.imshow(img, cmap=clipped, vmin=0, vmax=1, origin='lower')
 
@@ -445,13 +450,13 @@ def generate_report(outputdir, dataset, channel=None, res=10000, clip_threshold=
     gs = gridspec.GridSpec(subplots[0], subplots[1], figure=f)
 
     for idx, ch in enumerate(channels):
-        chstem = '{}_ch{:02d}'.format(filestem, ch)
+        chstem = '{}_ch{:02d}_shading'.format(filestem, ch)
         axdict = gen_subgrid(f, gs[idx], channel=ch)
         plot_images(f, axdict['I'], chstem, clip_threshold)
         plot_profiles(f, axdict, chstem, clip_threshold)
 
     f.suptitle(figtitle, fontsize=14, fontweight='bold')
-    f.savefig('{}_shading-report.pdf'.format(outputstem))
+    f.savefig('{}_shading.pdf'.format(outputstem))
     if ioff:
         plt.close(f)
 
