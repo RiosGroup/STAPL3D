@@ -884,7 +884,7 @@ function get_py_bias_stack {
     echo "stack_bias(inputfiles, outputstem)"
     echo ''
     echo "from stapl3d.reporting import zip_parameters"
-    echo "zip_parameters('${channeldir}/${dataset}', '${datadir}/${dataset}', 'biasfield')"
+    echo "zip_parameters('${biasfielddir}/${dataset}', '${datadir}/${dataset}', 'biasfield')"
 
 }
 function get_cmd_bias_stack {
@@ -895,7 +895,7 @@ function get_cmd_bias_stack {
     local channels_in=()
     local bpf="${bias_estimation__bias_postfix}"
     for chstem in "${channelstems[@]}"; do
-        channels_in+=("${channeldir}/${chstem}${bpf}")
+        channels_in+=("${biasfielddir}/${chstem}${bpf}")
     done
 
     echo python "${pyfile}" "\${filestem}${bpf}" "${channels_in[@]}"
@@ -903,10 +903,10 @@ function get_cmd_bias_stack {
     # TODO: also replace by python equiv
     echo ''
     echo pdfunite \
-        "${channeldir}/${dataset}_ch??${bpf}.pdf" \
+        "${biasfielddir}/${dataset}_ch??${bpf}.pdf" \
         "${datadir}/${dataset}${bpf}.pdf"
-    # echo rm "${channeldir}/${dataset}_ch??${bpf}.pdf"
-    # echo "    rm ${datadir}/${dataset}_ch??${bpf}.pickle"
+    # echo rm "${biasfielddir}/${dataset}_ch??${bpf}.pdf"
+    # echo "    rm ${biasfielddir}/${dataset}_ch??${bpf}.pickle"
 
 }
 
