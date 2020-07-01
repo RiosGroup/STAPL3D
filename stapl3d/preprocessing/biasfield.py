@@ -396,9 +396,10 @@ def apply(
         bias_fname = '{}{}_ch{:02d}_{}.h5/bias'.format(dataset, postfix, ch, step_id)
         arglist.append(
             (
-                os.path.join(channeldir, '{}.ims'.format(chstem)),
+                image_in,
                 os.path.join(outputdir, bias_fname),
                 os.path.join(channeldir, '{}_{}.ims'.format(chstem, step_id)),
+                ch,
                 [params['downsample_factors'][dim] for dim in 'zyxct'],
                 params['blocksize_xy'],
             )
@@ -412,12 +413,12 @@ def apply_channel(
     image_in,
     bias_in,
     image_out,
+    channel=None,
     dsfacs=[1, 1, 1, 1, 1],
     blocksize_xy=1280,
     ):
     """Correct inhomogeneity of a channel."""
 
-    print(image_in, bias_in, image_out)
     im = Image(image_in, permission='r')
     im.load(load_data=False)
 
@@ -426,6 +427,12 @@ def apply_channel(
 
     mo = Image(image_out)
     mo.load()
+
+    if channel is not None:
+        if len(im.dims) > 3:
+            im.slices[3] = slice(channel, channel + 1)
+        if len(bf.dims) > 3:
+            bf.slices[3] = slice(channel, channel + 1)
 
     mpi = wmeMPI(usempi=False)
     mpi_nm = wmeMPI(usempi=False)
