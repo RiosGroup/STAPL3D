@@ -151,19 +151,25 @@ function set_dirtree {
 
     local datadir="${1}"
 
-    blockdir="${datadir}/${projectdir__datadir__blockdir}"
+    blockdir="${datadir}/${dirtree__datadir__blocks}"
     mkdir -p "${blockdir}"
 
-    channeldir="${datadir}/${projectdir__datadir__channeldir}"
+    channeldir="${datadir}/${dirtree__datadir__channels}"
     mkdir -p "${channeldir}"
 
-    profdir="${datadir}/${projectdir__datadir__profdir__base}"
+    shadingdir="${datadir}/${dirtree__datadir__shading}"
+    mkdir -p "${shadingdir}"
+
+    biasfielddir="${datadir}/${dirtree__datadir__biasfield}"
+    mkdir -p "${biasfielddir}"
+
+    profdir="${datadir}/${dirtree__datadir__profdir__base}"
     mkdir -p "${profdir}"
 
-    featdir="${profdir}/${projectdir__datadir__profdir__featdir}"
+    featdir="${profdir}/${dirtree__datadir__profdir__featdir}"
     mkdir -p "${featdir}"
 
-    jobdir="${datadir}/${projectdir__datadir__jobfiles}"
+    jobdir="${datadir}/${dirtree__datadir__jobfiles}"
     mkdir -p "${jobdir}"
 
 }
