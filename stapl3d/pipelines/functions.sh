@@ -845,12 +845,13 @@ function get_py_bias_estimation {
     echo 'import sys'
     echo 'inputfile = sys.argv[1]'
     echo 'channel = int(sys.argv[2])'
+    echo 'maskfile = sys.argv[3]'
     echo ''
     echo "from stapl3d.preprocessing import biasfield"
     echo "biasfield.estimate_channel(
         inputfile,
         channel,
-        mask_in=\${filestem}${generate_mask__mask_postfix}.h5/mask_thr00000,
+        mask_in=maskfile,
         resolution_level=${dataset__reslev},
         downsample_factors=[1, ${dataset__dsa}, ${dataset__dsa}, 1, 1],
         n_iterations=${bias_estimation__n_iterations},
@@ -865,7 +866,8 @@ function get_cmd_bias_estimation {
     pyfile="${datadir}/${jobname}.py"
     eval get_py_${stage} > "${pyfile}"
 
-    echo python "${pyfile}" "\${filestem}.ims" "\${idx}"
+    local maskfile="\${filestem}${mask__postfix}.h5/mask_thr00000"
+    echo python "${pyfile}" "\${filestem}.ims" "\${idx}" "${maskfile}"
 
 }
 
