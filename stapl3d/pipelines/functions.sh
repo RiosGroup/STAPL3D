@@ -251,8 +251,8 @@ function find_dim_from_h5 {
 
 function set_blockdims {
 
-    nx=$((X/bs + 1))
-    ny=$((Y/bs + 1))
+    nx=`python -c "from math import ceil; print(int(ceil($X/$bs)))"`
+    ny=`python -c "from math import ceil; print(int(ceil($Y/$bs)))"`
     nb=$((nx*ny))
 
 }
