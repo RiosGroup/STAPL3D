@@ -1005,7 +1005,11 @@ function get_py_splitblocks {
     echo 'br_upper = int(sys.argv[4])'
     echo ''
     echo "from stapl3d.channels import process_channels"
-    echo "process_channels(image_in, parameter_file, blockrange=[br_lower, br_upper])"
+    echo "process_channels(
+        image_in,
+        parameter_file,
+        blockrange=[br_lower, br_upper],
+        )"
 }
 function get_cmd_splitblocks {
 
@@ -1020,56 +1024,32 @@ function get_cmd_splitblocks {
 }
 
 
-function get_py_convert1 {
+function get_py_membrane_enhancement {
 
     echo '#!/usr/bin/env python'
     echo ''
     echo 'import sys'
-    echo 'blockstem = sys.argv[1]'
-    echo 'grp = sys.argv[2]'
-    echo 'ids = sys.argv[3]'
-    echo "from stapl3d.channels import h5_nii_convert"
-    echo "image_in = '{}.h5/{}/{}'.format(blockstem, grp, ids)"
-    echo "image_out = '{}_{}-{}.nii.gz'.format(blockstem, grp, ids)"
-    echo "h5_nii_convert(image_in, image_out, datatype='uint8')"
-}
-function get_py_convert2 {
-
-    echo '#!/usr/bin/env python'
+    echo 'image_in = sys.argv[1]'
+    echo 'parameter_file = sys.argv[2]'
+    echo 'br_lower = int(sys.argv[3])'
+    echo 'br_upper = int(sys.argv[4])'
     echo ''
-    echo 'import sys'
-    echo 'blockstem = sys.argv[1]'
-    echo 'grp = sys.argv[2]'
-    echo 'ids = sys.argv[3]'
-    echo "from stapl3d.channels import h5_nii_convert"
-    echo "image_in = '{}_{}-{}.nii.gz'.format(blockstem, grp, ids)"
-    echo "image_out = '{}.h5/{}/{}'.format(blockstem, grp, ids)"
-    echo "h5_nii_convert(image_in, image_out)"
+    echo "from stapl3d.segmentation import membrane_enhancement"
+    echo "membrane_enhancement.estimate(
+        image_in,
+        parameter_file,
+        blockrange=[br_lower, br_upper],
+        )"
 }
 function get_cmd_membrane_enhancement {
 
-    pyfile1="${datadir}/${jobname}_convert1.py"
-    eval get_py_convert1 > "${pyfile1}"
-    pyfile2="${datadir}/${jobname}_convert2.py"
-    eval get_py_convert2 > "${pyfile2}"
+    pyfile="${datadir}/${jobname}.py"
+    eval get_py_${stage} > "${pyfile}"
 
-    echo ''
-    echo python "${pyfile1}" "\${blockstem}" 'memb' 'mean'
-
-    echo ''
-    echo "${ACME}/cellPreprocess" \
-        "\${blockstem}_memb-mean.nii.gz" \
-        "\${blockstem}_memb-preprocess.nii.gz" \
-        "${membrane_enhancement__median_filter_par}"
-    echo "${ACME}/multiscalePlateMeasureImageFilter" \
-        "\${blockstem}_memb-preprocess.nii.gz" \
-        "\${blockstem}_memb-planarity.nii.gz" \
-        "\${blockstem}_memb-eigen.mha" \
-        "${membrane_enhancement__membrane_filter_par}"
-
-    echo ''
-    echo python "${pyfile2}" "\${blockstem}" 'memb' 'preprocess'
-    echo python "${pyfile2}" "\${blockstem}" 'memb' 'planarity'
+    echo python "${pyfile}" \
+        "\${blockstem}${bpf}.ims" \
+        "\${blockstem}.yml" \
+        "\${idx}" "\$((idx+1))"
 
     echo ''
     echo "rm \${blockstem}_memb-eigen.mha"

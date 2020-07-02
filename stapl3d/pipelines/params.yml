@@ -31,6 +31,8 @@ dataset:
 
 channels:
     n: 8
+
+blocks:
     memb_idxs:
         - 3
         - 5
