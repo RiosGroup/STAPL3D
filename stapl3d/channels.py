@@ -4,16 +4,31 @@
 
 """
 
+import os
 import sys
 import argparse
-import yaml
+import logging
+import pickle
+import shutil
+import multiprocessing
 
 import numpy as np
-import multiprocessing
 
 from skimage.transform import resize
 
-from stapl3d import Image, wmeMPI
+from stapl3d import (
+    get_n_workers,
+    get_blocksize,
+    get_blockmargin,
+    get_n_blocks,
+    prep_outputdir,
+    get_params,
+    get_paths,
+    Image,
+    wmeMPI,
+    )
+
+logger = logging.getLogger(__name__)
 
 
 def main(argv):
@@ -24,64 +39,76 @@ def main(argv):
         formatter_class=argparse.ArgumentDefaultsHelpFormatter
         )
     parser.add_argument(
-        'inputfile',
-        help='path to ims file',
+        '-i', '--image_in',
+        required=True,
+        help='path to image file',
         )
     parser.add_argument(
-        'parameter_file',
+        '-p', '--parameter_file',
+        required=True,
         help='path to yaml parameter file',
+        )
+    parser.add_argument(
+        '-o', '--outputdir',
+        required=False,
+        help='path to output directory',
         )
 
     args = parser.parse_args()
 
-    process_channels(
-        args.inputfile,
-        args.parameter_file,
-        )
+    process_channels(args.image_in, args.parameter_file, args.outputdir)
 
 
 def process_channels(
-        filepath,
-        parameter_file='',
-        blocksize=[],
-        blockmargin=[0, 64, 64, 0, 0],
-        blockrange=[],
-        bias_image='',
-        bias_dsfacs=[1, 64, 64, 1],
-        memb_idxs=None,
-        memb_weights=[],
-        nucl_idxs=None,
-        nucl_weights=[],
-        mean_idxs=None,
-        mean_weights=[],
-        output_channels=None,
-        datatype='',
-        chunksize=[],
-        outputprefix='',
-        usempi=False,
-        ):
+    image_in,
+    parameter_file='',
+    outputdir='',
+    blocksize=[],
+    blockmargin=[],
+    blockrange=[],
+    bias_image='',
+    bias_dsfacs=[1, 64, 64, 1],
+    memb_idxs=None,
+    memb_weights=[],
+    nucl_idxs=None,
+    nucl_weights=[],
+    mean_idxs=None,
+    mean_weights=[],
+    output_channels=None,
+    datatype='',
+    chunksize=[],
+    ):
     """Average membrane and nuclear channels and write as blocks."""
 
-    params = locals()
+    step_id = 'blocks'
 
-    file_params = {}
-    if parameter_file:
-        with open(parameter_file, 'r') as ymlfile:
-            cfg = yaml.safe_load(ymlfile)
-            file_params = cfg['channels']
+    dirs = get_params(dict(), parameter_file, 'dirtree')
+    try:
+        subdir = dirs['datadir'][step_id] or ''
+    except KeyError:
+        subdir = step_id
+    outputdir = prep_outputdir(outputdir, image_in, subdir)
 
-    params.update(file_params)
+    params = get_params(locals(), parameter_file, step_id)
+
+    if not params['blocksize']:
+        ds_par = get_params(dict(), parameter_file, 'dataset')
+        bs = ds_par['bs'] or 640
+        params['blocksize'] = get_blocksize(image_in, bs)
+    if not params['blockmargin']:
+        ds_par = get_params(dict(), parameter_file, 'dataset')
+        bm = ds_par['bm'] or 64
+        params['blockmargin'] = get_blockmargin(image_in, bm)
 
     if 'blocks' not in params.keys():
-        n_blocks = get_n_blocks(filepath, params['blocksize'], params['blockmargin'])
+        n_blocks = get_n_blocks(image_in, params['blocksize'], params['blockmargin'])
         params['blocks'] = list(range(n_blocks))
 
     n_workers = get_n_workers(len(params['blocks']), params)
 
-    print(params)
     arglist = [
         (
-            filepath,
+            image_in,
             params['blocksize'],
             params['blockmargin'],
             [b_idx, b_idx+1],
@@ -96,8 +123,7 @@ def process_channels(
             params['output_channels'],
             params['datatype'],
             params['chunksize'],
-            params['outputprefix'],
-            False,
+            outputdir,
         )
         for b_idx in params['blocks']]
 
@@ -105,52 +131,44 @@ def process_channels(
         pool.starmap(combine_channels, arglist)
 
 
-def get_n_workers(n_workers, params):
-    """Determine the number of workers."""
-
-    n_workers = min(n_workers, multiprocessing.cpu_count())
-
-    try:
-        n_workers = min(n_workers, params['n_workers'])
-    except:
-        pass
-
-    return n_workers
-
-
-def get_n_blocks(image_in, blocksize, blockmargin):
-
-    im = Image(image_in, permission='r')
-    im.load(load_data=False)
-    mpi = wmeMPI(usempi=False)
-    mpi.set_blocks(im, blocksize, blockmargin)
-    im.close()
-
-    return len(mpi.blocks)
-
-
 def combine_channels(
-        image_in,
-        blocksize=[],
-        blockmargin=[0, 64, 64],
-        blockrange=[],
-        bias_image='',
-        bias_dsfacs=[1, 64, 64, 1],
-        memb_idxs=None,
-        memb_weights=[],
-        nucl_idxs=None,
-        nucl_weights=[],
-        mean_idxs=None,
-        mean_weights=[],
-        output_channels=None,
-        datatype='',
-        chunksize=[],
-        outputprefix='',
-        usempi=False,
-        ):
+    image_in,
+    blocksize,
+    blockmargin=[0, 64, 64],
+    blockrange=[],
+    bias_image='',
+    bias_dsfacs=[1, 64, 64, 1],
+    memb_idxs=None,
+    memb_weights=[],
+    nucl_idxs=None,
+    nucl_weights=[],
+    mean_idxs=None,
+    mean_weights=[],
+    output_channels=None,
+    datatype='',
+    chunksize=[],
+    outputdir='',
+    ):
     """Average membrane and nuclear channels and write as blocks."""
 
-    mpi = wmeMPI(usempi)
+    # Prepare the output.
+    step_id = 'blocks'
+    postfix = ''
+
+    outputdir = prep_outputdir(outputdir, image_in, subdir=step_id)
+
+    paths = get_paths(image_in)
+    datadir, filename = os.path.split(paths['base'])
+    dataset, ext = os.path.splitext(filename)
+
+    filestem = '{}'.format(dataset)
+    outputstem = os.path.join(outputdir, filestem)
+    outputpat = '{}.h5/{}'.format(outputstem, '{}')
+
+    logging.basicConfig(filename='{}.log'.format(outputstem), level=logging.INFO)
+    report = {'parameters': locals()}
+
+    mpi = wmeMPI(usempi=False)
 
     im = Image(image_in, permission='r')
     im.load(comm=mpi.comm, load_data=False)
@@ -161,7 +179,7 @@ def combine_channels(
     else:
         bf = None
 
-    outputtemplate = '{}_{}.h5/ods'.format(outputprefix, '{}')
+    outputtemplate = '{}_{}.h5/ods'.format(outputstem, '{}')
     mpi.set_blocks(im, blocksize, blockmargin, blockrange, outputtemplate)
     mpi.scatter_series()
 

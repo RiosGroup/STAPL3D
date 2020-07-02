@@ -2044,6 +2044,39 @@ def get_n_workers(n_workers, params):
     return n_workers
 
 
+def get_blocksize(image_in, bs=640):
+
+    im = Image(image_in, permission='r')
+    im.load(load_data=False)
+    blocksize = im.dims
+    blocksize[im.axlab.index('x')] = bs
+    blocksize[im.axlab.index('y')] = bs
+
+    return blocksize
+
+
+def get_blockmargin(image_in, bm=64):
+
+    im = Image(image_in, permission='r')
+    im.load(load_data=False)
+    blockmargin = [0] * len(im.dims)
+    blockmargin[im.axlab.index('x')] = bm
+    blockmargin[im.axlab.index('y')] = bm
+
+    return blockmargin
+
+
+def get_n_blocks(image_in, blocksize, blockmargin):
+
+    im = Image(image_in, permission='r')
+    im.load(load_data=False)
+    mpi = wmeMPI(usempi=False)
+    mpi.set_blocks(im, blocksize, blockmargin)
+    im.close()
+
+    return len(mpi.blocks)
+
+
 def get_params(params, parameter_file, pfile_entry):
     """Merge parameters from arguments and parameterfile(=leading)."""
 
