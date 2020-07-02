@@ -791,18 +791,15 @@ function get_py_shading_estimation {
     echo '#!/usr/bin/env python'
     echo ''
     echo 'import sys'
-    echo 'inputfile = sys.argv[1]'
-    echo 'channel = int(sys.argv[2])'
+    echo 'image_in = sys.argv[1]'
+    echo 'parameter_file = sys.argv[2]'
+    echo 'channel = int(sys.argv[3])'
     echo ''
     echo "from stapl3d.preprocessing import shading"
-    echo "shading.estimate_channel(
+    echo "shading.estimate(
         inputfile,
-        channel,
-        noise_threshold=${shading__noise_threshold},
-        metric='${shading__metric}',
-        quantile_threshold=${shading__quantile_threshold},
-        polynomial_order=${shading__polynomial_order},
-        outputdir='${datadir}/${dirtree__datadir__shading}',
+        parameter_file,
+        channels=[channel],
         )"
 
 }
@@ -811,7 +808,10 @@ function get_cmd_shading_estimation {
     pyfile="${datadir}/${jobname}.py"
     eval get_py_${stage} > "${pyfile}"
 
-    echo python "${pyfile}" "\${filestem}.${shading__file_format}" "\${idx}"
+    echo python "${pyfile}" \
+        "\${filestem}.${shading__file_format}" \
+        "\${filestem}.yml" \
+        "\${idx}"
 
 }
 
@@ -821,11 +821,14 @@ function get_py_generate_mask {
     echo '#!/usr/bin/env python'
     echo ''
     echo 'import sys'
-    echo 'inputfile = sys.argv[1]'
-    echo 'parameterfile = sys.argv[2]'
+    echo 'image_in = sys.argv[1]'
+    echo 'parameter_file = sys.argv[2]'
     echo ''
     echo "from stapl3d.preprocessing import masking"
-    echo "masking.estimate(inputfile, parameterfile)"
+    echo "masking.estimate(
+        image_in,
+        parameter_file,
+        )"
 
 }
 function get_cmd_generate_mask {
@@ -833,7 +836,9 @@ function get_cmd_generate_mask {
     pyfile="${datadir}/${jobname}.py"
     eval get_py_${stage} > "${pyfile}"
 
-    echo python "${pyfile}" "\${filestem}.ims" "\${filestem}.yml"
+    echo python "${pyfile}" \
+        "\${filestem}.ims" \
+        "\${filestem}.yml"
 
 }
 
@@ -843,21 +848,17 @@ function get_py_bias_estimation {
     echo '#!/usr/bin/env python'
     echo ''
     echo 'import sys'
-    echo 'inputfile = sys.argv[1]'
-    echo 'channel = int(sys.argv[2])'
-    echo 'maskfile = sys.argv[3]'
+    echo 'image_in = sys.argv[1]'
+    echo 'parameter_file = sys.argv[2]'
+    echo 'channel = int(sys.argv[3])'
+    echo 'mask_file = sys.argv[4]'
     echo ''
     echo "from stapl3d.preprocessing import biasfield"
-    echo "biasfield.estimate_channel(
-        inputfile,
-        channel,
-        mask_in=maskfile,
-        resolution_level=${biasfield__resolution_level},
-        downsample_factors=[${biasfield__downsample_factors__z}, ${biasfield__downsample_factors__y}, ${biasfield__downsample_factors__x}, ${biasfield__downsample_factors__c}, ${biasfield__downsample_factors__t}],
-        n_iterations=${biasfield__n_iterations},
-        n_fitlevels=${biasfield__n_fitlevels},
-        n_bspline_cps=[${biasfield__n_bspline_cps__x}, ${biasfield__n_bspline_cps__y}, ${biasfield__n_bspline_cps__z}],
-        outputdir='${datadir}/${dirtree__datadir__biasfield}',
+    echo "biasfield.estimate(
+        image_in,
+        parameter_file,
+        channels=[channel],
+        mask_in=mask_file,
         )"
 
 }
@@ -866,8 +867,11 @@ function get_cmd_bias_estimation {
     pyfile="${datadir}/${jobname}.py"
     eval get_py_${stage} > "${pyfile}"
 
-    local maskfile="\${filestem}${mask__postfix}.h5/mask"
-    echo python "${pyfile}" "\${filestem}.ims" "\${idx}" "${maskfile}"
+    echo python "${pyfile}" \
+        "\${filestem}.ims" \
+        "\${filestem}.yml" \
+        "\${idx}" \
+        "\${filestem}${mask__postfix}.h5/mask"
 
 }
 
@@ -881,10 +885,23 @@ function get_py_bias_stack {
     echo 'inputfiles = sys.argv[2:]'
     echo ''
     echo "from stapl3d.preprocessing.biasfield import stack_bias"
-    echo "stack_bias(inputfiles, outputstem)"
+    echo "stack_bias(
+        inputfiles,
+        outputstem,
+        )"
     echo ''
     echo "from stapl3d.reporting import zip_parameters"
-    echo "zip_parameters('${biasfielddir}/${dataset}', '${datadir}/${dataset}', 'biasfield')"
+    echo "zip_parameters(
+        '${biasfielddir}/${dataset}',
+        '${datadir}/${dataset}',
+        'biasfield',
+        )"
+    echo ''
+    echo "from stapl3d.reporting import merge_reports"
+    echo "merge_reports(
+        glob('${biasfielddir}/${dataset}_ch??${biasfield__postfix}').sort(),
+        '${datadir}/${dataset}${biasfield__postfix}.pdf',
+        )"
 
 }
 function get_cmd_bias_stack {
@@ -897,15 +914,12 @@ function get_cmd_bias_stack {
         channels_in+=("${biasfielddir}/${chstem}${biasfield__postfix}")
     done
 
-    echo python "${pyfile}" "\${filestem}${biasfield__postfix}" "${channels_in[@]}"
+    echo python "${pyfile}" \
+        "\${filestem}${biasfield__postfix}" \
+        "${channels_in[@]}"
 
-    # TODO: also replace by python equiv
-    echo ''
-    echo pdfunite \
-        "${biasfielddir}/${dataset}_ch??${biasfield__postfix}.pdf" \
-        "${datadir}/${dataset}${bpf}.pdf"
-    # echo rm "${biasfielddir}/${dataset}_ch??${biasfield__postfix}.pdf"
-    # echo "    rm ${biasfielddir}/${dataset}_ch??${biasfield__postfix}.pickle"
+    # echo "rm ${biasfielddir}/${dataset}_ch??${biasfield__postfix}.pdf"
+    # echo "rm ${biasfielddir}/${dataset}_ch??${biasfield__postfix}.pickle"
 
 }
 
@@ -917,22 +931,20 @@ function get_py_bias_apply {
     echo ''
     echo 'import sys'
     echo 'image_in = sys.argv[1]'
-    echo 'bias_in = sys.argv[2]'
-    echo 'ref_path = sys.argv[3]'
-    echo 'outputpath = sys.argv[4]'
-    echo 'channel = int(sys.argv[5])'
+    echo 'parameter_file = sys.argv[2]'
+    echo 'channel = int(sys.argv[3])'
+    echo 'bias_in = sys.argv[4]'
+    echo 'ref_path = sys.argv[5]'
+    echo 'outputpath = sys.argv[6]'
     echo ''
     echo 'import shutil'
     echo 'shutil.copy2(ref_path, outputpath)'
     echo ''
     echo "from stapl3d.preprocessing import biasfield"
-    echo "biasfield.apply_channel(
+    echo "biasfield.apply(
         image_in,
-        bias_in,
-        outputpath,
-        channel=channel,
-        downsample_factors=[${biasfield_apply__downsample_factors__z}, ${biasfield_apply__downsample_factors__y}, ${biasfield_apply__downsample_factors__x}, ${biasfield_apply__downsample_factors__c}, ${biasfield_apply__downsample_factors__t}],
-        blocksize_xy=${biasfield_apply__blocksize_xy},
+        parameter_file,
+        channels=[channel],
         )"
 
 }
@@ -943,10 +955,11 @@ function get_cmd_bias_apply {
 
     echo python "${pyfile}" \
         "\${filestem}.ims" \
+        "\${filestem}.yml" \
+        "\${idx}" \
         "\${filestem}${biasfield__postfix}.h5/bias" \
         "\${filestem}${dataset__ims_ref_postfix}.ims" \
-        "\${channelstem}${biasfield__postfix}.ims" \
-        "\${idx}"
+        "\${channelstem}${biasfield__postfix}.ims"
 
 }
 
@@ -961,7 +974,11 @@ function get_py_ims_aggregate {
     echo 'inputfiles = sys.argv[3:]'
     echo ''
     echo "from stapl3d.imarisfiles import make_aggregate"
-    echo "make_aggregate(inputfiles, out_path, ref_path)"
+    echo "make_aggregate(
+        inputfiles,
+        out_path,
+        ref_path,
+        )"
 
 }
 function get_cmd_ims_aggregate {
@@ -1043,8 +1060,8 @@ function get_cmd_membrane_enhancement {
         "\${idx}"
 
     echo ''
-    echo "rm \${blockstem}_memb-eigen.mha"
-    echo "rm \${blockstem}_memb-*.nii.gz"
+    echo "rm \${blockstem}${biasfield__postfix}_memb-eigen.mha"
+    echo "rm \${blockstem}${biasfield__postfix}_memb-*.nii.gz"
 
 }
 
@@ -1081,9 +1098,9 @@ function get_cmd_segmentation {
 function get_cmd_segmentation_postproc {
 
     echo pdfunite \
-        "${blockdir}/${dataset}_?????-?????_?????-?????_?????-?????_seg-report.pdf" \
+        "${blockdir}/${dataset}${biasfield__postfix}_?????-?????_?????-?????_?????-?????_seg-report.pdf" \
         "\${filestem}_seg-report.pdf"
-    echo "rm ${blockdir}/${dataset}_?????-?????_?????-?????_?????-?????_seg-report.pdf"
+    echo "rm ${blockdir}/${dataset}${biasfield__postfix}_?????-?????_?????-?????_?????-?????_seg-report.pdf"
 
 }
 
@@ -1181,8 +1198,8 @@ function get_cmd_gather {
     local prefix="${segmentation__segments_ods}"
     local ids="segm/${prefix}${postfix}"
 
-    echo set_images_in "${blockdir}/${dataset}" "${ids}"
-    echo maxlabelfile="${blockdir}/${dataset}_maxlabels${postfix}.txt"
+    echo set_images_in "${blockdir}/${dataset}${biasfield__postfix}" "${ids}"
+    echo maxlabelfile="${blockdir}/${dataset}${biasfield__postfix}_maxlabels${postfix}.txt"
     echo gather_maxlabels "\${maxlabelfile}"
 
 }
