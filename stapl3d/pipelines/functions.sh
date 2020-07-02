@@ -1023,14 +1023,13 @@ function get_py_membrane_enhancement {
     echo 'import sys'
     echo 'image_in = sys.argv[1]'
     echo 'parameter_file = sys.argv[2]'
-    echo 'br_lower = int(sys.argv[3])'
-    echo 'br_upper = int(sys.argv[4])'
+    echo 'block_idx = int(sys.argv[3])'
     echo ''
     echo "from stapl3d.segmentation import membrane_enhancement"
     echo "membrane_enhancement.estimate(
         image_in,
         parameter_file,
-        blockrange=[br_lower, br_upper],
+        blocks=[block_idx],
         )"
 }
 function get_cmd_membrane_enhancement {
@@ -1041,7 +1040,7 @@ function get_cmd_membrane_enhancement {
     echo python "${pyfile}" \
         "\${blockstem}${biasfield__postfix}.ims" \
         "\${blockstem}.yml" \
-        "\${idx}" "\$((idx+1))"
+        "\${idx}"
 
     echo ''
     echo "rm \${blockstem}_memb-eigen.mha"

@@ -98,7 +98,7 @@ def estimate(
     filepaths = glob(os.path.join(outputdir, filepat))
     filepaths.sort()
     if params['blocks']:
-        filepaths = [filepaths[i] for i in params['blocks'])]
+        filepaths = [filepaths[i] for i in params['blocks']]
 
     n_workers = get_n_workers(len(params['blocks']), params)
 
