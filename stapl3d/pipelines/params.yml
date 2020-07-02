@@ -137,7 +137,7 @@ biasfield:
         y: 5
         x: 5
     submit:
-        tasks: 22
+        tasks: 2
 
 bias_estimation:
     conda:
