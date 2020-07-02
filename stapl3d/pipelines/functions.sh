@@ -72,8 +72,8 @@ function load_parameters {
         echo "" ; }
     # TODO: exit on undefined ZYXCT
 
-    bs="${dataset__blocksize}" && check_dims bs "$bs" || set_blocksize
-    bm="${dataset__blockmargin}" && check_dims bm "$bm" || bm=64
+    bs="${dataset__bs}" && check_dims bs "$bs" || set_blocksize
+    bm="${dataset__bm}" && check_dims bm "$bm" || bm=64
 
     set_channelstems
     set_blocks "${bs}" "${bm}"
