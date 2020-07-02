@@ -36,7 +36,7 @@ function set_datadir {
 function init_dataset {
 
     cp "${STAPL3D}/pipelines/params.yml" "${datadir}/${dataset}.yml"
-    set_ZYXCT_ims '-v' "${datadir}/${dataset}.ims"
+    set_ZYXCT_ims -v "${datadir}/${dataset}.ims"
     write_ZYXCT_to_yml ${dataset} "${datadir}/${dataset}_dims.yml"
 
 }
@@ -72,8 +72,8 @@ function load_parameters {
         echo "" ; }
     # TODO: exit on undefined ZYXCT
 
-    bs="${dataset__bs}" && check_dims bs "$bs" || set_blocksize
-    bm="${dataset__bm}" && check_dims bm "$bm" || bm=64
+    bs="${dataset__blocksize}" && check_dims bs "$bs" || set_blocksize
+    bm="${dataset__blockmargin}" && check_dims bm "$bm" || bm=64
 
     set_channelstems
     set_blocks "${bs}" "${bm}"

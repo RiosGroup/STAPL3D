@@ -27,6 +27,7 @@ dataset:
     mean_idxs: 0 1 2 3 4 5 6 7
     mean_weights: 1.0 1.0 1.0 1.0 1.0 1.0 1.0 1.0
     blocksize: 200
+    blockmargin: 64
 
 channels:
     n: 8
@@ -464,7 +465,6 @@ features:
         tasks: 1
         mem: 60G
         wtime: 02:00:00
-
 
 features_postproc:
     conda:
