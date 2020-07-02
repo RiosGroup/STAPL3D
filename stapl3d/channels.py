@@ -364,6 +364,8 @@ def h5_nii_convert(image_in, image_out, datatype=''):
 
     props = transpose_props(im_in.get_props())
     if datatype:
+        from skimage.util.dtype import convert
+        data = convert(data, np.dtype(datatype), force_copy=False)
         props['dtype'] = datatype
 
     im_out = Image(image_out, **props)
