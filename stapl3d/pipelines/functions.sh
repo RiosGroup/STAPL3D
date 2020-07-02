@@ -797,7 +797,7 @@ function get_py_shading_estimation {
     echo ''
     echo "from stapl3d.preprocessing import shading"
     echo "shading.estimate(
-        inputfile,
+        image_in,
         parameter_file,
         channels=[channel],
         )"
@@ -851,14 +851,14 @@ function get_py_bias_estimation {
     echo 'image_in = sys.argv[1]'
     echo 'parameter_file = sys.argv[2]'
     echo 'channel = int(sys.argv[3])'
-    echo 'mask_file = sys.argv[4]'
+    echo 'mask_in = sys.argv[4]'
     echo ''
     echo "from stapl3d.preprocessing import biasfield"
     echo "biasfield.estimate(
         image_in,
         parameter_file,
         channels=[channel],
-        mask_in=mask_file,
+        mask_in=mask_in,
         )"
 
 }
@@ -893,11 +893,11 @@ function get_py_bias_stack {
     echo "from stapl3d.reporting import zip_parameters"
     echo "zip_parameters(
         '${biasfielddir}/${dataset}',
-        '${datadir}/${dataset}',
         'biasfield',
         )"
     echo ''
     echo "from stapl3d.reporting import merge_reports"
+    echo "from glob import glob"
     echo "merge_reports(
         glob('${biasfielddir}/${dataset}_ch??${biasfield__postfix}').sort(),
         '${datadir}/${dataset}${biasfield__postfix}.pdf',
@@ -1116,7 +1116,12 @@ function get_py_relabel {
     echo 'postfix = sys.argv[4]'
     echo ''
     echo 'from stapl3d.segmentation.zipping import relabel_parallel'
-    echo "relabel_parallel(image_in, block_idx, maxlabelfile, pf=postfix)"
+    echo "relabel_parallel(
+        image_in,
+        block_idx,
+        maxlabelfile,
+        pf=postfix,
+        )"
 
 }
 function get_cmd_relabel {
@@ -1125,11 +1130,12 @@ function get_cmd_relabel {
     eval get_py_${stage} > "${pyfile}"
 
     eval postfix="\${${stage}__postfix}"
-    local ids="segm/${segmentation__segments_ods}"
 
-    local maxlabelfile="${blockdir}/${dataset}_maxlabels.txt"
-
-    echo python "${pyfile}" "\${blockstem}.h5/${ids}" "\${idx}" "${maxlabelfile}" "${postfix}"
+    echo python "${pyfile}" \
+        "\${blockstem}.h5/segm/${segmentation__segments_ods}" \
+        "\${idx}" \
+        "${blockdir}/${dataset}_maxlabels.txt" \
+        "${postfix}"
 
 }
 
@@ -1143,7 +1149,10 @@ function get_py_copyblocks {
     echo 'block_idx = int(sys.argv[2])'
     echo ''
     echo 'from stapl3d.segmentation.zipping import copy_blocks_parallel'
-    echo "copy_blocks_parallel(image_in, block_idx)"
+    echo "copy_blocks_parallel(
+        image_in,
+        block_idx,
+        )"
 
 }
 function get_cmd_copyblocks {
@@ -1152,9 +1161,10 @@ function get_cmd_copyblocks {
     eval get_py_${stage} > "$pyfile"
 
     eval postfix="\${${stage}__postfix}"
-    local ids="segm/${segmentation__segments_ods}${postfix}"
 
-    echo python "${pyfile}" "\${blockstem}.h5/${ids}" "\${idx}"
+    echo python "${pyfile}" \
+    "\${blockstem}.h5/segm/${segmentation__segments_ods}${postfix}" \
+    "\${idx}"
 
 }
 
@@ -1195,10 +1205,10 @@ function get_cmd_gather {
 
     local stage="${1}"
     eval postfix="\${${stage}__postfix}"
-    local prefix="${segmentation__segments_ods}"
-    local ids="segm/${prefix}${postfix}"
 
-    echo set_images_in "${blockdir}/${dataset}${biasfield__postfix}" "${ids}"
+    echo set_images_in \
+        "${blockdir}/${dataset}${biasfield__postfix}" \
+        "segm/${segmentation__segments_ods}${postfix}"
     echo maxlabelfile="${blockdir}/${dataset}${biasfield__postfix}_maxlabels${postfix}.txt"
     echo gather_maxlabels "\${maxlabelfile}"
 
