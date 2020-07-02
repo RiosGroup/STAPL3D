@@ -894,7 +894,7 @@ function get_cmd_bias_stack {
     eval get_py_${stage} > "${pyfile}"
 
     local channels_in=()
-    local bpf="${bias_estimation__bias_postfix}"
+    local bpf="${biasfield__postfix}"
     for chstem in "${channelstems[@]}"; do
         channels_in+=("${biasfielddir}/${chstem}${bpf}")
     done
@@ -997,7 +997,7 @@ function get_cmd_block_segmentation {
 function get_cmd_splitblocks {
 
     local rpf="${dataset__ims_ref_postfix}"
-    local bpf="${bias_estimation__bias_postfix}"
+    local bpf="${biasfield__postfix}"
 
     blockrange_start='$((SLURM_ARRAY_TASK_ID-1))'
     blockrange_end='$((SLURM_ARRAY_TASK_ID))'
@@ -1295,7 +1295,7 @@ function get_cmd_features {
             "${datadir}/${dataset}_${ids////-}_${pf1}.h5/${ids}_${pf1}" \
             "${datadir}/${dataset}_${ids////-}_${pf2}.h5/${ids}_${pf2}" \
         --seg_names ${pf0} ${pf1} ${pf2} \
-        --data_path "${datadir}/${dataset}${bias_estimation__bias_postfix}.ims" \
+        --data_path "${datadir}/${dataset}${biasfield__postfix}.ims" \
         --data_names "${channel_names[@]}" \
         --aux_data_path "${datadir}/${dataset}${generate_mask__mask_postfix}.h5/mask_thr00000_edt" \
         --downsample_factors "1 ${dataset__dsr} ${dataset__dsr}" \
