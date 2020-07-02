@@ -363,7 +363,7 @@ def h5_nii_convert(image_in, image_out, datatype=''):
     data = im_in.slice_dataset()
 
     props = transpose_props(im_in.get_props())
-    if dataype:
+    if datatype:
         props['dtype'] = datatype
 
     im_out = Image(image_out, **props)
