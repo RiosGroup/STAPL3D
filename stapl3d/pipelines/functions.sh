@@ -1038,8 +1038,8 @@ function get_cmd_membrane_enhancement {
     eval get_py_${stage} > "${pyfile}"
 
     echo python "${pyfile}" \
-        "\${blockstem}${biasfield__postfix}.ims" \
-        "\${blockstem}.yml" \
+        "\${filestem}${biasfield__postfix}.ims" \
+        "\${filestem}.yml" \
         "\${idx}"
 
     echo ''
@@ -1071,8 +1071,8 @@ function get_cmd_segmentation {
     eval get_py_${stage} > "${pyfile}"
 
     echo python "${pyfile}" \
-        "\${blockstem}${biasfield__postfix}.ims" \
-        "\${blockstem}.yml" \
+        "\${filestem}${biasfield__postfix}.ims" \
+        "\${filestem}.yml" \
         "\${idx}"
 
 }
