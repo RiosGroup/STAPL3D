@@ -811,8 +811,7 @@ function get_cmd_shading_estimation {
     pyfile="${datadir}/${jobname}.py"
     eval get_py_${stage} > "${pyfile}"
 
-    local file_format="${shading__file_format}"
-    echo python "${pyfile}" "\${filestem}.${file_format}" "\${idx}"
+    echo python "${pyfile}" "\${filestem}.${shading__file_format}" "\${idx}"
 
 }
 
@@ -894,20 +893,19 @@ function get_cmd_bias_stack {
     eval get_py_${stage} > "${pyfile}"
 
     local channels_in=()
-    local bpf="${biasfield__postfix}"
     for chstem in "${channelstems[@]}"; do
-        channels_in+=("${biasfielddir}/${chstem}${bpf}")
+        channels_in+=("${biasfielddir}/${chstem}${biasfield__postfix}")
     done
 
-    echo python "${pyfile}" "\${filestem}${bpf}" "${channels_in[@]}"
+    echo python "${pyfile}" "\${filestem}${biasfield__postfix}" "${channels_in[@]}"
 
     # TODO: also replace by python equiv
     echo ''
     echo pdfunite \
-        "${biasfielddir}/${dataset}_ch??${bpf}.pdf" \
+        "${biasfielddir}/${dataset}_ch??${biasfield__postfix}.pdf" \
         "${datadir}/${dataset}${bpf}.pdf"
-    # echo rm "${biasfielddir}/${dataset}_ch??${bpf}.pdf"
-    # echo "    rm ${biasfielddir}/${dataset}_ch??${bpf}.pickle"
+    # echo rm "${biasfielddir}/${dataset}_ch??${biasfield__postfix}.pdf"
+    # echo "    rm ${biasfielddir}/${dataset}_ch??${biasfield__postfix}.pickle"
 
 }
 
@@ -943,14 +941,11 @@ function get_cmd_bias_apply {
     pyfile="${datadir}/${jobname}.py"
     eval get_py_${stage} > "${pyfile}"
 
-    local rpf="${dataset__ims_ref_postfix}"
-    local bpf="${biasfield__postfix}"
-
     echo python "${pyfile}" \
         "\${filestem}.ims" \
-        "\${filestem}${bpf}.h5/bias" \
-        "\${filestem}${rpf}.ims" \
-        "\${channelstem}${bpf}.ims" \
+        "\${filestem}${biasfield__postfix}.h5/bias" \
+        "\${filestem}${dataset__ims_ref_postfix}.ims" \
+        "\${channelstem}${biasfield__postfix}.ims" \
         "\${idx}"
 
 }
@@ -974,13 +969,10 @@ function get_cmd_ims_aggregate {
     pyfile="${datadir}/${jobname}.py"
     eval get_py_${stage} > "${pyfile}"
 
-    local rpf="${dataset__ims_ref_postfix}"
-    local bpf="${biasfield__postfix}"
-
     echo python "${pyfile}" \
-        "\${filestem}${bpf}.ims" \
-        "\${filestem}${rpf}.ims" \
-        "${channeldir}/${dataset}_ch??${bpf}.ims"
+        "\${filestem}${biasfield__postfix}.ims" \
+        "\${filestem}${dataset__ims_ref_postfix}.ims" \
+        "${channeldir}/${dataset}_ch??${biasfield__postfix}.ims"
 
 }
 
@@ -1017,7 +1009,7 @@ function get_cmd_splitblocks {
     eval get_py_${stage} > "${pyfile}"
 
     echo python "${pyfile}" \
-        "\${filestem}${bpf}.ims" \
+        "\${filestem}${biasfield__postfix}.ims" \
         "\${filestem}.yml" \
         "\${idx}" "\$((idx+1))"
 
@@ -1047,7 +1039,7 @@ function get_cmd_membrane_enhancement {
     eval get_py_${stage} > "${pyfile}"
 
     echo python "${pyfile}" \
-        "\${blockstem}${bpf}.ims" \
+        "\${blockstem}${biasfield__postfix}.ims" \
         "\${blockstem}.yml" \
         "\${idx}" "\$((idx+1))"
 
