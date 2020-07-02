@@ -1049,15 +1049,31 @@ function get_cmd_membrane_enhancement {
 }
 
 
+function get_py_segmentation {
+
+    echo '#!/usr/bin/env python'
+    echo ''
+    echo 'import sys'
+    echo 'image_in = sys.argv[1]'
+    echo 'parameter_file = sys.argv[2]'
+    echo 'block_idx = int(sys.argv[3])'
+    echo ''
+    echo "from stapl3d.segmentation import segment"
+    echo "segment.estimate(
+        image_in,
+        parameter_file,
+        blocks=[block_idx],
+        )"
+}
 function get_cmd_segmentation {
 
-    echo python -W ignore "${STAPL3D}/segmentation/features.py" \
-        "\${blockstem}.h5/${segmentation__ids_memb_mask}" \
-        "\${blockstem}.h5/${segmentation__ids_memb_chan}" \
-        "\${blockstem}.h5/${segmentation__ids_nucl_chan}" \
-        "\${blockstem}.h5/${segmentation__ids_dset_mean}" \
-        "\${filestem}${segmentation__param_postfix}" \
-        -S -o "\${blockstem}"
+    pyfile="${datadir}/${jobname}.py"
+    eval get_py_${stage} > "${pyfile}"
+
+    echo python "${pyfile}" \
+        "\${blockstem}${biasfield__postfix}.ims" \
+        "\${blockstem}.yml" \
+        "\${idx}"
 
 }
 

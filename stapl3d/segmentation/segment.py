@@ -4,20 +4,28 @@
 
 """
 
+import os
 import sys
 import argparse
-
-import os
-import numpy as np
-import time
+import logging
+import pickle
+import shutil
+import multiprocessing
 
 import matplotlib
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
-from skimage.color import label2rgb
+
+import numpy as np
+
+from glob import glob
+
+import time
 
 from scipy import ndimage as ndi
 from scipy.ndimage import distance_transform_edt
+
+from skimage.color import label2rgb
 from skimage.transform import resize
 from skimage.segmentation import find_boundaries, watershed
 from skimage.filters import (
@@ -38,11 +46,18 @@ from skimage.morphology import (
     )
 
 from stapl3d import (
+    get_n_workers,
+    prep_outputdir,
+    get_params,
+    get_paths,
+    Image,
+    LabelImage,
+    MaskImage,
+    wmeMPI,
     get_image,
-    Image, LabelImage, MaskImage,
     split_filename,
     )
-from stapl3d.channels import get_n_workers
+
 from stapl3d.reporting import (
     # gen_orthoplot,
     load_parameters,
@@ -52,6 +67,8 @@ from stapl3d.reporting import (
     get_zyx_medians,
     get_cslc,
     )
+
+logger = logging.getLogger(__name__)
 
 
 def main(argv):
@@ -64,157 +81,30 @@ def main(argv):
         formatter_class=argparse.ArgumentDefaultsHelpFormatter
         )
     parser.add_argument(
-        'memb_mask_file',
-        help='path to membrane mask',
-        )
-    parser.add_argument(
-        'memb_chan_file',
-        help='path to membrane channel',
-        )
-    parser.add_argument(
-        'dapi_chan_file',
-        help='path to dapi channel',
-        )
-    parser.add_argument(
-        'mean_chan_file',
-        help='path to mean channel',
+        '-i', '--image_in',
+        required=True,
+        help='path to image file',
         )
     parser.add_argument(
         'parameter_file',
         help='path to yaml parameter file',
         )
     parser.add_argument(
-        '-o', '--outputstem',
-        help='template for output',
-        )
-    parser.add_argument(
-        '-S', '--save_steps',
-        action='store_true',
-        help='save intermediate results'
+        '-o', '--outputdir',
+        required=False,
+        help='path to output directory',
         )
 
     args = parser.parse_args()
 
-    extract_segments(
-        args.memb_mask_file,
-        args.memb_chan_file,
-        args.dapi_chan_file,
-        args.mean_chan_file,
-        args.parameter_file,
-        args.outputstem,
-        args.save_steps,
-        )
+    estimate(args.image_in, args.parameter_file, args.outputdir)
 
 
-# def segmentation(
-#     parameter_file='',
-#     outputstem='',
-#     save_steps=False,
-#     ):
-#     """Average membrane and nuclear channels and write as blocks."""
-#
-#     params = locals()
-#
-#     file_params = {}
-#     if parameter_file:
-#         with open(parameter_file, 'r') as ymlfile:
-#             cfg = yaml.safe_load(ymlfile)
-#             file_params = cfg['segmentation']
-#
-#     params.update(file_params)
-#
-#     if not params['blocks']:
-#         n_blocks = get_n_blocks(filepath)  # TODO: with glob?
-#         params['blocks'] = list(range(n_blocks))
-#
-#     n_workers = get_n_workers(len(params['channels']), params)
-#
-#     arglist = [
-#         (
-#             filepath,
-#             params['blocksize'],
-#             params['blockmargin'],
-#             [b_idx, b_idx+1],
-#             params['bias_image'],
-#             params['bias_dsfacs'],
-#             params['memb_idxs'],
-#             params['memb_weights'],
-#             params['nucl_idxs'],
-#             params['nucl_weights'],
-#             params['mean_idxs'],
-#             params['mean_weights'],
-#             params['output_channels'],
-#             params['datatype'],
-#             params['chunksize'],
-#             params['outputprefix'],
-#             False,
-#         )
-#         for b_idx in params['blocks']]
-#
-#     with multiprocessing.Pool(processes=n_workers) as pool:
-#         pool.starmap(extract_segments, arglist)
-
-
-def extract_segments(
-    plan_path,
-    memb_path,
-    dapi_path,
-    mean_path,
+def estimate(
+    image_in,
     parameter_file,
-    outputstem='',
-    save_steps=False,
-    ):
-
-    import yaml
-    import pprint
-    from types import SimpleNamespace
-
-    with open(parameter_file, "r") as ymlfile:
-        cfg = yaml.load(ymlfile)
-
-    n = SimpleNamespace(**cfg["segmentation"])
-
-    pp = pprint.PrettyPrinter(indent=4)
-    pp.pprint(n)
-
-    cell_segmentation(
-        plan_path,
-        memb_path,
-        dapi_path,
-        mean_path,
-        n.dapi_shift_planes,
-        n.nucl_opening_footprint,
-        n.dapi_filter,
-        n.dapi_sigma,
-        n.dapi_dog_sigma1,
-        n.dapi_dog_sigma2,
-        n.dapi_thr,
-        n.sauvola_window_size,
-        n.sauvola_k,
-        n.dapi_absmin,
-        n.dapi_erodisk,
-        n.dist_max,
-        n.peaks_size,
-        n.peaks_thr,
-        n.peaks_dil_footprint,
-        n.compactness,
-        n.memb_filter,
-        n.memb_sigma,
-        n.planarity_thr,
-        n.dset_mask_filter,
-        n.dset_mask_sigma,
-        n.dset_mask_thr,
-        n.steps,
-        outputstem,
-        save_steps,
-    )
-
-
-def cell_segmentation(
-    plan_path,
-    memb_path,
-    dapi_path,
-    mean_path,
+    outputdir='',
+    blocks=[],
     dapi_shift_planes=0,
     nucl_opening_footprint=[3, 7, 7],
     dapi_filter='median',
@@ -238,34 +128,124 @@ def cell_segmentation(
     dset_mask_sigma=50,
     dset_mask_thr=1000,
     steps=[0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
-    outputstem='',
-    save_steps=False,
+    ):
+    """Perform N4 bias field correction."""
+
+    step_id = 'segmentation'
+
+    dirs = get_params(dict(), parameter_file, 'dirtree')
+    try:
+        subdir = dirs['datadir'][step_id] or ''
+    except KeyError:
+        subdir = 'blocks'
+    outputdir = prep_outputdir(outputdir, image_in, subdir)
+
+    params = get_params(locals(), parameter_file, 'segmentation')
+
+    ipf = ''
+    paths = get_paths(image_in)
+    datadir, filename = os.path.split(paths['base'])
+    dataset, ext = os.path.splitext(filename)
+    filepat = '{}_*{}.h5'.format(dataset, ipf)
+    filepaths = glob(os.path.join(outputdir, filepat))
+    filepaths.sort()
+    if params['blocks']:
+        filepaths = [filepaths[i] for i in params['blocks']]
+
+    n_workers = get_n_workers(len(params['blocks']), params)
+
+    arglist = [
+        (
+            filepath,
+            params['ids_memb_mask'],
+            params['ids_memb_chan'],
+            params['ids_nucl_chan'],
+            params['ids_dset_mean'],
+            params['dapi_shift_planes'],
+            params['nucl_opening_footprint'],
+            params['dapi_filter'],
+            params['dapi_sigma'],
+            params['dapi_dog_sigma1'],
+            params['dapi_dog_sigma2'],
+            params['dapi_thr'],
+            params['sauvola_window_size'],
+            params['sauvola_k'],
+            params['dapi_absmin'],
+            params['dapi_erodisk'],
+            params['dist_max'],
+            params['peaks_size'],
+            params['peaks_thr'],
+            params['peaks_dil_footprint'],
+            params['compactness'],
+            params['memb_filter'],
+            params['memb_sigma'],
+            params['planarity_thr'],
+            params['dset_mask_filter'],
+            params['dset_mask_sigma'],
+            params['dset_mask_thr'],
+            params['steps'],
+            outputdir,
+        )
+        for filepath in filepaths]
+
+    with multiprocessing.Pool(processes=n_workers) as pool:
+        pool.starmap(cell_segmentation, arglist)
+
+
+def cell_segmentation(
+    filepath,
+    ids_memb_mask,
+    ids_memb_chan,
+    ids_nucl_chan,
+    ids_dset_mean,
+    dapi_shift_planes=0,
+    nucl_opening_footprint=[3, 7, 7],
+    dapi_filter='median',
+    dapi_sigma=1,
+    dapi_dog_sigma1=2,
+    dapi_dog_sigma2=4,
+    dapi_thr=0,
+    sauvola_window_size=[19, 75, 75],
+    sauvola_k=0.2,
+    dapi_absmin=500,
+    dapi_erodisk=0,
+    dist_max=5,
+    peaks_size=[11, 19, 19],
+    peaks_thr=1.0,
+    peaks_dil_footprint=[3, 7, 7],
+    compactness=0.80,
+    memb_filter='median',
+    memb_sigma=3,
+    planarity_thr=0.0005,
+    dset_mask_filter='gaussian',
+    dset_mask_sigma=50,
+    dset_mask_thr=1000,
+    steps=[0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
+    outputdir='',
     ):
 
-    step = 'segment'
-    paths = get_paths(plan_path, -1, 0, outputstem, step, save_steps)
-    report = {
-        'parameters': locals(),
-        'paths': paths,
-        'medians': {},
-        'centreslices': {}
-        }
+    # Prepare the output.
+    outputstem = os.path.splitext(filepath)[0]
+    save_steps = True
+
+    logging.basicConfig(filename='{}.log'.format(outputstem), level=logging.INFO)
+    report = {'parameters': locals()}
 
     # load images
-    im_dapi = Image(dapi_path)
+    im_dapi = Image('{}/{}'.format(filepath, ids_nucl_chan))
     im_dapi.load()
     nucl_props = im_dapi.get_props()
 
-    im_memb = MaskImage(memb_path)
+    im_memb = Image('{}/{}'.format(filepath, ids_memb_chan))
     im_memb.load()
     memb_props = im_memb.get_props()
 
-    im_plan = MaskImage(plan_path)
+    im_plan = MaskImage('{}/{}'.format(filepath, ids_memb_mask))
     im_plan.load()
 
     # im_dset_mask = Image(dset_mask_path, permission='r')
     # im_dset_mask.load(load_data=False)
-    im_mean = Image(mean_path)
+    im_mean = Image('{}/{}'.format(filepath, ids_dset_mean))
     im_mean.load()
 
     # preprocess dapi channel
@@ -463,9 +443,6 @@ def cell_segmentation(
 
     # write report
     generate_report('{}.h5/{}'.format(outputstem, 'mean_mask'))
-
-    return im_ws_pp
-
 
 
 def preprocess_nucl(
