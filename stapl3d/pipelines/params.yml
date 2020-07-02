@@ -129,12 +129,14 @@ biasfield:
         x: 2
         c: 1
         t: 1
-    n_iterations: 5
+    n_iterations: 2
     n_fitlevels: 4
     n_bspline_cps:
         z: 5
         y: 5
         x: 5
+    submit:
+        tasks: 22
 
 bias_estimation:
     conda:
