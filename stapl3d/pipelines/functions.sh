@@ -1057,11 +1057,11 @@ function get_cmd_membrane_enhancement {
     echo python "${pyfile1}" "\${blockstem}" 'memb' 'mean'
 
     echo ''
-    echo "${MRbin}/cellPreprocess" \
+    echo "${ACME}/cellPreprocess" \
         "\${blockstem}_memb-mean.nii.gz" \
         "\${blockstem}_memb-preprocess.nii.gz" \
         "${membrane_enhancement__median_filter_par}"
-    echo "${MRbin}/multiscalePlateMeasureImageFilter" \
+    echo "${ACME}/multiscalePlateMeasureImageFilter" \
         "\${blockstem}_memb-preprocess.nii.gz" \
         "\${blockstem}_memb-planarity.nii.gz" \
         "\${blockstem}_memb-eigen.mha" \
