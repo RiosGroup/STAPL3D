@@ -1020,38 +1020,6 @@ function get_cmd_splitblocks {
 }
 
 
-function get_cmd_splitblocks {
-
-    local rpf="${dataset__ims_ref_postfix}"
-    local bpf="${biasfield__postfix}"
-
-    blockrange_start='$((SLURM_ARRAY_TASK_ID-1))'
-    blockrange_end='$((SLURM_ARRAY_TASK_ID))'
-
-    if [ "${splitblocks__bias_apply}" == 'true' ]
-    then
-        bias_args="--bias_image \${filestem}${bpf}.h5/bias --bias_dsfacs 1 ${dataset__dst} ${dataset__dst} 1"
-    else
-        bias_args=''
-    fi
-    echo python -W ignore "${STAPL3D}/channels.py" \
-        --inputfile "\${filestem}${bpf}.ims" \
-        --blocksize "${blocksize}" \
-        --blockmargin "${blockmargin}" \
-        --blockrange "${blockrange_start} ${blockrange_end}" \
-        --memb_idxs "${dataset__memb_idxs}" \
-        --memb_weights "${dataset__memb_weights}" \
-        --nucl_idxs "${dataset__nucl_idxs}" \
-        --nucl_weights "${dataset__nucl_weights}" \
-        --mean_idxs "${dataset__mean_idxs}" \
-        --mean_weights "${dataset__mean_weights}" \
-        --output_channels "${dataset__dapi_chan}" \
-        --outputprefix "${blockdir}/${dataset}" \
-        "${bias_args}"
-
-}
-
-
 function get_py_convert1 {
 
     echo '#!/usr/bin/env python'
@@ -1081,9 +1049,9 @@ function get_py_convert2 {
 function get_cmd_membrane_enhancement {
 
     pyfile1="${datadir}/${jobname}_convert1.py"
-    eval get_py_convert1 > "$pyfile"
+    eval get_py_convert1 > "${pyfile1}"
     pyfile2="${datadir}/${jobname}_convert2.py"
-    eval get_py_convert2 > "$pyfile"
+    eval get_py_convert2 > "${pyfile2}"
 
     echo ''
     echo python "${pyfile1}" "\${blockstem}" 'memb' 'mean'
