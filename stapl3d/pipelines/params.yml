@@ -26,8 +26,8 @@ dataset:
     nucl_weights: 1.0 1.0 1.0 1.0
     mean_idxs: 0 1 2 3 4 5 6 7
     mean_weights: 1.0 1.0 1.0 1.0 1.0 1.0 1.0 1.0
-    blocksize: 200
-    blockmargin: 64
+    bs: 176
+    bm: 64
 
 channels:
     n: 8
