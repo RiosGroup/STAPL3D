@@ -341,5 +341,5 @@ def zip_parameters(filestem, report_type='bfc'):
     outputpath = '{}_{}.zip'.format(filestem, report_type)
     zf = zipfile.ZipFile(outputpath, mode='w')
     for pfile in zips:
-        zf.write(pfile, basename(pfile))
+        zf.write(pfile, os.path.basename(pfile))
     zf.close()
