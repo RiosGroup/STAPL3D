@@ -994,6 +994,32 @@ function get_cmd_block_segmentation {
 }
 
 
+function get_py_splitblocks {
+
+    echo '#!/usr/bin/env python'
+    echo ''
+    echo 'import sys'
+    echo 'image_in = sys.argv[1]'
+    echo 'parameter_file = sys.argv[2]'
+    echo 'br_lower = int(sys.argv[3])'
+    echo 'br_upper = int(sys.argv[4])'
+    echo ''
+    echo "from stapl3d.channels import process_channels"
+    echo "process_channels(image_in, parameter_file, blockrange=[br_lower, br_upper])"
+}
+function get_cmd_splitblocks {
+
+    pyfile="${datadir}/${jobname}.py"
+    eval get_py_${stage} > "${pyfile}"
+
+    echo python "${pyfile}" \
+        "\${filestem}${bpf}.ims" \
+        "\${filestem}.yml" \
+        "\${idx}" "\$((idx+1))"
+
+}
+
+
 function get_cmd_splitblocks {
 
     local rpf="${dataset__ims_ref_postfix}"
