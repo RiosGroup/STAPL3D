@@ -46,10 +46,10 @@ from skimage.morphology import (
     )
 
 from stapl3d import (
-    get_n_workers,
-    prep_outputdir,
+    get_outputdir,
     get_params,
-    get_paths,
+    get_blockfiles,
+    get_n_workers,
     Image,
     LabelImage,
     MaskImage,
@@ -61,7 +61,6 @@ from stapl3d import (
 from stapl3d.reporting import (
     # gen_orthoplot,
     load_parameters,
-    get_paths,
     get_centreslice,
     get_centreslices,
     get_zyx_medians,
@@ -133,26 +132,13 @@ def estimate(
 
     step_id = 'segmentation'
 
-    dirs = get_params(dict(), parameter_file, 'dirtree')
-    try:
-        subdir = dirs['datadir'][step_id] or ''
-    except KeyError:
-        subdir = 'blocks'
-    outputdir = prep_outputdir(outputdir, image_in, subdir)
+    outputdir = get_outputdir(image_in, parameter_file, outputdir, step_id, fallback='blocks')
 
-    params = get_params(locals(), parameter_file, 'segmentation')
+    params = get_params(locals(), parameter_file, step_id)
 
-    ipf = ''
-    paths = get_paths(image_in)
-    datadir, filename = os.path.split(paths['base'])
-    dataset, ext = os.path.splitext(filename)
-    filepat = '{}_*{}.h5'.format(dataset, ipf)
-    filepaths = glob(os.path.join(outputdir, filepat))
-    filepaths.sort()
-    if params['blocks']:
-        filepaths = [filepaths[i] for i in params['blocks']]
+    filepaths, blocks = get_blockfiles(image_in, outputdir, params['blocks'])
 
-    n_workers = get_n_workers(len(params['blocks']), params)
+    n_workers = get_n_workers(len(blocks), params)
 
     arglist = [
         (
@@ -186,7 +172,7 @@ def estimate(
             params['steps'],
             outputdir,
         )
-        for filepath in filepaths]
+        for block_idx, filepath in zip(blocks, filepaths)]
 
     with multiprocessing.Pool(processes=n_workers) as pool:
         pool.starmap(cell_segmentation, arglist)

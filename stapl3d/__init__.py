@@ -2044,6 +2044,22 @@ def get_n_workers(n_workers, params):
     return n_workers
 
 
+def get_blockfiles(image_in, block_dir, block_selection=[], block_postfix='.h5'):
+
+    paths = get_paths(image_in)
+    datadir, filename = os.path.split(paths['base'])
+    dataset, ext = os.path.splitext(filename)
+    filepat = '{}_*{}'.format(dataset, block_postfix)
+
+    filepaths = glob.glob(os.path.join(block_dir, filepat))
+    filepaths.sort()
+
+    if block_selection:
+        filepaths = [filepaths[i] for i in block_selection]
+
+    return filepaths, list(range(len(filepaths)))
+
+
 def get_blocksize(image_in, bs=640):
 
     im = Image(image_in, permission='r')
@@ -2089,6 +2105,24 @@ def get_params(params, parameter_file, pfile_entry):
     params.update(file_params)
 
     return params
+
+
+def get_outputdir(image_in, parameter_file, outputdir, step_id, fallback=''):
+
+    dirs = get_params(dict(), parameter_file, 'dirtree')
+    try:
+        subdir = dirs['datadir'][step_id] or ''
+    except KeyError:
+        subdir = fallback
+
+    if not outputdir:
+        paths = get_paths(image_in)
+        datadir, filename = os.path.split(paths['base'])
+        outputdir = os.path.join(datadir, subdir)
+
+    os.makedirs(outputdir, exist_ok=True)
+
+    return outputdir
 
 
 def prep_outputdir(outputdir, image_in='', subdir=''):

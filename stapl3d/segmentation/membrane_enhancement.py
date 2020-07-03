@@ -22,16 +22,14 @@ import numpy as np
 from glob import glob
 
 from stapl3d import (
-    get_n_workers,
-    prep_outputdir,
+    get_outputdir,
+    get_blockfiles,
     get_params,
-    get_paths,
+    get_n_workers,
     Image,
     LabelImage,
     MaskImage,
     wmeMPI,
-    get_image,
-    split_filename,
     )
 
 from stapl3d.channels import h5_nii_convert
@@ -81,26 +79,13 @@ def estimate(
 
     step_id = 'membrane_enhancement'
 
-    dirs = get_params(dict(), parameter_file, 'dirtree')
-    try:
-        subdir = dirs['datadir'][step_id] or ''
-    except KeyError:
-        subdir = 'blocks'
-    outputdir = prep_outputdir(outputdir, image_in, subdir)
+    outputdir = get_outputdir(image_in, parameter_file, outputdir, step_id, fallback='blocks')
 
     params = get_params(locals(), parameter_file, step_id)
 
-    ipf = ''
-    paths = get_paths(image_in)
-    datadir, filename = os.path.split(paths['base'])
-    dataset, ext = os.path.splitext(filename)
-    filepat = '{}_*{}.h5'.format(dataset, ipf)
-    filepaths = glob(os.path.join(outputdir, filepat))
-    filepaths.sort()
-    if params['blocks']:
-        filepaths = [filepaths[i] for i in params['blocks']]
+    filepaths, blocks = get_blockfiles(image_in, outputdir, params['blocks'])
 
-    n_workers = get_n_workers(len(params['blocks']), params)
+    n_workers = get_n_workers(len(blocks), params)
 
     ACMEdir = ACMEdir or os.environ.get('ACME')
 
@@ -112,7 +97,7 @@ def estimate(
             params['membrane_filter_par'],
             outputdir,
         )
-        for filepath in filepaths]
+        for block_idx, filepath in zip(blocks, filepaths)]
 
     with multiprocessing.Pool(processes=n_workers) as pool:
         pool.starmap(membrane_enhancement, arglist)

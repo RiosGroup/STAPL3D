@@ -17,13 +17,14 @@ import numpy as np
 from skimage.transform import resize
 
 from stapl3d import (
-    get_n_workers,
+    get_outputdir,
+    get_params,
     get_blocksize,
     get_blockmargin,
     get_n_blocks,
-    prep_outputdir,
-    get_params,
+    get_n_workers,
     get_paths,
+    prep_outputdir,
     Image,
     wmeMPI,
     )
@@ -82,12 +83,7 @@ def process_channels(
 
     step_id = 'blocks'
 
-    dirs = get_params(dict(), parameter_file, 'dirtree')
-    try:
-        subdir = dirs['datadir'][step_id] or ''
-    except KeyError:
-        subdir = step_id
-    outputdir = prep_outputdir(outputdir, image_in, subdir)
+    outputdir = get_outputdir(image_in, parameter_file, outputdir, step_id, fallback=step_id)
 
     params = get_params(locals(), parameter_file, step_id)
 
