@@ -32,7 +32,7 @@ from stapl3d import (
     wmeMPI,
     )
 
-from stapl3d.channels import h5_nii_convert
+from stapl3d import h5_nii_convert
 
 logger = logging.getLogger(__name__)
 

@@ -321,43 +321,6 @@ def prep_props(im, datatype, chunksize, blockmargin):
     return props
 
 
-def transpose_props(props, outlayout=''):
-    """Transpose the attributes of an image."""
-
-    if not outlayout:
-        outlayout = props['axlab'][::-1]
-    in2out = [props['axlab'].index(l) for l in outlayout]
-    props['elsize'] = np.array(props['elsize'])[in2out]
-    props['slices'] = [props['slices'][i] for i in in2out]
-    props['shape'] = np.array(props['shape'])[in2out]
-    props['axlab'] = ''.join([props['axlab'][i] for i in in2out])
-    if 'chunks' in props.keys():
-        if props['chunks'] is not None:
-            props['chunks'] = np.array(props['chunks'])[in2out]
-
-    return props
-
-
-def h5_nii_convert(image_in, image_out, datatype=''):
-    """Convert between h5 (zyx) and nii (xyz) file formats."""
-
-    im_in = Image(image_in)
-    im_in.load(load_data=False)
-    data = im_in.slice_dataset()
-
-    props = transpose_props(im_in.get_props())
-    if datatype:
-        from skimage.util.dtype import convert
-        data = convert(data, np.dtype(datatype), force_copy=False)
-        props['dtype'] = datatype
-
-    im_out = Image(image_out, **props)
-    im_out.create()
-    im_out.write(data.transpose().astype(props['dtype']))
-    im_in.close()
-    im_out.close()
-
-
 def splitblocks(image_in, blocksize, blockmargin, outputtemplate):
     """Split an image into blocks."""
 
