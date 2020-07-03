@@ -14,14 +14,31 @@ splitting of the full dataset: proposed new
 # include coordinates in attributes?
 """
 
+import os
 import sys
 import argparse
-import os
+import logging
+import pickle
+import shutil
+import multiprocessing
 
 import numpy as np
 from skimage.segmentation import relabel_sequential
 
 from stapl3d import wmeMPI, Image, LabelImage, split_filename
+from stapl3d import (
+    get_outputdir,
+    get_blockfiles,
+    get_blockinfo,
+    get_imageprops,
+    get_params,
+    get_n_workers,
+    get_paths,
+    Image,
+    LabelImage,
+    wmeMPI,
+    split_filename,
+    )
 
 
 def main(argv):
@@ -169,6 +186,60 @@ def main(argv):
         args.save_steps,
         args.protective,
         )
+
+
+def merge(
+    image_in,
+    parameter_file='',
+    outputdir='',
+    blocksize=[],
+    blockmargin=[],
+    blockrange=[],
+    blocks=[],
+    fullsize=[],
+    ):
+    """Average membrane and nuclear channels and write as blocks."""
+
+    step_id = 'mergeblocks'
+
+    blockdir = get_outputdir(image_in, parameter_file, outputdir, 'blocks', fallback='blocks')
+    outputdir = get_outputdir(image_in, parameter_file, outputdir, step_id, fallback='')
+
+    params = get_params(locals(), parameter_file, step_id)
+    idss = [v['ids'] for ids, v in params.items() if ids.startswith('ids')]
+    n_workers = get_n_workers(len(idss), params)
+
+    filepaths, blocks = get_blockfiles(image_in, blockdir, params['blocks'])
+    blocksize, blockmargin, _ = get_blockinfo(image_in, parameter_file, params)
+    props = get_imageprops(image_in)
+
+    dataset = os.path.splitext(get_paths(image_in)['fname'])[0]
+
+    arglist = [
+        (
+            ['{}/{}'.format(filepath, ids) for filepath in filepaths],
+            None,
+            blocksize[:3],
+            blockmargin[:3],
+            [],
+            [0, 0, 0],
+            props['shape'][:3],
+            False,
+            False,
+            False,
+            False,
+            [],
+            'np.amax',
+            '',
+            False,
+            os.path.join(outputdir, '{}_{}.h5/{}'.format(dataset, ids.replace('/', '-'), ids)),
+            False,
+            False,
+        )
+        for ids in idss]
+
+    with multiprocessing.Pool(processes=n_workers) as pool:
+        pool.starmap(mergeblocks, arglist)
 
 
 def mergeblocks(
