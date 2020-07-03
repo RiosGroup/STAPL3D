@@ -28,8 +28,7 @@ from skimage.color import label2rgb
 from stapl3d import (
     get_outputdir,
     get_blockfiles,
-    get_blocksize,
-    get_blockmargin,
+    get_blockinfo,
     get_params,
     get_n_workers,
     get_paths,
@@ -100,6 +99,8 @@ def estimate(
 
     filepaths, blocks = get_blockfiles(image_in, outputdir, params['blocks'])
 
+    blocksize, blockmargin, _ = get_blockinfo(image_in, par_file, params)
+
     n_workers = get_n_workers(len(blocks), params)
 
     path_int = '{}/{}'.format(params['grp'], params['ids'])
@@ -108,42 +109,20 @@ def estimate(
     maxlabelfile = os.path.join(outputdir, filename)
     maxlabels = get_maxlabels_from_attribute(filepaths, path_int, maxlabelfile)
 
-    # NOTE: same as in splitblocks
-    if not params['blocksize']:
-        ds_par = get_params(dict(), parameter_file, 'dataset')
-        bs = ds_par['bs'] or 640
-        params['blocksize'] = get_blocksize(image_in, bs)
-    if not params['blockmargin']:
-        ds_par = get_params(dict(), parameter_file, 'dataset')
-        bm = ds_par['bm'] or 64
-        params['blockmargin'] = get_blockmargin(image_in, bm)
-
     # Arguments to `resegment_block_boundaries`
     images_in = ['{}/{}'.format(filepath, path_int) for filepath in filepaths]
-    blocksize=params['blocksize'][:3]
-    blockmargin=params['blockmargin'][:3]
-    axis=0
-    seamnumbers=[-1, -1, -1]
-    mask_dataset=''
-    relabel=False
-    maxlabel=maxlabelfile
-    in_place=True
-    outputstem=os.path.join(outputdir, dataset)
-    save_steps=False
-
-    args = [
-        images_in,
-        blocksize,
-        blockmargin,
-        axis,
-        seamnumbers,
-        mask_dataset,
-        relabel,
-        maxlabel,
-        in_place,
-        outputstem,
-        save_steps,
-    ]
+    blocksize = blocksize[:3]
+    blockmargin = blockmargin[:3]
+    axis = 0
+    seamnumbers = [-1, -1, -1]
+    mask_dataset = ''
+    relabel = False
+    maxlabel = maxlabelfile
+    in_place = True
+    outputstem = os.path.join(outputdir, dataset)
+    save_steps = False
+    args = [images_in, blocksize, blockmargin, axis, seamnumbers, mask_dataset,
+            relabel, maxlabel, in_place, outputstem, save_steps]
 
     # Set the number of seams in the data.
     im = Image(image_in)

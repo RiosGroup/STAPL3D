@@ -2082,6 +2082,25 @@ def get_blockmargin(image_in, bm=64):
     return blockmargin
 
 
+def get_blockinfo(image_in, parameter_file, params=dict(blocksize=[], blockmargin=[], blockrange=[])):
+
+    if not params['blocksize']:
+        ds_par = get_params(dict(), parameter_file, 'dataset')
+        bs = ds_par['bs'] or 640
+        blocksize = get_blocksize(image_in, bs)
+    if not params['blockmargin']:
+        ds_par = get_params(dict(), parameter_file, 'dataset')
+        bm = ds_par['bm'] or 64
+        blockmargin = get_blockmargin(image_in, bm)
+    if params['blockrange']:
+        blocks = list(range(params['blockrange'][0], params['blockrange'][1]))
+    elif 'blocks' not in params.keys():
+        n_blocks = get_n_blocks(image_in, params['blocksize'], params['blockmargin'])
+        blocks = list(range(n_blocks))
+
+    return blocksize, blockmargin, blocks
+
+
 def get_n_blocks(image_in, blocksize, blockmargin):
 
     im = Image(image_in, permission='r')
@@ -2148,3 +2167,13 @@ def get_paths(image_in, resolution_level=-1, channel=0, outputstem='', step='', 
     im.close()
 
     return paths
+
+
+def get_imageprops(image_in):
+
+    im = Image(image_in)
+    im.load(load_data=False)
+    props = im.get_props()
+    im.close()
+
+    return props

@@ -19,8 +19,7 @@ from skimage.transform import resize
 from stapl3d import (
     get_outputdir,
     get_params,
-    get_blocksize,
-    get_blockmargin,
+    get_blockinfo,
     get_n_blocks,
     get_n_workers,
     get_paths,
@@ -87,27 +86,15 @@ def process_channels(
 
     params = get_params(locals(), parameter_file, step_id)
 
-    if not params['blocksize']:
-        ds_par = get_params(dict(), parameter_file, 'dataset')
-        bs = ds_par['bs'] or 640
-        params['blocksize'] = get_blocksize(image_in, bs)
-    if not params['blockmargin']:
-        ds_par = get_params(dict(), parameter_file, 'dataset')
-        bm = ds_par['bm'] or 64
-        params['blockmargin'] = get_blockmargin(image_in, bm)
-    if params['blockrange']:
-        params['blocks'] = list(range(params['blockrange'][0], params['blockrange'][1]))
-    elif 'blocks' not in params.keys():
-        n_blocks = get_n_blocks(image_in, params['blocksize'], params['blockmargin'])
-        params['blocks'] = list(range(n_blocks))
+    blocksize, blockmargin, blocks = get_blockinfo(image_in, par_file, params)
 
-    n_workers = get_n_workers(len(params['blocks']), params)
+    n_workers = get_n_workers(len(blocks), params)
 
     arglist = [
         (
             image_in,
-            params['blocksize'],
-            params['blockmargin'],
+            blocksize,
+            blockmargin,
             [b_idx, b_idx+1],
             params['bias_image'],
             params['bias_dsfacs'],
@@ -122,7 +109,7 @@ def process_channels(
             params['chunksize'],
             outputdir,
         )
-        for b_idx in params['blocks']]
+        for b_idx in blocks]
 
     with multiprocessing.Pool(processes=n_workers) as pool:
         pool.starmap(combine_channels, arglist)
