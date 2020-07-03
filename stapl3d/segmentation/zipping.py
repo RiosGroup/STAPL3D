@@ -4,29 +4,43 @@
 
 """
 
+import os
 import sys
 import argparse
-
-import os
-import numpy as np
+import logging
+import pickle
+import shutil
+import multiprocessing
 
 import matplotlib
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
-from skimage.color import label2rgb
+
+import numpy as np
+
+from glob import glob
 
 from scipy import ndimage as ndi
 
 from skimage.segmentation import relabel_sequential, watershed
+from skimage.color import label2rgb
 
-from stapl3d.segmentation import features
-
-from stapl3d import Image, MaskImage, LabelImage, wmeMPI
+from stapl3d import (
+    get_outputdir,
+    get_blockfiles,
+    get_params,
+    get_n_workers,
+    get_paths,
+    Image,
+    LabelImage,
+    MaskImage,
+    wmeMPI,
+    split_filename,
+    )
 
 from stapl3d.reporting import (
     gen_orthoplot,
     load_parameters,
-    get_paths,
     get_centreslice,
     get_centreslices,
     get_zyx_medians,
@@ -205,7 +219,7 @@ def get_block_info(images_in, blocksize, margins=[0, 64, 64]):
     for i, inputfile in enumerate(inputfiles):
         # NOTE: after inputfiles.sort(), i is a linear index
         # into image info incrementing first z then y then x
-        info[i] = features.split_filename(inputfile)[0]
+        info[i] = split_filename(inputfile)[0]
         info[i]['inputfile'] = inputfile
         zyx = [info[i][dim] + margins[j] if info[i][dim] > 0 else 0
                for j, dim in enumerate('zyx')]
@@ -554,7 +568,7 @@ def process_pair(info_ims, ids='segm/labels_memb_fix', margin=64, axis=2,
     find_peaks = False
     if find_peaks:
         peaks_size=[11, 19, 19]
-        from membrane.extract_segment import find_local_maxima
+        from stapl3d.segmentation.segment import find_local_maxima
         new_peaks = find_local_maxima(edts_ds, peaks_size, peaks_thr)
         peaks_ds[mask] = new_peaks[mask]
         write_margin(peaks, peaks_ds, axis, margin, n)
@@ -564,7 +578,7 @@ def process_pair(info_ims, ids='segm/labels_memb_fix', margin=64, axis=2,
                                                   axis, margin, n, include_margin=False,
                                                   concat=True)
             peaks_dil_footprint=[3, 7, 7]
-            from membrane.extract_segments import create_footprint
+            from stapl3d.segmentation.segment import create_footprint
             footprint = create_footprint(peaks_dil_footprint)
             from skimage.morphology import binary_dilation
             new_peaks_dil = binary_dilation(new_peaks, selem=footprint)
@@ -647,55 +661,59 @@ def create_resegmentation_mask_datasets(info):
         im.close()
 
 
-def relabel_blocks(info, ids='segm/labels_memb_del', pf='relabeled', maxlabel=1):
-    """Relabel all blocks in the dataset sequentially."""
+def relabel(
+    image_in,
+    parameter_file,
+    outputdir='',
+    blocks=[],
+    grp='segm',
+    ids='labels_memb_del',
+    postfix='relabeled',
+    ):
+    """Correct z-stack shading."""
 
-    for k, v in info.items():
+    step_id = 'relabel'
 
-        ods = '{}_{}'.format(ids, pf)
-        print('relabeling block {:03d} (id:{}) to {}'.format(k, v['postfix'], ods))
+    outputdir = get_outputdir(image_in, parameter_file, outputdir, step_id, fallback='blocks')
 
-        # seg = read_image(v, ids=ids, imtype='Label')
-        fstem = os.path.join(v['datadir'], '{}_{}'.format(v['base'], v['postfix']))
-        seg = LabelImage('{}.h5/{}'.format(fstem, ids))
-        seg.load(load_data=False)
+    params = get_params(locals(), parameter_file, step_id)
 
-        seg = relabel(seg, maxlabel=maxlabel)
+    filepaths, blocks = get_blockfiles(image_in, outputdir, params['blocks'])
 
-        if seg.maxlabel != 0:
-            maxlabel = seg.maxlabel
+    n_workers = get_n_workers(len(blocks), params)
 
-        print('maxlabel = {:08d}'.format(maxlabel))
+    path_int = '{}/{}'.format(params['grp'], params['ids'])
+    dataset = os.path.splitext(get_paths(image_in)['fname'])[0]
+    filename = '{}_maxlabels_{}.txt'.format(dataset, params['ids'])
+    maxlabelfile = os.path.join(outputdir, filename)
+    maxlabels = get_maxlabels_from_attribute(filepaths, path_int, maxlabelfile)
 
-        seg.close()
+    arglist = [
+        (
+            '{}/{}'.format(filepath, path_int),
+            block_idx,
+            maxlabelfile,
+            params['postfix'],
+        )
+        for block_idx, filepath in zip(blocks, filepaths)]
 
-    return maxlabel
+    with multiprocessing.Pool(processes=n_workers) as pool:
+        pool.starmap(relabel_parallel, arglist)
 
 
 def relabel_parallel(image_in, block_idx, maxlabelfile, pf='relabeled'):
 
-    # print('block_idx {:03d} will start from {:10d}'.format(block_idx, maxlabel))
-    # print('block_idx {:03d}'.format(block_idx))
     maxlabels = np.loadtxt(maxlabelfile, dtype=np.uint32)
     maxlabel = np.sum(maxlabels[:block_idx])
-    # print('maxlabel {:10d}'.format(maxlabel))
 
     seg = LabelImage(image_in)
     seg.load(load_data=False)
 
-    # TODO: into segmentation pipeline: but will probably fail as attr too big
-    # seg.set_ulabels()
-    # seg.ds.attrs.create('ulabels', seg.ulabels, dtype='uint32')
-
-    relabel(seg, pf, maxlabel)
-    # relabel(seg, pf, maxlabel, force_sequential=True)
+    relabel_block(seg, pf, maxlabel)
 
 
-def relabel(im, pf='relabeled', maxlabel=1, bg_label=0, force_sequential=False):
+def relabel_block(im, pf='relabeled', maxlabel=1, bg_label=0, force_sequential=False):
     """Relabel dataset sequentially."""
-
-    # ulabels = set(im.ds.attrs['ulabels']) - set([0])
-    # print('ulabels min {:10d}   max {:10d}'.format(min(ulabels), max(ulabels)))
 
     data = im.slice_dataset()
     mask = data == bg_label
@@ -717,29 +735,51 @@ def relabel(im, pf='relabeled', maxlabel=1, bg_label=0, force_sequential=False):
     if force_sequential or (maxlabel_block is None):
         mo.set_maxlabel()
     else:
-        # mo.set_ulabels()  # FIXME: this may be very inefficient in many cases
         mo.maxlabel = maxlabel + maxlabel_block
 
-    # mo.ds.attrs.create('ulabels', mo.ulabels, dtype='uint32')
     mo.ds.attrs.create('maxlabel', mo.maxlabel, dtype='uint32')
     mo.close()
-
-    # ulabels = set(mo.ulabels) - set([0])
-    # print('ulabels min {:10d}   max {:10d}'.format(min(ulabels), max(ulabels)))
-    # print('maxlabel from {:10d} to {:10d}'.format(maxlabel_block, mo.maxlabel))
-    # print('')
 
     return mo
 
 
-def copy_block_datasets(info, ids='segm/labels_memb_del', pf='fix', dtype='uint32'):
-    """Create datasets to hold the resegmented blocks."""
+def copyblocks(
+    image_in,
+    parameter_file,
+    outputdir='',
+    blocks=[],
+    grp='segm',
+    ids='labels_memb_del_relabeled',
+    postfix='fix',
+    ):
+    """Correct z-stack shading."""
 
-    for k, v in info.items():
-        ods = '{}_{}'.format(ids, pf)
-        print('copying block {:03d} (id:{}) to {}'.format(k, v['postfix'], ods))
-        seg = read_image(v, ids=ids, imtype='Label')
-        copy_h5_dataset(seg, imtype='Label', pf=pf, dtype=dtype, k=k)
+    step_id = 'copyblocks'
+
+    outputdir = get_outputdir(image_in, parameter_file, outputdir, step_id, fallback='blocks')
+
+    params = get_params(locals(), parameter_file, step_id)
+
+    filepaths, blocks = get_blockfiles(image_in, outputdir, params['blocks'])
+
+    n_workers = get_n_workers(len(blocks), params)
+
+    path_int = '{}/{}'.format(params['grp'], params['ids'])
+    dataset = os.path.splitext(get_paths(image_in)['fname'])[0]
+    filename = '{}_maxlabels_{}.txt'.format(dataset, params['ids'])
+    maxlabelfile = os.path.join(outputdir, filename)
+    maxlabels = get_maxlabels_from_attribute(filepaths, path_int, maxlabelfile)
+
+    arglist = [
+        (
+            '{}/{}'.format(filepath, path_int),
+            block_idx,
+            params['postfix'],
+        )
+        for block_idx, filepath in zip(blocks, filepaths)]
+
+    with multiprocessing.Pool(processes=n_workers) as pool:
+        pool.starmap(copy_blocks_parallel, arglist)
 
 
 def copy_blocks_parallel(image_in, block_idx, postfix='fix'):
