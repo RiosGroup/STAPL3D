@@ -994,29 +994,78 @@ def memb_mask(labels_ds, memb_meth='ip'):
     return mask
 
 
-def split_segments(seg_path, ids='/segm/labels_memb_del_relabeled_fix', outputstem=''):
+def subsegment(
+    image_in,
+    parameter_file,
+    outputdir='',
+    blocks=[],
+    ids='segm/labels_memb_del_relabeled_fix',
+    ods_full='segm/labels_memb_del_relabeled_fix_full',
+    ods_memb='segm/labels_memb_del_relabeled_fix_memb',
+    ods_nucl='segm/labels_memb_del_relabeled_fix_nucl',
+    ):
+    """Perform N4 bias field correction."""
 
-    labels = LabelImage(seg_path)
+    step_id = 'subsegment'
+
+    outputdir = get_outputdir(image_in, parameter_file, outputdir, step_id, fallback='blocks')
+
+    params = get_params(locals(), parameter_file, step_id)
+
+    filepaths, blocks = get_blockfiles(image_in, outputdir, params['blocks'])
+
+    n_workers = get_n_workers(len(blocks), params)
+
+    arglist = [
+        (
+            filepath,
+            params['ids'],
+            params['ods_full'],
+            params['ods_memb'],
+            params['ods_nucl'],
+            outputdir,
+        )
+        for block_idx, filepath in zip(blocks, filepaths)]
+
+    with multiprocessing.Pool(processes=n_workers) as pool:
+        pool.starmap(split_segments, arglist)
+
+
+def split_segments(
+    inputfile,
+    ids='segm/labels_memb_del_relabeled_fix',
+    ods_full='segm/labels_memb_del_relabeled_fix_full',
+    ods_memb='segm/labels_memb_del_relabeled_fix_memb',
+    ods_nucl='segm/labels_memb_del_relabeled_fix_nucl',
+    outputdir='',
+    ):
+
+    labels = LabelImage('{}/{}'.format(inputfile, ids))
     labels.load(load_data=False)
+    try:
+        del labels.file[ods_full]
+    except KeyError:
+        pass
+    labels.file[ods_full] = labels.file[ids]
     labels_ds = labels.slice_dataset()
 
     # nuclei
-    outstem = '{}.h5{}'.format(outputstem, '/nucl/dapi')
-    maskpath_sauvola = '{}_mask_sauvola'.format(outstem)
-    maskpath_absmin = '{}_mask_absmin'.format(outstem)
+    nuclstem = '{}/{}'.format(inputfile, 'nucl/dapi')  # TODO: flexible naming
+    maskpath_sauvola = '{}_mask_sauvola'.format(nuclstem)
+    maskpath_absmin = '{}_mask_absmin'.format(nuclstem)
     mask_nucl = nucl_mask(maskpath_sauvola, maskpath_absmin)
-    write(mask_nucl, outstem, '_mask_nuclei', labels, imtype='Mask')
+    write(mask_nucl, nuclstem, '_mask_nuclei', labels, imtype='Mask')
 
     # membranes  # TODO: may combine with planarity_mask to make it more data-informed
-    outstem = '{}.h5{}'.format(outputstem, '/memb/boundary')
+    membstem = '{}/{}'.format(inputfile, 'memb/boundary')
     mask_memb = memb_mask(labels_ds)
-    write(mask_memb, outstem, '_mask', labels, imtype='Mask')
+    write(mask_memb, membstem, '_mask', labels, imtype='Mask')
 
-    outstem = '{}.h5{}'.format(outputstem, ids)
-    for mask, pf in zip([mask_memb, mask_nucl], ['_memb', '_nucl']):
+    for mask, ods in zip([mask_memb, mask_nucl], [ods_memb, ods_nucl]):
+        outstem = '{}/{}'.format(inputfile, ods)
         labs = np.copy(labels_ds)
         labs[~mask] = 0
-        write(labs, outstem, pf, labels, imtype='Label')
+        write(labs, outstem, '', labels, imtype='Label')
 
 
 def plot_images(axs, info_dict={}):
