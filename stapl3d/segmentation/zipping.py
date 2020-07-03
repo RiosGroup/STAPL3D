@@ -28,6 +28,8 @@ from skimage.color import label2rgb
 from stapl3d import (
     get_outputdir,
     get_blockfiles,
+    get_blocksize,
+    get_blockmargin,
     get_params,
     get_n_workers,
     get_paths,
@@ -49,94 +51,165 @@ from stapl3d.reporting import (
 
 
 def main(argv):
-    """Resegment the dataset block boundaries."""
+    """"Resegment the dataset block boundaries.
+
+    """
 
     parser = argparse.ArgumentParser(
         description=__doc__,
         formatter_class=argparse.ArgumentDefaultsHelpFormatter
         )
     parser.add_argument(
-        '-i', '--images_in',
+        '-i', '--image_in',
         required=True,
-        nargs='*',
-        help="""paths to hdf5 datasets <filepath>.h5/<...>/<dataset>:
-                datasets to stitch together""",
+        help='path to image file',
         )
     parser.add_argument(
-        '-s', '--blocksize',
-        required=True,
-        nargs=3,
-        type=int,
-        default=[],
-        help='size of the datablock',
+        'parameter_file',
+        help='path to yaml parameter file',
         )
     parser.add_argument(
-        '-m', '--blockmargin',
-        nargs=3,
-        type=int,
-        default=[0, 64, 64],
-        help='the datablock overlap used',
-        )
-
-    parser.add_argument(
-        '-A', '--axis',
-        type=int,
-        default=2,
-        help='',
-        )
-    parser.add_argument(
-        '-L', '--seamnumbers',
-        nargs='*',
-        type=int,
-        default=[-1, -1, -1],
-        help='',
-        )
-    parser.add_argument(
-        '-a', '--mask_dataset',
-        help='use this mask h5 dataset to mask the labelvolume',
-        )
-
-    group = parser.add_mutually_exclusive_group(required=True)
-    group.add_argument(
-        '-r', '--relabel',
-        action='store_true',
-        help='apply incremental labeling to each block'
-        )
-    group.add_argument(
-        '-l', '--maxlabel',
-        help='maximum labelvalue in the full dataset'
-        )
-
-    parser.add_argument(
-        '-p', '--in_place',
-        action='store_true',
-        help='write the resegmentation back to the input datasets'
-        )
-    parser.add_argument(
-        '-o', '--outputstem',
-        help='template for output',
-        )
-    parser.add_argument(
-        '-S', '--save_steps',
-        action='store_true',
-        help='save intermediate results'
+        '-o', '--outputdir',
+        required=False,
+        help='path to output directory',
         )
 
     args = parser.parse_args()
 
-    resegment_block_boundaries(
-        args.images_in,
-        args.blocksize,
-        args.blockmargin,
-        args.axis,
-        args.seamnumbers,
-        args.mask_dataset,
-        args.relabel,
-        args.maxlabel,
-        args.in_place,
-        args.outputstem,
-        args.save_steps,
-        )
+    estimate(args.image_in, args.parameter_file, args.outputdir)
+
+
+def estimate(
+    image_in,
+    parameter_file,
+    outputdir='',
+    blocksize=[],
+    blockmargin=[],
+    blocks=[],
+    grp='segm',
+    ids='labels_memb_del_relabeled_fix',
+    postfix='fix',
+    ):
+    """Correct z-stack shading."""
+
+    step_id = 'copyblocks'
+
+    outputdir = get_outputdir(image_in, parameter_file, outputdir, step_id, fallback='blocks')
+
+    params = get_params(locals(), parameter_file, step_id)
+
+    filepaths, blocks = get_blockfiles(image_in, outputdir, params['blocks'])
+
+    n_workers = get_n_workers(len(blocks), params)
+
+    path_int = '{}/{}'.format(params['grp'], params['ids'])
+    dataset = os.path.splitext(get_paths(image_in)['fname'])[0]
+    filename = '{}_maxlabels_{}.txt'.format(dataset, params['ids'])
+    maxlabelfile = os.path.join(outputdir, filename)
+    maxlabels = get_maxlabels_from_attribute(filepaths, path_int, maxlabelfile)
+
+    # NOTE: same as in splitblocks
+    if not params['blocksize']:
+        ds_par = get_params(dict(), parameter_file, 'dataset')
+        bs = ds_par['bs'] or 640
+        params['blocksize'] = get_blocksize(image_in, bs)
+    if not params['blockmargin']:
+        ds_par = get_params(dict(), parameter_file, 'dataset')
+        bm = ds_par['bm'] or 64
+        params['blockmargin'] = get_blockmargin(image_in, bm)
+
+    # Arguments to `resegment_block_boundaries`
+    images_in = ['{}/{}'.format(filepath, path_int) for filepath in filepaths]
+    blocksize=params['blocksize'][:3]
+    blockmargin=params['blockmargin'][:3]
+    axis=0
+    seamnumbers=[-1, -1, -1]
+    mask_dataset=''
+    relabel=False
+    maxlabel=maxlabelfile
+    in_place=True
+    outputstem=os.path.join(outputdir, dataset)
+    save_steps=False
+
+    args = [
+        images_in,
+        blocksize,
+        blockmargin,
+        axis,
+        seamnumbers,
+        mask_dataset,
+        relabel,
+        maxlabel,
+        in_place,
+        outputstem,
+        save_steps,
+    ]
+
+    # Set the number of seams in the data.
+    im = Image(image_in)
+    im.load(load_data=False)
+    X = im.dims[im.axlab.index('x')]
+    Y = im.dims[im.axlab.index('y')]
+    im.close()
+    from math import ceil
+    nx = int(ceil(X/bs))
+    ny = int(ceil(Y/bs))
+    n_seams_yx = [ny - 1, nx - 1]
+    seams = list(range(np.prod(n_seams_yx)))
+    seamgrid = np.reshape(seams, n_seams_yx)
+
+    for axis, n_seams in zip([1, 2], n_seams_yx):
+        n_proc = min(n_workers, int(np.ceil(n_seams / 2)))
+        for offset in [0, 1]:
+            compute_zip_step(
+                args, axis, seamgrid,
+                starts=[offset, 0], stops=[n_seams, 1], steps=[2, 2],
+                n_proc=n_proc,
+            )
+            maxlabels = get_maxlabels_from_attribute(filepaths, path_int, maxlabelfile)
+
+    for start_y in [0, 1]:
+        for start_x in [0, 1]:
+            compute_zip_step(
+                args, axis=0, seamgrid=seamgrid,
+                starts=[start_y, start_x], stops=n_seams_yx, steps=[2, 2],
+                n_proc=n_workers,
+            )
+            maxlabels = get_maxlabels_from_attribute(filepaths, path_int, maxlabelfile)
+
+
+def get_arglist(args, axis, starts, stops, steps):
+    """Replace the `axis` and `seamnumbers` arguments
+    with values specific for sequential zip-steps.
+
+    axis = 0: zip-quads
+    axis = 1: zip-lines over Y
+    axis = 2: zip-lines over X
+    seamnumbers: start-stop-step triplets (with step=2)
+    """
+
+    arglist = []
+    for seam_y in range(starts[0], stops[0], steps[0]):
+        for seam_x in range(starts[1], stops[1], steps[1]):
+            seamnumbers = [-1, seam_y, seam_x]
+            args[3] = axis
+            if axis == 0:
+                args[4] = [seamnumbers[d] if d != axis else -1 for d in [0, 1, 2]]
+            else:
+                args[4] = [seam_y if d == axis else -1 for d in [0, 1, 2]]
+            arglist.append(tuple(args))
+
+    return arglist
+
+
+def compute_zip_step(args, axis, seamgrid, starts, stops, steps, n_proc):
+    """Compute the zip-step."""
+
+    arglist = get_arglist(args, axis, starts, stops, steps)
+    print('submitting {:3d} jobs over {:3d} processes'.format(len(arglist), n_proc))
+
+    with multiprocessing.Pool(processes=n_proc) as pool:
+        pool.starmap(resegment_block_boundaries, arglist)
 
 
 def resegment_block_boundaries(
