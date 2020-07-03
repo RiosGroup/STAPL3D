@@ -56,10 +56,10 @@ def main(argv):
 
     args = parser.parse_args()
 
-    process_channels(args.image_in, args.parameter_file, args.outputdir)
+    split(args.image_in, args.parameter_file, args.outputdir)
 
 
-def process_channels(
+def split(
     image_in,
     parameter_file='',
     outputdir='',
