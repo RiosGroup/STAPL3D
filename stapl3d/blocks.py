@@ -15,6 +15,7 @@ import multiprocessing
 import numpy as np
 
 from skimage.transform import resize
+from skimage.segmentation import relabel_sequential
 
 from stapl3d import (
     get_outputdir,
@@ -26,6 +27,10 @@ from stapl3d import (
     prep_outputdir,
     Image,
     wmeMPI,
+    get_blockfiles,
+    get_imageprops,
+    LabelImage,
+    split_filename,
     )
 
 logger = logging.getLogger(__name__)
@@ -336,6 +341,148 @@ def splitblocks(image_in, blocksize, blockmargin, outputtemplate):
         im.slices = block['slices']
         data = im.slice_dataset()
         write_output(block['path'], data, props)
+
+
+def merge(
+    image_in,
+    parameter_file='',
+    outputdir='',
+    blocksize=[],
+    blockmargin=[],
+    blockrange=[],
+    blocks=[],
+    fullsize=[],
+    ):
+    """Average membrane and nuclear channels and write as blocks."""
+
+    step_id = 'mergeblocks'
+
+    blockdir = get_outputdir(image_in, parameter_file, outputdir, 'blocks', fallback='blocks')
+    outputdir = get_outputdir(image_in, parameter_file, outputdir, step_id, fallback='')
+
+    params = get_params(locals(), parameter_file, step_id)
+    idss = [v['ids'] for ids, v in params.items() if ids.startswith('ids')]
+    n_workers = get_n_workers(len(idss), params)
+
+    filepaths, blocks = get_blockfiles(image_in, blockdir, params['blocks'])
+    blocksize, blockmargin, _ = get_blockinfo(image_in, parameter_file, params)
+    props = get_imageprops(image_in)
+
+    dataset = os.path.splitext(get_paths(image_in)['fname'])[0]
+
+    arglist = [
+        (
+            ['{}/{}'.format(filepath, ids) for filepath in filepaths],
+            blocksize[:3],
+            blockmargin[:3],
+            [],
+            [0, 0, 0],
+            props['shape'][:3],
+            '',
+            os.path.join(outputdir, '{}_{}.h5/{}'.format(dataset, ids.replace('/', '-'), ids)),
+        )
+        for ids in idss]
+
+    with multiprocessing.Pool(processes=n_workers) as pool:
+        pool.starmap(mergeblocks, arglist)
+
+
+def mergeblocks(
+        images_in,
+        blocksize=[],
+        blockmargin=[],
+        blockrange=[],
+        blockoffset=[0, 0, 0],
+        fullsize=[],
+        datatype='',
+        outputpath='',
+        ):
+    """Merge blocks of data into a single hdf5 file."""
+
+    if blockrange:
+        images_in = images_in[blockrange[0]:blockrange[1]]
+
+    mpi = wmeMPI(usempi=False)
+
+    im = Image(images_in[0], permission='r')
+    im.load(mpi.comm, load_data=False)
+    props = im.get_props(squeeze=True)
+    ndim = im.get_ndim()
+
+    props['dtype'] = datatype or props['dtype']
+    props['chunks'] = props['chunks'] or None
+
+    # get the size of the outputfile
+    outsize = np.subtract(fullsize, blockoffset)
+
+    if ndim == 4:
+        outsize = list(outsize) + [im.ds.shape[3]]  # TODO: flexible insert
+
+    if outputpath.endswith('.ims'):
+        mo = LabelImage(outputpath)
+        mo.create(comm=mpi.comm)
+    else:
+        props['shape'] = outsize
+        mo = LabelImage(outputpath, **props)
+        mo.create(comm=mpi.comm)
+
+    mpi.blocks = [{'path': image_in} for image_in in images_in]
+    mpi.nblocks = len(images_in)
+    mpi.scatter_series()
+
+    # merge the datasets
+    for i in mpi.series:
+        block = mpi.blocks[i]
+
+        im = Image(block['path'], permission='r')
+        im.load(mpi.comm, load_data=False)
+        set_slices_in_and_out(im, mo, blocksize, blockmargin, fullsize)
+        data = im.slice_dataset()
+        mo.write(data)
+        im.close()
+
+        print('processed block {:03d}: {}'.format(i, block['path']))
+
+    im.close()
+    mo.close()
+
+
+def set_slices_in_and_out(im, mo, blocksize, margin, fullsize, blockoffset=[0, 0, 0]):
+
+    comps = im.split_path()
+    _, x, X, y, Y, z, Z = split_filename(comps['file'], blockoffset[:3][::-1])
+    (oz, oZ), (iz, iZ) = margins(z, Z, blocksize[0], margin[0], fullsize[0])
+    (oy, oY), (iy, iY) = margins(y, Y, blocksize[1], margin[1], fullsize[1])
+    (ox, oX), (ix, iX) = margins(x, X, blocksize[2], margin[2], fullsize[2])
+    im.slices[0] = slice(iz, iZ, 1)
+    im.slices[1] = slice(iy, iY, 1)
+    im.slices[2] = slice(ix, iX, 1)
+    mo.slices[0] = slice(oz, oZ, 1)
+    mo.slices[1] = slice(oy, oY, 1)
+    mo.slices[2] = slice(ox, oX, 1)
+
+
+def margins(fc, fC, blocksize, margin, fullsize):
+    """Return lower coordinate (fullstack and block) corrected for margin."""
+
+    if fc == 0:
+        bc = 0
+    else:
+        bc = 0 + margin
+        fc += margin
+
+    if fC == fullsize:
+        bC = bc + blocksize + (fullsize % blocksize)
+#         bC = bc + blocksize + 8 ==>>
+#         failed block 001: /Users/mkleinnijenhuis/PMCdata/Kidney/190909_RL57_FUnGI_16Bit_25x_zstack1-Masked_T001_Z001_C01/blocks_0500/190909_RL57_FUnGI_16Bit_25x_zstack1-Masked_T001_Z001_C01_00000-00564_00436-01024_00000-00150.h5/memb/sum
+#         Can't broadcast (150, 508, 500) -> (150, 524, 500)
+#         WHY 24??? ==>> fullsize is 1024; blocksize is 500; 3x3=9 blocks are created; blocks that fail are 1 3 4 5 7, block sthat succeeed are 0 2 6 8;
+
+    else:
+        bC = bc + blocksize
+        fC -= margin
+
+    return (fc, fC), (bc, bC)
 
 
 if __name__ == "__main__":
