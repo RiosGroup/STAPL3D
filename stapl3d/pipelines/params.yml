@@ -114,8 +114,9 @@ mask:
     distance_to_edge: true
 
 generate_mask:
+    mask_postfix: _mask
     conda:
-        env: stapl3d
+        env: segmentation
     submit:
         array: no
         nodes: 1
@@ -142,8 +143,15 @@ biasfield:
         tasks: 2
 
 bias_estimation:
+    bias_postfix: _biasfield
+    n_iterations: 50
+    n_fitlevels: 4
+    n_bspline_cps:
+        z: 5
+        y: 5
+        x: 5
     conda:
-        env: stapl3d
+        env: simpleitk
     submit:
         array: channel
         nodes: 1
@@ -153,7 +161,7 @@ bias_estimation:
 
 bias_stack:
     conda:
-        env: stapl3d
+        env: simpleitk
     submit:
         array: no
         nodes: 1
@@ -172,7 +180,7 @@ biasfield_apply:
 
 bias_apply:
     conda:
-        env: stapl3d
+        env: simpleitk
     submit:
         array: channel
         nodes: 1
@@ -182,7 +190,7 @@ bias_apply:
 
 ims_aggregate:
     conda:
-        env: stapl3d
+        env: segmentation
     submit:
         array: no
         nodes: 1
@@ -192,7 +200,7 @@ ims_aggregate:
 
 block_segmentation:
     conda:
-        env: stapl3d
+        env: segmentation
     submit:
         array: block
         nodes: 1
@@ -201,9 +209,10 @@ block_segmentation:
         wtime: 05:00:00
 
 splitblocks:
+    n_workers: 8
     bias_apply: true
     conda:
-        env: stapl3d
+        env: segmentation
     submit:
         array: block
         nodes: 1
@@ -212,10 +221,11 @@ splitblocks:
         wtime: 00:30:00
 
 membrane_enhancement:
+    n_workers: 8
     median_filter_par: 0.5
     membrane_filter_par: 1.1
     conda:
-        env: stapl3d
+        env: segmentation
     submit:
         array: block
         nodes: 1
@@ -224,6 +234,7 @@ membrane_enhancement:
         wtime: 01:00:00
 
 segmentation:
+    n_workers: 8
     ids_memb_mask: memb/planarity
     ids_memb_chan: memb/mean
     ids_nucl_chan: chan/ch00
@@ -231,7 +242,7 @@ segmentation:
     param_postfix: _params.yml
     segments_ods: labels_memb_del
     conda:
-        env: stapl3d
+        env: segmentation
     submit:
         array: block
         nodes: 1
@@ -286,7 +297,7 @@ segmentation:
 segmentation_postproc:
     postfix:
     conda:
-        env: stapl3d
+        env: segmentation
     submit:
         array: no
         nodes: 1
@@ -297,7 +308,7 @@ segmentation_postproc:
 segmentation_gather:
     postfix:
     conda:
-        env: stapl3d
+        env: segmentation
     submit:
         array: no
         nodes: 1
@@ -308,7 +319,7 @@ segmentation_gather:
 relabel:
     postfix: relabeled
     conda:
-        env: stapl3d
+        env: segmentation
     submit:
         array: block
         nodes: 1
@@ -319,7 +330,7 @@ relabel:
 relabel_gather:
     postfix: _relabeled
     conda:
-        env: stapl3d
+        env: segmentation
     submit:
         array: no
         nodes: 1
@@ -328,9 +339,9 @@ relabel_gather:
         wtime: 00:10:00
 
 copyblocks:
-    postfix: _relabeled
+    postfix: fix
     conda:
-        env: stapl3d
+        env: segmentation
     submit:
         array: block
         nodes: 1
@@ -341,7 +352,7 @@ copyblocks:
 copyblocks_gather:
     postfix: _relabeled_fix
     conda:
-        env: stapl3d
+        env: segmentation
     submit:
         array: no
         nodes: 1
@@ -355,7 +366,7 @@ zipping:
 zipping_gather:
     postfix: _relabeled_fix
     conda:
-        env: stapl3d
+        env: segmentation
     submit:
         array: no
         nodes: 1
@@ -365,7 +376,7 @@ zipping_gather:
 
 ziplines:
     conda:
-        env: stapl3d
+        env: segmentation
     submit:
         array: zipline
         nodes: 1
@@ -376,7 +387,7 @@ ziplines:
 zipquads:
     axis: 0
     conda:
-        env: stapl3d
+        env: segmentation
     submit:
         array: zipquad
         nodes: 1
@@ -386,7 +397,7 @@ zipquads:
 
 zipping_postproc:
     conda:
-        env: stapl3d
+        env: segmentation
     submit:
         array: no
         nodes: 1
@@ -398,7 +409,7 @@ copydataset:
     ids: /segm/labels_memb_del_relabeled_fix
     ods: /segm/labels_memb_del_relabeled_fix_full
     conda:
-        env: stapl3d
+        env: segmentation
     submit:
         array: block
         nodes: 1
@@ -406,10 +417,13 @@ copydataset:
         mem: 10G
         wtime: 00:10:00
 
-splitsegments:
+subsegment:
     ids: /segm/labels_memb_del_relabeled_fix
+    ods_full: segm/labels_memb_del_relabeled_fix_full
+    ods_memb: segm/labels_memb_del_relabeled_fix_memb
+    ods_nucl: segm/labels_memb_del_relabeled_fix_nucl
     conda:
-        env: stapl3d
+        env: segmentation
     submit:
         array: block
         nodes: 1
@@ -443,7 +457,7 @@ mergeblocks:
         format: ims
         postfix:
     conda:
-        env: stapl3d
+        env: segmentation
     submit:
         array: idss
         nodes: 1
@@ -460,7 +474,7 @@ features:
     featset_morph: maximal
     featset_intens: maximal
     conda:
-        env: stapl3d
+        env: segmentation
     submit:
         array: block
         nodes: 1
@@ -468,9 +482,10 @@ features:
         mem: 60G
         wtime: 02:00:00
 
+
 features_postproc:
     conda:
-        env: stapl3d
+        env: segmentation
     submit:
         array: no
         nodes: 1
