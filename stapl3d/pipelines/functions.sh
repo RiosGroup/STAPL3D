@@ -75,8 +75,12 @@ function load_parameters {
     bs="${dataset__bs}" && check_dims bs "$bs" || set_blocksize
     bm="${dataset__bm}" && check_dims bm "$bm" || bm=64
 
-    set_channelstems
+    dataset_preproc="${dataset}${shading__postfix}${stitching__postfix}${biasfield__postfix}"
+
+    set_channelstems "${dataset_preproc}"
+
     set_blocks "${bs}" "${bm}"
+
     echo "### parallelization: ${#channelstems[@]} channels"
     echo "### parallelization: ${#blockstems[@]} blocks (${nx} x ${ny}) of blocksize ${bs} with margin ${bm}"
     echo "###==========================================================================###"
@@ -191,7 +195,7 @@ function set_blocks {
     blocksize="$Z $bs $bs $C $T"
     blockmargin="0 $bm $bm 0 0"
     set_blockdims
-    set_blockstems
+    set_blockstems "${dataset_preproc}"
 
 }
 
@@ -263,7 +267,8 @@ function set_blockstems {
     # taking the form "dataset_x-X_y-Y_z-Z"
     # with voxel coordinates zero-padded to 5 digits
 
-    local verbose=$1
+    local dataset=$1
+    local verbose=$2
     local bx bX by bY bz bZ
     local dstem
 
@@ -353,6 +358,8 @@ function get_blockstem {
 
 
 function set_channelstems {
+
+    local dataset="$1"
 
     unset channelstems
     channelstems=()
@@ -1092,16 +1099,18 @@ function get_cmd_segmentation {
 }
 
 
-
+# TODO: move glob inside function
 function get_py_segmentation_postproc {
 
     echo '#!/usr/bin/env python'
     echo ''
-    echo "from stapl3d.reporting import merge_reports"
     echo "from glob import glob"
+    echo "from stapl3d.reporting import merge_reports"
+    echo "pdfs = glob('${blockdir}/${dataset_preproc}_?????-?????_?????-?????_?????-?????_seg.pdf')"
+    echo "pdfs.sort()"
     echo "merge_reports(
-        glob('${blockdir}/${dataset}${biasfield__postfix}_?????-?????_?????-?????_?????-?????_seg.pdf').sort(),
-        '${datadir}/${dataset}_seg.pdf',
+        pdfs,
+        '${datadir}/${dataset_preproc}_seg.pdf',
         )"
 
 }
@@ -1112,7 +1121,7 @@ function get_cmd_segmentation_postproc {
 
     echo python "${pyfile}"
 
-    echo "rm ${blockdir}/${dataset}${biasfield__postfix}_?????-?????_?????-?????_?????-?????_seg.pdf"
+    echo "rm ${blockdir}/${dataset_preproc}_?????-?????_?????-?????_?????-?????_seg.pdf"
 
 }
 
@@ -1141,13 +1150,11 @@ function get_cmd_relabel {
     pyfile="${datadir}/${jobname}.py"
     eval get_py_${stage} > "${pyfile}"
 
-    eval postfix="\${${stage}__postfix}"
-
     echo python "${pyfile}" \
         "\${blockstem}.h5/segm/${segmentation__segments_ods}" \
         "\${idx}" \
-        "${blockdir}/${dataset}_maxlabels_${segmentation__segments_ods}.txt" \
-        "${postfix}"
+        "${blockdir}/${dataset_preproc}_maxlabels.txt" \
+        "${relabel__postfix}"
 
 }
 
@@ -1172,10 +1179,8 @@ function get_cmd_copyblocks {
     pyfile="${datadir}/${jobname}.py"
     eval get_py_${stage} > "$pyfile"
 
-    eval postfix="\${${stage}__postfix}"
-
     echo python "${pyfile}" \
-    "\${blockstem}.h5/segm/${segmentation__segments_ods}${postfix}" \
+    "\${blockstem}.h5/segm/${segmentation__segments_ods}_${relabel__postfix}" \
     "\${idx}"
 
 }
@@ -1188,10 +1193,10 @@ function get_py_zipping {
     echo '#!/usr/bin/env python'
     echo ''
     echo 'import sys'
-    echo 'blocksize = [int(sys.argv[1], int(sys.argv[2], int(sys.argv[3]]'
-    echo 'blockmargin = [int(sys.argv[4], int(sys.argv[5], int(sys.argv[6]]'
+    echo 'blocksize = [int(sys.argv[1]), int(sys.argv[2]), int(sys.argv[3])]'
+    echo 'blockmargin = [int(sys.argv[4]), int(sys.argv[5]), int(sys.argv[6])]'
     echo 'axis = int(sys.argv[7])'
-    echo 'seamnumbers = [int(sys.argv[8], int(sys.argv[9], int(sys.argv[10]]'
+    echo 'seamnumbers = [int(sys.argv[8]), int(sys.argv[9]), int(sys.argv[10])]'
     echo 'maxlabelfile = sys.argv[11]'
     echo 'outputstem = sys.argv[12]'
     echo 'images_in = sys.argv[13:]'
@@ -1211,19 +1216,17 @@ function get_py_zipping {
         save_steps=False,
         )"
 
-
-
 }
 function get_cmd_zipping {
 
     pyfile="${datadir}/${jobname}.py"
-    eval get_py_${stage} > "$pyfile"
+    eval get_py_zipping > "$pyfile"
 
     local axis="${1}"
     local ids="segm/${segmentation__segments_ods}${zipping__postfix}"
 
     echo ''
-    echo set_images_in "${blockdir}/${dataset}" "${ids}"
+    echo set_images_in "${blockdir}/${dataset_preproc}" "${ids}"
     echo set_seamnumbers "${axis}" "\${SLURM_ARRAY_TASK_ID}" "${start_x}" "${start_y}" $((nx - 1)) $((ny - 1))
 
     echo python "${pyfile}" \
@@ -1231,22 +1234,25 @@ function get_cmd_zipping {
         "0" "${bm}" "${bm}" \
         "${axis}" \
         "\${seamnumbers}" \
-        "${blockdir}/${dataset}_maxlabels${zipping__postfix}.txt" \
-        "${blockdir}/${dataset}" \
+        "${blockdir}/${dataset_preproc}_maxlabels${zipping__postfix}.txt" \
+        "${blockdir}/${dataset_preproc}" \
         "\${images_in[@]}"
 
 }
 
 
+# TODO: move glob inside function
 function get_py_zipping_postproc {
 
     echo '#!/usr/bin/env python'
     echo ''
-    echo "from stapl3d.reporting import merge_reports"
     echo "from glob import glob"
+    echo "from stapl3d.reporting import merge_reports"
+    echo "pdfs = glob('${blockdir}/${dataset_preproc}_reseg_axis?-seam??-j???.pdf')"
+    echo "pdfs.sort()"
     echo "merge_reports(
-        glob('${blockdir}/${dataset}_reseg_axis?-seam??-j???-report.pdf').sort(),
-        '${datadir}/${dataset}_reseg-report.pdf',
+        pdfs,
+        '${datadir}/${dataset_preproc}_reseg.pdf',
         )"
 
 }
@@ -1257,7 +1263,7 @@ function get_cmd_zipping_postproc {
 
     echo python "${pyfile}"
 
-    echo "rm ${blockdir}/${dataset}_reseg_axis?-seam??-j???-report.pdf"
+    echo "rm ${blockdir}/${dataset_preproc}_reseg_axis?-seam??-j???.pdf"
 
 }
 
@@ -1272,10 +1278,9 @@ function get_cmd_gather {
     eval postfix="\${${stage}__postfix}"
 
     echo set_images_in \
-        "${blockdir}/${dataset}${biasfield__postfix}" \
+        "${blockdir}/${dataset_preproc}" \
         "segm/${segmentation__segments_ods}${postfix}"
-    echo maxlabelfile="${blockdir}/${dataset}${biasfield__postfix}_maxlabels${postfix}.txt"
-    # TODO: check carefully if postfix correct for each stage
+    echo maxlabelfile="${blockdir}/${dataset_preproc}_maxlabels${postfix}.txt"
     echo gather_maxlabels "\${maxlabelfile}"
 
 }
