@@ -355,32 +355,27 @@ def apply(
     image_in,
     parameter_file,
     outputdir='',
+    image_ref='',
     channels=[],
     downsample_factors={'z': 1, 'y': 1, 'x': 1, 'c': 1, 't': 1},
     blocksize_xy=1280,
     ):
     """Perform N4 bias field correction."""
 
-    step_id = 'biasfield'
+    step_id = 'biasfield_apply'
 
     outputdir = get_outputdir(image_in, parameter_file, outputdir, 'biasfield', 'biasfield')
 
     params = get_params(locals(), parameter_file, 'biasfield_apply')
 
     if not params['channels']:
-        im = Image(image_in, permission='r')
-        im.load()
-        n_channels = im.dims[im.axlab.index('c')]
+        props = get_imageprops(image_in)
+        n_channels = props['shape'][props['axlab'].index('c')]
         params['channels'] = list(range(n_channels))
-        im.close()
 
     n_workers = get_n_workers(len(params['channels']), params)
 
-    try:
-        subdir = dirs['datadir']['channels'] or ''
-    except KeyError:
-        subdir = 'channels'
-    channeldir = prep_outputdir('', image_in, subdir)
+    channeldir = get_outputdir(image_in, parameter_file, '', 'channels', 'channels')
 
     paths = get_paths(image_in)
     datadir, filename = os.path.split(paths['base'])
