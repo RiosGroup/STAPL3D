@@ -16,6 +16,8 @@ import matplotlib
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 
+import yaml
+
 import numpy as np
 
 from glob import glob
@@ -387,16 +389,24 @@ def apply(
     postfix = filestem.split(dataset)[-1]
     chstem_pat = '{}{}{}'.format(dataset, '_ch{:02d}', postfix)
 
+    with open(parameter_file, 'r') as ymlfile:
+        cfg = yaml.safe_load(ymlfile)
+
+    if params['copy_from_ref'] and not params['image_ref']:
+        filename = '{}{}.ims'.format(filestem, cfg['dataset']['ims_ref_postfix'])
+        params['image_ref'] = os.path.join(paths['dir'], filename)
+
     arglist = []
     for ch in params['channels']:
         chstem = chstem_pat.format(ch)
         os.path.join(channeldir, chstem)
-        bias_fname = '{}{}_ch{:02d}_{}.h5/bias'.format(dataset, postfix, ch, step_id)
+        bias_fname = '{}{}_ch{:02d}{}.h5/bias'.format(dataset, postfix, ch, cfg['biasfield']['postfix'])
         arglist.append(
             (
                 image_in,
                 os.path.join(outputdir, bias_fname),
-                os.path.join(channeldir, '{}_{}.ims'.format(chstem, step_id)),
+                os.path.join(channeldir, '{}{}.ims'.format(chstem, cfg['biasfield']['postfix'])),
+                params['image_ref'],
                 ch,
                 [params['downsample_factors'][dim] for dim in 'zyxct'],
                 params['blocksize_xy'],
@@ -411,6 +421,7 @@ def apply_channel(
     image_in,
     bias_in,
     image_out,
+    image_ref='',
     channel=None,
     downsample_factors=[1, 1, 1, 1, 1],
     blocksize_xy=1280,
@@ -423,6 +434,8 @@ def apply_channel(
     bf = Image(bias_in, permission='r')
     bf.load(load_data=False)
 
+    if image_ref:
+        shutil.copy2(image_ref, image_out)
     mo = Image(image_out)
     mo.load()
 

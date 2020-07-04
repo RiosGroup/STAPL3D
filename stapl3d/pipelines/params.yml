@@ -116,7 +116,7 @@ mask:
 generate_mask:
     mask_postfix: _mask
     conda:
-        env: segmentation
+        env: stapl3d
     submit:
         array: no
         nodes: 1
@@ -171,6 +171,7 @@ bias_stack:
         wtime: 00:30:00
 
 biasfield_apply:
+    copy_from_ref: true
     downsample_factors:
         z: 1
         y: 4
