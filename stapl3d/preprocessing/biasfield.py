@@ -252,8 +252,8 @@ def calculate_bias_field(im, mask=None,
 
     # run the N4 correction
     corrector = sitk.N4BiasFieldCorrectionImageFilter();
-    #corrector.SetNumberOfThreads(n_threads)
-    corrector.SetDebug(True)
+    corrector.SetDebug(False)
+    #corrector.SetNumberOfThreads(n_threads)  # FIXME: seems to have no effect
     corrector.SetMaximumNumberOfIterations([n_iter] * n_fitlev)
     corrector.SetNumberOfControlPoints(n_cps)
     if mask is None:
