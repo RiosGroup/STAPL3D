@@ -91,7 +91,7 @@ def split(
 
     params = get_params(locals(), parameter_file, step_id)
 
-    blocksize, blockmargin, blocks = get_blockinfo(image_in, par_file, params)
+    blocksize, blockmargin, blocks = get_blockinfo(image_in, parameter_file, params)
 
     n_workers = get_n_workers(len(blocks), params)
 
