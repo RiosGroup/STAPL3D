@@ -916,8 +916,9 @@ function get_cmd_bias_stack {
     eval get_py_${stage} > "${pyfile}"
 
     local channels_in=()
-    for chstem in "${channelstems[@]}"; do
-        channels_in+=("${biasfielddir}/${chstem}${biasfield__postfix}")
+    local stitch_stem="${biasfielddir}/${dataset}${shading__postfix}${stitching__postfix}"
+    for c in `seq 0 $(( C - 1 ))`; do
+        channels_in+=("${stitch_stem}_ch`printf %02d $c`${biasfield__postfix}")
     done
 
     echo python "${pyfile}" \
@@ -982,10 +983,11 @@ function get_cmd_ims_aggregate {
     pyfile="${datadir}/${jobname}.py"
     eval get_py_${stage} > "${pyfile}"
 
+    local chpat="${channeldir}/${dataset}_ch??${shading__postfix}${stitching__postfix}${biasfield__postfix}.ims"
     echo python "${pyfile}" \
         "\${biasfield_stem}.ims" \
         "\${stitching_stem}${dataset__ims_ref_postfix}.ims" \
-        "${channeldir}/${dataset}_ch??${biasfield__postfix}.ims"
+        `ls ${chpat}`
 
 }
 

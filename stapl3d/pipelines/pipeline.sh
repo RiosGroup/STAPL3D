@@ -10,7 +10,7 @@ dataset='HFK16w'
 
 load_dataset "${projectdir}" "${dataset}"
 cp "${STAPL3D}/pipelines/params.yml" "${datadir}/${dataset}.yml"
-set_ZYXCT_ims -v "${datadir}/${dataset}.ims"
+set_ZYXCT_ims -v "${datadir}/${dataset}_shading_stitching.ims"
 write_ZYXCT_to_yml ${dataset} "${datadir}/${dataset}_dims.yml"
 # [[ -f "${datadir}/${dataset}.yml" ]] || init_dataset 'copy_yaml'
 # [[ -f "${datadir}/${dataset}_dims.yml" ]] && init_dataset
@@ -27,6 +27,7 @@ submit $( generate_script shading_estimation ) $jid
 
 jid=''
 submit $( generate_script generate_mask ) $jid
+# submit $( generate_script splitchannels ) $jid  # TODO
 submit $( generate_script bias_estimation ) $jid
 submit $( generate_script bias_stack ) $jid
 submit $( generate_script bias_apply ) $jid
