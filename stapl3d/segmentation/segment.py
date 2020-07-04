@@ -128,7 +128,7 @@ def estimate(
     dset_mask_thr=1000,
     steps=[0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
     ):
-    """Perform N4 bias field correction."""
+    """Segment cells from membrane and nuclear channels."""
 
     step_id = 'segmentation'
 
