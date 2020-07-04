@@ -25,7 +25,9 @@ from skimage.measure import block_reduce
 
 from stapl3d import (
     get_n_workers,
+    get_outputdir,
     prep_outputdir,
+    get_imageprops,
     get_params,
     get_paths,
     Image,
@@ -88,12 +90,7 @@ def estimate(
 
     step_id = 'biasfield'
 
-    dirs = get_params(dict(), parameter_file, 'dirtree')
-    try:
-        subdir = dirs['datadir'][step_id] or ''
-    except KeyError:
-        subdir = step_id
-    outputdir = prep_outputdir(outputdir, image_in, subdir)
+    outputdir = get_outputdir(image_in, parameter_file, outputdir, step_id, step_id)
 
     params = get_params(locals(), parameter_file, step_id)
 
@@ -358,12 +355,7 @@ def apply(
 
     step_id = 'biasfield'
 
-    dirs = get_params(dict(), parameter_file, 'dirtree')
-    try:
-        subdir = dirs['datadir'][step_id] or ''
-    except KeyError:
-        subdir = step_id
-    outputdir = prep_outputdir(outputdir, image_in, subdir)
+    outputdir = get_outputdir(image_in, parameter_file, outputdir, 'biasfield', 'biasfield')
 
     params = get_params(locals(), parameter_file, 'biasfield_apply')
 

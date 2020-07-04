@@ -23,7 +23,9 @@ from scipy.ndimage.morphology import binary_fill_holes
 from scipy.ndimage import distance_transform_edt
 
 from stapl3d import (
+    get_outputdir,
     prep_outputdir,
+    get_imageprops,
     get_params,
     get_paths,
     Image,
@@ -81,12 +83,7 @@ def estimate(
 
     step_id = 'mask'
 
-    dirs = get_params(dict(), parameter_file, 'dirtree')
-    try:
-        subdir = dirs['datadir'][step_id] or ''
-    except KeyError:
-        subdir = step_id
-    outputdir = prep_outputdir(outputdir, image_in, subdir)
+    outputdir = get_outputdir(image_in, parameter_file, outputdir, step_id)
 
     params = get_params(locals(), parameter_file, step_id)
 
