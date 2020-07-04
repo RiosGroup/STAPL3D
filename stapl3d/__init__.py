@@ -2175,7 +2175,7 @@ def get_paths(image_in, resolution_level=-1, channel=0, outputstem='', step='', 
 
 def get_imageprops(image_in):
 
-    im = Image(image_in)
+    im = Image(image_in, permission='r')
     im.load(load_data=False)
     props = im.get_props()
     im.close()
