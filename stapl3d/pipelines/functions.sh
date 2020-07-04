@@ -619,17 +619,20 @@ function base_cmds {
     echo load_parameters "${dataset}"
     echo ''
 
+    echo idx="\$((SLURM_ARRAY_TASK_ID-1))"
+    echo filestem="${datadir}/${dataset}"
+    echo shading_stem="\${filestem}${shading__postfix}"
+    echo stitching_stem="\${shading_stem}${stitching__postfix}"
+    echo biasfield_stem="\${stitching_stem}${biasfield__postfix}"
+    echo channelstem="${channeldir}/\${channelstems[idx]}"
+    echo blockstem="${blockdir}/\${blockstems[idx]}"
+
 }
 
 
 function no_parallelization {
     # Generate directives for processing without parallelization.
 
-    echo "idx=\$((SLURM_ARRAY_TASK_ID-1))"
-    echo "filestem=${datadir}/${dataset}"
-    echo "shading_stem=\${filestem}${shading__postfix}"
-    echo "stitching_stem=\${shading_stem}${stitching__postfix}"
-    echo "biasfield_stem=\${stitching_stem}${biasfield__postfix}"
     echo ''
 
 }
@@ -638,12 +641,6 @@ function no_parallelization {
 function channel_parallelization {
     # Generate directives for parallel channels.
 
-    echo "idx=\$((SLURM_ARRAY_TASK_ID-1))"
-    echo "filestem=${datadir}/${dataset}"
-    echo "shading_stem=\${filestem}${shading__postfix}"
-    echo "stitching_stem=\${shading_stem}${stitching__postfix}"
-    echo "biasfield_stem=\${stitching_stem}${biasfield__postfix}"
-    echo "channelstem=${channeldir}/\${channelstems[idx]}"
     echo ''
 
 }
@@ -652,12 +649,6 @@ function channel_parallelization {
 function block_parallelization {
     # Generate directives for parallel blocks.
 
-    echo "idx=\$((SLURM_ARRAY_TASK_ID-1))"
-    echo "filestem=${datadir}/${dataset}"
-    echo "shading_stem=\${filestem}${shading__postfix}"
-    echo "stitching_stem=\${shading_stem}${stitching__postfix}"
-    echo "biasfield_stem=\${stitching_stem}${biasfield__postfix}"
-    echo "blockstem=${blockdir}/\${blockstems[idx]}"
     echo ''
 
 }
@@ -681,7 +672,6 @@ function idss_parallelization {
     # Generate directives for parallel channels.
 
     echo "set_idss ${stage}__ids..__ids= ="
-    echo "idx=\$((SLURM_ARRAY_TASK_ID-1))"
     echo ''
 
 }
