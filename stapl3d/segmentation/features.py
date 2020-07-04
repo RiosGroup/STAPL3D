@@ -1,182 +1,190 @@
 #!/usr/bin/env python
 
-"""Calculate regionprops of segments.
+"""Calculate features of segments.
 
 """
 
+import os
 import sys
 import argparse
+import logging
+import pickle
+import shutil
+import multiprocessing
 
-# conda install cython
-# conda install pytest
-# conda install pandas
-# pip install ~/workspace/scikit-image/  # scikit-image==0.16.dev0
-
-import os
 import re
 import glob
-import pickle
+import yaml
+
 import numpy as np
+
 import pandas as pd
+
 from scipy import ndimage as ndi
 from scipy.spatial import distance
-
-from stapl3d import Image, LabelImage, wmeMPI
-from stapl3d.channels import get_bias_field_block
 
 from skimage.measure import regionprops, regionprops_table
 from skimage.morphology import binary_dilation
 from skimage.segmentation import find_boundaries
 
-from stapl3d.segmentation.segment import extract_segments
+from stapl3d import (
+    get_outputdir,
+    get_params,
+    get_paths,
+    get_imageprops,
+    get_blockfiles,
+    get_blockinfo,
+    get_n_workers,
+    Image,
+    LabelImage,
+    wmeMPI,
+    )
+
+from stapl3d.blocks import get_bias_field_block
 
 
 def main(argv):
-    """Calculate regionprops of segments."""
+    """"Calculate features of segments.
+
+    """
 
     parser = argparse.ArgumentParser(
         description=__doc__,
         formatter_class=argparse.ArgumentDefaultsHelpFormatter
         )
     parser.add_argument(
-        '--seg_paths',
-        nargs='*',
-        help='paths to label volumes (xyz)',
-        )
-    parser.add_argument(
-        '--seg_names',
-        nargs='*',
-        help='names for (sub)segmentations',
-        )
-    parser.add_argument(
-        '--data_path',
-        nargs='*',
-        help='paths to data channels',
-        )
-    parser.add_argument(
-        '--data_names',
-        nargs='*',
-        help='names for channels',
-        )
-    parser.add_argument(
-        '--aux_data_path',
-        help='path to auxilliary data file (zyxc)',
-        )
-    parser.add_argument(
-        '--downsample_factors',
-        nargs='*',
-        type=int,
-        default=[],
-        help='the downsample factors applied to the aux_data_path image'
-        )
-    parser.add_argument(
-        '--csv_path',
-        default='',
-        help='path to output csv file',
-        )
-    parser.add_argument(
-        '-s', '--blocksize',
+        '-i', '--image_in',
         required=True,
-        nargs='*',
-        type=int,
-        default=[],
-        help='size of the datablock'
+        help='path to image file',
         )
     parser.add_argument(
-        '-m', '--blockmargin',
-        nargs='*',
-        type=int,
-        default=[],
-        help='the datablock overlap used'
+        'parameter_file',
+        help='path to yaml parameter file',
         )
     parser.add_argument(
-        '--blockrange',
-        nargs=2,
-        type=int,
-        default=[],
-        help='a range of blocks to process'
-        )
-    parser.add_argument(
-        '--channels',
-        nargs='*',
-        type=int,
-        default=[],
-        help='a list of channel indices to extract intensity features for'
-        )
-    parser.add_argument(
-        '-f', '--filter_borderlabels',
-        action='store_true',
-        help='save intermediate results'
-        )
-    parser.add_argument(
-        '--min_labelsize',
-        type=int,
-        default=0,
-        help='minimum labelsize in voxels',
-        )
-    parser.add_argument(
-        '--split_features',
-        action='store_true',
-        help='save intermediate results'
-        )
-    parser.add_argument(
-        '--fset_morph',
-        default=['label'],
-        help='morphology feature set',
-        )
-    parser.add_argument(
-        '--fset_intens',
-        default=['mean_intensity'],
-        help='intensity feature set',
-        )
-    parser.add_argument(
-        '--fset_addit',
-        default=['com_z', 'com_y', 'com_x'],
-        help='auxilliary feature set',
+        '-o', '--outputdir',
+        required=False,
+        help='path to output directory',
         )
 
     args = parser.parse_args()
 
-    export_regionprops(
-        args.seg_paths,
-        args.seg_names,
-        args.data_path,
-        args.data_names,
-        args.aux_data_path,
-        args.downsample_factors,
-        args.csv_path,
-        args.blocksize,
-        args.blockmargin,
-        args.blockrange,
-        args.channels,
-        args.filter_borderlabels,
-        args.min_labelsize,
-        args.split_features,
-        args.fset_morph,
-        args.fset_intens,
-        args.fset_addit,
+    estimate(args.image_in, args.parameter_file, args.outputdir)
+
+
+def estimate(
+    image_in,
+    parameter_file,
+    outputdir='',
+    blocks=[],
+    seg_paths=[],
+    seg_names=['full', 'memb', 'nucl'],
+    data_paths=[],
+    data_names=[],
+    aux_data_path=[],
+    downsample_factors=[1, 1, 1],
+    outputstem='',
+    blocksize=[],
+    blockmargin=[],
+    blockrange=[],
+    channels=[],
+    filter_borderlabels=False,
+    min_labelsize=0,
+    split_features=False,
+    fset_morph='minimal',
+    fset_intens='minimal',
+    fset_addit=[],
+    ):
+    """Calculate features of segments."""
+
+    step_id = 'features'
+
+    outputdir = get_outputdir(image_in, parameter_file, outputdir, step_id, 'blocks')
+
+    params = get_params(locals(), parameter_file, step_id)
+
+    filepaths, blocks = get_blockfiles(image_in, outputdir, params['blocks'])
+
+    blocksize, blockmargin, _ = get_blockinfo(image_in, parameter_file, params)
+
+    n_workers = get_n_workers(len(blocks), params)
+
+    with open(parameter_file, 'r') as ymlfile:
+        cfg = yaml.safe_load(ymlfile)
+    idss = [cfg['subsegment']['ods_{}'.format(seg_name)] for seg_name in seg_names]
+    datadir = get_outputdir(image_in, parameter_file, '', '', '')
+    dataset = os.path.splitext(get_paths(image_in)['fname'])[0]
+    filestem = os.path.join(datadir, dataset)
+    seg_paths = ['{}_{}.h5/{}'.format(filestem, ids.replace('/', '-'), ids) for ids in idss]
+
+    #outputstem = os.path.join(featdir, dataset) # TODO
+    # TODO: blocksize_xy like in biasfield apply???
+
+    if not params['data_names']:
+        props = get_imageprops(image_in)
+        n_channels = props['shape'][props['axlab'].index('c')]
+        params['data_names'] =  ['ch{:02d}'.format(ch) for ch in range(n_channels)]
+
+    # NOTE: copied from biasfield  # TODO: generalize
+    if isinstance(params['aux_data_path'], bool):
+        if params['aux_data_path']:
+            filestem = os.path.splitext(get_paths(image_in)['fname'])[0]
+            mpars = get_params(dict(), parameter_file, 'mask')
+            maskfile = '{}{}.h5/mask'.format(filestem, mpars['postfix'])
+            maskdir = get_outputdir(image_in, parameter_file, '', 'mask')
+            params['aux_data_path'] = os.path.join(maskdir, maskfile)
+
+    arglist = [
+        (
+            #['{}/{}'.format(filepath, ids) for ids in idss],
+            seg_paths,
+            params['seg_names'],
+            [image_in],
+            params['data_names'],
+            params['aux_data_path'],
+            params['downsample_factors'],
+            params['blocksize'],
+            params['blockmargin'],
+            [block_idx, block_idx + 1],
+            params['channels'],
+            params['filter_borderlabels'],
+            params['min_labelsize'],
+            params['split_features'],
+            params['fset_morph'],
+            params['fset_intens'],
+            params['fset_addit'],
+            outputdir,
         )
+        for block_idx, filepath in zip(blocks, filepaths)]
+
+    with multiprocessing.Pool(processes=n_workers) as pool:
+        pool.starmap(export_regionprops, arglist)
 
 
 def export_regionprops(
-        seg_paths,
-        seg_names=['full', 'memb', 'nucl'],
-        data_paths=[],
-        data_names=[],
-        aux_data_path=[],
-        downsample_factors=[1, 1, 1],
-        outputstem='',
-        blocksize=[],
-        blockmargin=[],
-        blockrange=[],
-        channels=[],
-        filter_borderlabels=False,
-        min_labelsize=0,
-        split_features=False,
-        fset_morph=['label'],
-        fset_intens=['mean_intensity'],
-        fset_addit=['com_z', 'com_y', 'com_x'],
-        ):
+    seg_paths,
+    seg_names=['full', 'memb', 'nucl'],
+    data_paths=[],
+    data_names=[],
+    aux_data_path=[],
+    downsample_factors=[1, 1, 1],
+    blocksize=[],
+    blockmargin=[],
+    blockrange=[],
+    channels=[],
+    filter_borderlabels=False,
+    min_labelsize=0,
+    split_features=False,
+    fset_morph='minimal',
+    fset_intens='minimal',
+    fset_addit=[],
+    outputdir='',
+    ):
+
+    # TODO: generalize
+    dataset = os.path.splitext(get_paths(data_paths[0])['fname'])[0]
+    filestem = os.path.join(outputdir, dataset)
+    outputstem = os.path.join(outputdir, filestem)
 
     # load the segments: ['full'] or ['full', 'memb', 'nucl']
     label_ims = {}
@@ -203,7 +211,8 @@ def export_regionprops(
         ch_idx = data.axlab.index('c')
         # FIXME channels for multiple data_paths
         chs = channels or [ch for ch in range(data.dims[ch_idx])]
-        names = [data_names.pop(0) for _ in range(len(chs))]
+        names = [data_names[ch] for ch in chs]
+        #names = [data_names.pop(0) for _ in range(len(chs))]
         data_ims[pf] = {'im': data, 'ch': chs, 'names': names}
         """ TODO
         try:
@@ -222,10 +231,9 @@ def export_regionprops(
 #        outstem += '_dataset'
 #        border_labelset |= filter_borders(label_ims['full'], outstem)
 
-    dfs = []
     for i in mpi_label.series:
         print('processing block {:03d} with id: {}'.format(i, mpi_label.blocks[i]['id']))
-        dfs.append(process_block(
+        process_block(
             mpi_label.blocks[i],
             mpi_data.blocks[i],
             label_ims,
@@ -242,9 +250,6 @@ def export_regionprops(
             aux_data_path,
             downsample_factors,
             )
-        )
-
-    return dfs
 
 
 def process_block(
@@ -315,10 +320,6 @@ def process_block(
         outstem += '_{}'.format(block_label['id'])
         csv_path = "{}_features_{}.csv".format(outstem, pf)
         df.to_csv(csv_path)
-
-    # TODO: close images
-
-    return df
 
 
 def filter_borders(label_im, outstem):
@@ -803,17 +804,18 @@ def select_features(dfs, feat_select, min_size=0, split_features=False):
 
     # create some compound features
     df4 = pd.DataFrame(index=df1.index)
-    comcols = ['centroid-0', 'centroid-1', 'centroid-2']
-    dfa = dfs['full'][comcols]
-    dfb = dfs['full'][comcols]
-    dfb[dfb.index.isin(dfs['nucl'].index)] = dfs['nucl'][comcols]
-    comcols = ['ch00_weighted_centroid-0', 'ch00_weighted_centroid-1', 'ch00_weighted_centroid-2']
-    dfc = dfs['full'][comcols]
-    #df4['dist_c'] = np.sqrt((np.square(np.array(dfa)-np.array(dfb)).sum(axis=1)))
-    #df4['dist_w'] = np.sqrt((np.square(np.array(dfa)-np.array(dfc)).sum(axis=1)))
-    #df4['dist_cn'] = df4['dist_c'] / dfs['full']['major_axis_length']
-    dist_w = np.sqrt((np.square(np.array(dfa)-np.array(dfc)).sum(axis=1)))
-    df4['polarity'] = dist_w / dfs['full']['major_axis_length']
+    if False:
+        comcols = ['centroid-0', 'centroid-1', 'centroid-2']
+        dfa = dfs['full'][comcols]
+        dfb = dfs['full'][comcols]
+        dfb[dfb.index.isin(dfs['nucl'].index)] = dfs['nucl'][comcols]
+        comcols = ['ch00_weighted_centroid-0', 'ch00_weighted_centroid-1', 'ch00_weighted_centroid-2']
+        dfc = dfs['full'][comcols]
+        #df4['dist_c'] = np.sqrt((np.square(np.array(dfa)-np.array(dfb)).sum(axis=1)))
+        #df4['dist_w'] = np.sqrt((np.square(np.array(dfa)-np.array(dfc)).sum(axis=1)))
+        #df4['dist_cn'] = df4['dist_c'] / dfs['full']['major_axis_length']
+        dist_w = np.sqrt((np.square(np.array(dfa)-np.array(dfc)).sum(axis=1)))
+        df4['polarity'] = dist_w / dfs['full']['major_axis_length']
 
     df = pd.concat([df1, df2, df3, df4], axis=1)
 
@@ -859,7 +861,7 @@ def get_feature_names(fset_morph='', fset_intens='', metrics=['mean']):
     else:
         feat_names['morphs'] = fset_morph
 
-    # TODO: generalize with arguments
+    # TODO: generalize with arguments (get from yaml file)
     d = {'markers': list(range(8)),
          'membrane': [3, 5, 6, 7],
          'nuclear': [0, 1, 2, 4],
@@ -880,22 +882,87 @@ def get_feature_names(fset_morph='', fset_intens='', metrics=['mean']):
     return feat_names
 
 
-def postprocess_features(
+def postproc(
+    image_in,
+    parameter_file,
+    outputdir='',
+    seg_paths=[],
+    blocksize=[],
+    blockmargin=[],
+    blockrange=[],
+    csv_dir='',
+    csv_stem='',
+    feat_pf='_features',
+    segm_pfs=['full', 'memb', 'nucl'],
+    ext='csv',
+    min_size_nucl=50,
+    save_border_labels=True,
+    split_features=False,
+    fset_morph='minimal',
+    fset_intens='minimal',
+    ):
+    """Generate a mask that covers the tissue."""
+
+    step_id = 'features_postproc'
+
+    outputdir = get_outputdir(image_in, parameter_file, outputdir, step_id, '')
+
+    params = get_params(locals(), parameter_file, step_id)
+
+    blocksize, blockmargin, _ = get_blockinfo(image_in, parameter_file, params)
+
+    with open(parameter_file, 'r') as ymlfile:
+        cfg = yaml.safe_load(ymlfile)
+    idss = [cfg['subsegment']['ods_{}'.format(seg_name)] for seg_name in cfg['features']['seg_names']]
+    datadir = get_outputdir(image_in, parameter_file, '', '', '')
+    dataset = os.path.splitext(get_paths(image_in)['fname'])[0]
+    filestem = os.path.join(datadir, dataset)
+    seg_paths = ['{}_{}.h5/{}'.format(filestem, ids.replace('/', '-'), ids) for ids in idss]
+
+    # NOTE: as outputdir in estimate
+    params['csv_dir'] = get_outputdir(image_in, parameter_file, params['csv_dir'], 'features', 'blocks')
+    # NOTE: as outputstem in export_regionprops
+    params['csv_stem'] = os.path.splitext(get_paths(image_in)['fname'])[0]
+
+    postprocess_features(
         seg_paths,
-        blocksize=[],
-        blockmargin=[],
-        blockrange=[],
-        csv_dir='',
-        csv_stem='',
-        feat_pf='_features',
-        segm_pfs=['full', 'memb', 'nucl'],
-        ext='csv',
-        min_size_nucl=50,
-        save_border_labels=False,
-        split_features=False,
-        fset_morph='minimal',
-        fset_intens='minimal',
-        ):
+        params['blocksize'],
+        params['blockmargin'],
+        params['blockrange'],
+        params['csv_dir'],
+        params['csv_stem'],
+        params['feat_pf'],
+        params['segm_pfs'],
+        params['ext'],
+        params['min_size_nucl'],
+        params['save_border_labels'],
+        params['split_features'],
+        params['fset_morph'],
+        params['fset_intens'],
+        outputdir,
+        )
+
+
+def postprocess_features(
+    seg_paths,
+    blocksize=[],
+    blockmargin=[],
+    blockrange=[],
+    csv_dir='',
+    csv_stem='',
+    feat_pf='_features',
+    segm_pfs=['full', 'memb', 'nucl'],
+    ext='csv',
+    min_size_nucl=50,
+    save_border_labels=True,
+    split_features=False,
+    fset_morph='minimal',
+    fset_intens='minimal',
+    outputdir='',
+    ):
+
+    if not outputdir:
+        outputdir = csv_dir
 
     labels = LabelImage(seg_paths[0], permission='r')
     labels.load(load_data=False)
@@ -925,8 +992,10 @@ def postprocess_features(
 
         # select features
         # metrics=['mean', 'median', 'variance', 'min', 'max']
-        metrics=['mean']
+        metrics=['mean'] # TODO
         feat_names = get_feature_names(fset_morph, fset_intens, metrics)
+        print(feat_names)
+        print(dfs['full'].columns)
         df = select_features(dfs, feat_names, min_size_nucl, split_features)
         #df = rename_columns(df, metrics=metrics)
 
@@ -956,7 +1025,7 @@ def postprocess_features(
 
     combined_df.drop_duplicates(subset='label', inplace=True)
 
-    outputpath = os.path.join(csv_dir, '{}{}.csv'.format(csv_stem, feat_pf))
+    outputpath = os.path.join(outputdir, '{}{}.csv'.format(csv_stem, feat_pf))
     combined_df.to_csv(outputpath, index=True, encoding='utf-8-sig')
 
     return combined_df
