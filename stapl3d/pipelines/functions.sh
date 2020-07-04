@@ -620,6 +620,9 @@ function no_parallelization {
 
     echo "idx=\$((SLURM_ARRAY_TASK_ID-1))"
     echo "filestem=${datadir}/${dataset}"
+    echo "shading_stem=\${filestem}${shading__postfix}"
+    echo "stitching_stem=\${shading_stem}${stitching__postfix}"
+    echo "biasfield_stem=\${stitching_stem}${biasfield__postfix}"
     echo ''
 
 }
@@ -630,6 +633,9 @@ function channel_parallelization {
 
     echo "idx=\$((SLURM_ARRAY_TASK_ID-1))"
     echo "filestem=${datadir}/${dataset}"
+    echo "shading_stem=\${filestem}${shading__postfix}"
+    echo "stitching_stem=\${shading_stem}${stitching__postfix}"
+    echo "biasfield_stem=\${stitching_stem}${biasfield__postfix}"
     echo "channelstem=${channeldir}/\${channelstems[idx]}"
     echo ''
 
@@ -641,6 +647,9 @@ function block_parallelization {
 
     echo "idx=\$((SLURM_ARRAY_TASK_ID-1))"
     echo "filestem=${datadir}/${dataset}"
+    echo "shading_stem=\${filestem}${shading__postfix}"
+    echo "stitching_stem=\${shading_stem}${stitching__postfix}"
+    echo "biasfield_stem=\${stitching_stem}${biasfield__postfix}"
     echo "blockstem=${blockdir}/\${blockstems[idx]}"
     echo ''
 
@@ -793,13 +802,13 @@ function get_py_shading_estimation {
     echo 'import sys'
     echo 'image_in = sys.argv[1]'
     echo 'parameter_file = sys.argv[2]'
-    echo 'channel = int(sys.argv[3])'
+    echo 'idx = int(sys.argv[3])'
     echo ''
     echo "from stapl3d.preprocessing import shading"
     echo "shading.estimate(
         image_in,
         parameter_file,
-        channels=[channel],
+        channels=[idx],
         )"
 
 }
@@ -837,7 +846,7 @@ function get_cmd_generate_mask {
     eval get_py_${stage} > "${pyfile}"
 
     echo python "${pyfile}" \
-        "\${filestem}.ims" \
+        "\${stitching_stem}.ims" \
         "\${filestem}.yml"
 
 }
@@ -850,15 +859,13 @@ function get_py_bias_estimation {
     echo 'import sys'
     echo 'image_in = sys.argv[1]'
     echo 'parameter_file = sys.argv[2]'
-    echo 'channel = int(sys.argv[3])'
-    echo 'mask_in = sys.argv[4]'
+    echo 'idx = int(sys.argv[3])'
     echo ''
     echo "from stapl3d.preprocessing import biasfield"
     echo "biasfield.estimate(
         image_in,
         parameter_file,
-        channels=[channel],
-        mask_in=mask_in,
+        channels=[idx],
         )"
 
 }
@@ -868,10 +875,9 @@ function get_cmd_bias_estimation {
     eval get_py_${stage} > "${pyfile}"
 
     echo python "${pyfile}" \
-        "\${filestem}.ims" \
+        "\${stitching_stem}.ims" \
         "\${filestem}.yml" \
-        "\${idx}" \
-        "\${filestem}${mask__postfix}.h5/mask"
+        "\${idx}"
 
 }
 
@@ -915,7 +921,7 @@ function get_cmd_bias_stack {
     done
 
     echo python "${pyfile}" \
-        "\${filestem}${biasfield__postfix}" \
+        "\${biasfield_stem}" \
         "${channels_in[@]}"
 
     # echo "rm ${biasfielddir}/${dataset}_ch??${biasfield__postfix}.pdf"
@@ -926,25 +932,18 @@ function get_cmd_bias_stack {
 
 function get_py_bias_apply {
 
-    # read from 4D, write to channel
     echo '#!/usr/bin/env python'
     echo ''
     echo 'import sys'
     echo 'image_in = sys.argv[1]'
     echo 'parameter_file = sys.argv[2]'
-    echo 'channel = int(sys.argv[3])'
-    echo 'bias_in = sys.argv[4]'
-    echo 'ref_path = sys.argv[5]'
-    echo 'outputpath = sys.argv[6]'
-    echo ''
-    echo 'import shutil'
-    echo 'shutil.copy2(ref_path, outputpath)'
+    echo 'idx = int(sys.argv[3])'
     echo ''
     echo "from stapl3d.preprocessing import biasfield"
     echo "biasfield.apply(
         image_in,
         parameter_file,
-        channels=[channel],
+        channels=[idx],
         )"
 
 }
@@ -954,12 +953,9 @@ function get_cmd_bias_apply {
     eval get_py_${stage} > "${pyfile}"
 
     echo python "${pyfile}" \
-        "\${filestem}.ims" \
+        "\${stitching_stem}.ims" \
         "\${filestem}.yml" \
-        "\${idx}" \
-        "\${filestem}${biasfield__postfix}.h5/bias" \
-        "\${filestem}${dataset__ims_ref_postfix}.ims" \
-        "\${channelstem}${biasfield__postfix}.ims"
+        "\${idx}"
 
 }
 
@@ -987,8 +983,8 @@ function get_cmd_ims_aggregate {
     eval get_py_${stage} > "${pyfile}"
 
     echo python "${pyfile}" \
-        "\${filestem}${biasfield__postfix}.ims" \
-        "\${filestem}${dataset__ims_ref_postfix}.ims" \
+        "\${biasfield_stem}.ims" \
+        "\${stitching_stem}${dataset__ims_ref_postfix}.ims" \
         "${channeldir}/${dataset}_ch??${biasfield__postfix}.ims"
 
 }
@@ -1025,7 +1021,7 @@ function get_cmd_splitblocks {
     eval get_py_${stage} > "${pyfile}"
 
     echo python "${pyfile}" \
-        "\${filestem}${biasfield__postfix}.ims" \
+        "\${biasfield_stem}.ims" \
         "\${filestem}.yml" \
         "\${idx}"
 
@@ -1039,13 +1035,13 @@ function get_py_membrane_enhancement {
     echo 'import sys'
     echo 'image_in = sys.argv[1]'
     echo 'parameter_file = sys.argv[2]'
-    echo 'block_idx = int(sys.argv[3])'
+    echo 'idx = int(sys.argv[3])'
     echo ''
-    echo "from stapl3d.segmentation import membrane_enhancement"
-    echo "membrane_enhancement.estimate(
+    echo "from stapl3d.segmentation import enhance"
+    echo "enhance.estimate(
         image_in,
         parameter_file,
-        blocks=[block_idx],
+        blocks=[idx],
         )"
 }
 function get_cmd_membrane_enhancement {
@@ -1054,7 +1050,7 @@ function get_cmd_membrane_enhancement {
     eval get_py_${stage} > "${pyfile}"
 
     echo python "${pyfile}" \
-        "\${filestem}${biasfield__postfix}.ims" \
+        "\${biasfield_stem}.ims" \
         "\${filestem}.yml" \
         "\${idx}"
 
@@ -1072,13 +1068,13 @@ function get_py_segmentation {
     echo 'import sys'
     echo 'image_in = sys.argv[1]'
     echo 'parameter_file = sys.argv[2]'
-    echo 'block_idx = int(sys.argv[3])'
+    echo 'idx = int(sys.argv[3])'
     echo ''
     echo "from stapl3d.segmentation import segment"
     echo "segment.estimate(
         image_in,
         parameter_file,
-        blocks=[block_idx],
+        blocks=[idx],
         )"
 }
 function get_cmd_segmentation {
@@ -1087,19 +1083,34 @@ function get_cmd_segmentation {
     eval get_py_${stage} > "${pyfile}"
 
     echo python "${pyfile}" \
-        "\${filestem}${biasfield__postfix}.ims" \
+        "\${biasfield_stem}.ims" \
         "\${filestem}.yml" \
         "\${idx}"
 
 }
 
 
+
+function get_py_segmentation_postproc {
+
+    echo '#!/usr/bin/env python'
+    echo ''
+    echo "from stapl3d.reporting import merge_reports"
+    echo "from glob import glob"
+    echo "merge_reports(
+        glob('${blockdir}/${dataset}${biasfield__postfix}_?????-?????_?????-?????_?????-?????_seg.pdf').sort(),
+        '${datadir}/${dataset}_seg.pdf',
+        )"
+
+}
 function get_cmd_segmentation_postproc {
 
-    echo pdfunite \
-        "${blockdir}/${dataset}${biasfield__postfix}_?????-?????_?????-?????_?????-?????_seg-report.pdf" \
-        "\${filestem}_seg-report.pdf"
-    echo "rm ${blockdir}/${dataset}${biasfield__postfix}_?????-?????_?????-?????_?????-?????_seg-report.pdf"
+    pyfile="${datadir}/${jobname}.py"
+    eval get_py_${stage} > "${pyfile}"
+
+    echo python "${pyfile}"
+
+    echo "rm ${blockdir}/${dataset}${biasfield__postfix}_?????-?????_?????-?????_?????-?????_seg.pdf"
 
 }
 
@@ -1110,14 +1121,14 @@ function get_py_relabel {
     echo ''
     echo 'import sys'
     echo 'image_in = sys.argv[1]'
-    echo 'block_idx = int(sys.argv[2])'
+    echo 'idx = int(sys.argv[2])'
     echo 'maxlabelfile = sys.argv[3]'
     echo 'postfix = sys.argv[4]'
     echo ''
     echo 'from stapl3d.segmentation.zipping import relabel_parallel'
     echo "relabel_parallel(
         image_in,
-        block_idx,
+        idx,
         maxlabelfile,
         pf=postfix,
         )"
@@ -1133,7 +1144,7 @@ function get_cmd_relabel {
     echo python "${pyfile}" \
         "\${blockstem}.h5/segm/${segmentation__segments_ods}" \
         "\${idx}" \
-        "${blockdir}/${dataset}_maxlabels.txt" \
+        "${blockdir}/${dataset}_maxlabels_${segmentation__segments_ods}.txt" \
         "${postfix}"
 
 }
@@ -1145,12 +1156,12 @@ function get_py_copyblocks {
     echo ''
     echo 'import sys'
     echo 'image_in = sys.argv[1]'
-    echo 'block_idx = int(sys.argv[2])'
+    echo 'idx = int(sys.argv[2])'
     echo ''
     echo 'from stapl3d.segmentation.zipping import copy_blocks_parallel'
     echo "copy_blocks_parallel(
         image_in,
-        block_idx,
+        idx,
         )"
 
 }
@@ -1170,7 +1181,41 @@ function get_cmd_copyblocks {
 
 function get_cmd_ziplines { get_cmd_zipping "${axis}" ; }
 function get_cmd_zipquads { get_cmd_zipping "${zipquads__axis}" ; }
+function get_py_zipping {
+
+    echo '#!/usr/bin/env python'
+    echo ''
+    echo 'import sys'
+    echo 'blocksize = [int(sys.argv[1], int(sys.argv[2], int(sys.argv[3]]'
+    echo 'blockmargin = [int(sys.argv[4], int(sys.argv[5], int(sys.argv[6]]'
+    echo 'axis = int(sys.argv[7])'
+    echo 'seamnumbers = [int(sys.argv[8], int(sys.argv[9], int(sys.argv[10]]'
+    echo 'maxlabelfile = sys.argv[11]'
+    echo 'outputstem = sys.argv[12]'
+    echo 'images_in = sys.argv[13:]'
+    echo ''
+    echo 'from stapl3d.segmentation.zipping import resegment_block_boundaries'
+    echo "resegment_block_boundaries(
+        images_in,
+        blocksize,
+        blockmargin,
+        axis,
+        seamnumbers,
+        mask_dataset='',
+        relabel=False,
+        maxlabel=maxlabelfile,
+        in_place=True,
+        outputstem=outputstem,
+        save_steps=False,
+        )"
+
+
+
+}
 function get_cmd_zipping {
+
+    pyfile="${datadir}/${jobname}.py"
+    eval get_py_${stage} > "$pyfile"
 
     local axis="${1}"
     local ids="segm/${segmentation__segments_ods}${zipping__postfix}"
@@ -1179,19 +1224,38 @@ function get_cmd_zipping {
     echo set_images_in "${blockdir}/${dataset}" "${ids}"
     echo set_seamnumbers "${axis}" "\${SLURM_ARRAY_TASK_ID}" "${start_x}" "${start_y}" $((nx - 1)) $((ny - 1))
 
-    echo python -W ignore "${STAPL3D}/segmentation/zipping.py" \
-        -i "\${images_in[@]}" \
-        -s "${Z}" "${bs}" "${bs}" \
-        -m 0 "${bm}" "${bm}" \
-        -A ${axis} -L "\${seamnumbers}" \
-        -p -l "${blockdir}/${dataset}_maxlabels${zipping__postfix}.txt" \
-        -o "${blockdir}/${dataset}"
+    echo python "${pyfile}" \
+        "${Z}" "${bs}" "${bs}" \
+        "0" "${bm}" "${bm}" \
+        "${axis}" \
+        "\${seamnumbers}" \
+        "${blockdir}/${dataset}_maxlabels${zipping__postfix}.txt" \
+        "${blockdir}/${dataset}" \
+        "\${images_in[@]}"
+
+}
+
+
+function get_py_zipping_postproc {
+
+    echo '#!/usr/bin/env python'
+    echo ''
+    echo "from stapl3d.reporting import merge_reports"
+    echo "from glob import glob"
+    echo "merge_reports(
+        glob('${blockdir}/${dataset}_reseg_axis?-seam??-j???-report.pdf').sort(),
+        '${datadir}/${dataset}_reseg-report.pdf',
+        )"
 
 }
 function get_cmd_zipping_postproc {
 
-    echo pdfunite "${blockdir}/${dataset}_reseg_axis?-seam??-j???-report.pdf" "${datadir}/${dataset}_reseg-report.pdf"
-    echo rm "${blockdir}/${dataset}_reseg_axis?-seam??-j???-report.pdf"
+    pyfile="${datadir}/${jobname}.py"
+    eval get_py_${stage} > "${pyfile}"
+
+    echo python "${pyfile}"
+
+    echo "rm ${blockdir}/${dataset}_reseg_axis?-seam??-j???-report.pdf"
 
 }
 
@@ -1209,145 +1273,114 @@ function get_cmd_gather {
         "${blockdir}/${dataset}${biasfield__postfix}" \
         "segm/${segmentation__segments_ods}${postfix}"
     echo maxlabelfile="${blockdir}/${dataset}${biasfield__postfix}_maxlabels${postfix}.txt"
+    # TODO: check carefully if postfix correct for each stage
     echo gather_maxlabels "\${maxlabelfile}"
 
 }
 
 
-function get_py_copydataset {
+function get_py_subsegment {
 
     echo '#!/usr/bin/env python'
     echo ''
     echo 'import sys'
-    echo 'filestem = sys.argv[1]'
-    echo 'ids = sys.argv[2]'
-    echo 'ods = sys.argv[3]'
+    echo 'image_in = sys.argv[1]'
+    echo 'parameter_file = sys.argv[2]'
+    echo 'idx = int(sys.argv[3])'
     echo ''
-    echo "from stapl3d import LabelImage"
-    echo "im = LabelImage('{}.h5{}'.format(filestem, ids))"
-    echo "im.load(load_data=False)"
-    echo "im.file[ods] = im.file[ids]"
-    echo "im.close()"
+    echo 'from stapl3d.segmentation import segment'
+    echo "segment.subsegment(
+        image_in,
+        parameter_file,
+        blocks=[idx],
+        )"
 
 }
-function get_cmd_copydataset {
+function get_cmd_subsegment {
 
     pyfile="${datadir}/${jobname}.py"
     eval get_py_${stage} > "$pyfile"
 
-    echo "python ${pyfile} \${blockstem} ${copydataset__ids} ${copydataset__ods}"
+    echo python "${pyfile}" \
+        "\${biasfield_stem}.ims" \
+        "\${filestem}.yml" \
+        "\${idx}"
 
 }
 
 
-function get_py_splitsegments {
+function get_py_mergeblocks {
 
     echo '#!/usr/bin/env python'
     echo ''
     echo 'import sys'
-    echo 'filestem = sys.argv[1]'
-    echo 'ids = sys.argv[2]'
+    echo 'image_in = sys.argv[1]'
+    echo 'parameter_file = sys.argv[2]'
+    echo 'idx = int(sys.argv[3])'
     echo ''
-    echo 'from stapl3d.segmentation.segment import split_segments'
-    echo "split_segments('{}.h5{}'.format(filestem, ids), outputstem=filestem)"
+    echo 'from stapl3d import blocks'
+    echo "blocks.merge(
+        image_in,
+        parameter_file,
+        blocks=[idx],
+        )"
 
 }
-function get_cmd_splitsegments {
-
-    pyfile="${datadir}/${jobname}.py"
-    eval get_py_${stage} > "$pyfile"
-
-    echo "python ${pyfile} \${blockstem} ${splitsegments__ids}"
-
-}
-
-
 function get_cmd_mergeblocks {
 
-    echo idxf=\`printf %02g \${idx}\`
-    echo eval format="\\\${mergeblocks__ids\${idxf}__format}"
-    echo eval ids="\\\${mergeblocks__ids\${idxf}__ids}"
-    echo ''
-    echo mergeblocks_outputpath \${format} \${ids}
-    echo ''
-    echo set_images_in "${blockdir}/${dataset}" "\${ids}"
-    echo ''
+    pyfile="${datadir}/${jobname}.py"
+    eval get_py_${stage} > "$pyfile"
 
-    echo python -W ignore "${STAPL3D}/mergeblocks.py" \
-        "\${images_in[@]}" \
-        "\${out_path}" \
-        --blocksize "${blocksize}" \
-        --blockmargin "${blockmargin}" \
-        -s "${Z}" "${Y}" "${X}"
+    echo python "${pyfile}" \
+        "\${biasfield_stem}.ims" \
+        "\${filestem}.yml" \
+        "\${idx}"
 
 }
 
 
-function get_cmd_features {
-
-    channel_names=( 'ch00' 'ch01' 'ch02' 'ch03' 'ch04' 'ch05' 'ch06' 'ch07' )
-    ids='segm/labels_memb_del_relabeled_fix'
-
-    local ids="${features__ids}"
-    local pf0="${features__segm00}"
-    local pf1="${features__segm01}"
-    local pf2="${features__segm02}"
-
-    blockrange_start='$((SLURM_ARRAY_TASK_ID-1))'
-    blockrange_end='$((SLURM_ARRAY_TASK_ID))'
-
-    echo python -W ignore "${STAPL3D}/segmentation/features.py" \
-        --seg_paths \
-            "${datadir}/${dataset}_${ids////-}_${pf0}.h5/${ids}_${pf0}" \
-            "${datadir}/${dataset}_${ids////-}_${pf1}.h5/${ids}_${pf1}" \
-            "${datadir}/${dataset}_${ids////-}_${pf2}.h5/${ids}_${pf2}" \
-        --seg_names ${pf0} ${pf1} ${pf2} \
-        --data_path "${datadir}/${dataset}${biasfield__postfix}.ims" \
-        --data_names "${channel_names[@]}" \
-        --aux_data_path "${datadir}/${dataset}${generate_mask__mask_postfix}.h5/mask_thr00000_edt" \
-        --downsample_factors "1 ${dataset__dsr} ${dataset__dsr}" \
-        --csv_path "${featdir}/${dataset}" \
-        --blocksize "${blocksize}" \
-        --blockmargin "${blockmargin}" \
-        --blockrange "${blockrange_start} ${blockrange_end}" \
-        --min_labelsize "${features__min_labelsize}" \
-        --filter_borderlabels \
-        --split_features \
-        --fset_morph "${features__featset_morph}" \
-        --fset_intens "${features__featset_intens}"
-
-}
-
-
-function get_py_features_postproc {
-
-    local ids="${features__ids}"
-    local pf0="${features__segm00}"
-    local pf1="${features__segm01}"
-    local pf2="${features__segm02}"
+function get_py_features {
 
     echo '#!/usr/bin/env python'
     echo ''
-    echo 'from stapl3d.segmentation.features import export_regionprops'
-    echo "export_regionprops.postprocess_features(
-        seg_paths=[
-            '${datadir}/${dataset}_${ids////-}_${pf0}.h5/${ids}_${pf0}',
-            '${datadir}/${dataset}_${ids////-}_${pf1}.h5/${ids}_${pf1}',
-            '${datadir}/${dataset}_${ids////-}_${pf2}.h5/${ids}_${pf2}',
-            ],
-        blocksize=[$Z, $bs, $bs, $C, $T],
-        blockmargin=[0, $bm, $bm, 0, 0],
-        blockrange=[],
-        csv_dir='${featdir}',
-        csv_stem='${dataset}',
-        feat_pf='_features',
-        segm_pfs=['${pf0}', '${pf1}', '${pf2}'],
-        ext='csv',
-        min_size_nucl=${features__min_labelsize},
-        save_border_labels=True,
-        split_features=True,
-        fset_morph='${features__featset_morph}',
-        fset_intens='${features__featset_intens}',
+    echo 'import sys'
+    echo 'image_in = sys.argv[1]'
+    echo 'parameter_file = sys.argv[2]'
+    echo 'idx = int(sys.argv[3])'
+    echo ''
+    echo 'from stapl3d.segmentation import features'
+    echo "features.estimate(
+        image_in,
+        parameter_file,
+        blocks=[idx],
+        )"
+
+}
+function get_cmd_features {
+
+    pyfile="${datadir}/${jobname}.py"
+    eval get_py_${stage} > "$pyfile"
+
+    echo python "${pyfile}" \
+        "\${biasfield_stem}.ims" \
+        "\${filestem}.yml" \
+        "\${idx}"
+
+}
+function get_py_features_postproc {
+
+    echo '#!/usr/bin/env python'
+    echo ''
+    echo 'import sys'
+    echo 'image_in = sys.argv[1]'
+    echo 'parameter_file = sys.argv[2]'
+    echo 'idx = int(sys.argv[3])'
+    echo ''
+    echo 'from stapl3d.segmentation import features'
+    echo "features.postproc(
+        image_in,
+        parameter_file,
+        blocks=[idx],
         )"
 
 }
@@ -1356,6 +1389,9 @@ function get_cmd_features_postproc {
     pyfile="${datadir}/${jobname}.py"
     eval get_py_${stage} > "$pyfile"
 
-    echo "python ${pyfile}"
+    echo python "${pyfile}" \
+        "\${biasfield_stem}.ims" \
+        "\${filestem}.yml" \
+        "\${idx}"
 
 }

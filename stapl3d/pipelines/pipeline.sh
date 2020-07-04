@@ -9,7 +9,11 @@ projectdir='/hpc/pmc_rios/Kidney'
 dataset='HFK16w'
 
 load_dataset "${projectdir}" "${dataset}"
-[[ -z "${datadir}/${dataset}.yml" ]] && init_dataset
+cp "${STAPL3D}/pipelines/params.yml" "${datadir}/${dataset}.yml"
+set_ZYXCT_ims -v "${datadir}/${dataset}.ims"
+write_ZYXCT_to_yml ${dataset} "${datadir}/${dataset}_dims.yml"
+# [[ -f "${datadir}/${dataset}.yml" ]] || init_dataset 'copy_yaml'
+# [[ -f "${datadir}/${dataset}_dims.yml" ]] && init_dataset
 
 load_parameters "${dataset}" -v
 
@@ -69,8 +73,7 @@ submit $( generate_script zipping_postproc ) $jid
 
 ###==========================================================================###
 ### merging
-submit $( generate_script copydataset ) $jid
-submit $( generate_script splitsegments ) $jid
+submit $( generate_script subsegment ) $jid
 submit $( generate_script mergeblocks ) $jid
 
 ###==========================================================================###
