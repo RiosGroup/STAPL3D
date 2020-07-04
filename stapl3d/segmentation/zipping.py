@@ -84,6 +84,7 @@ def estimate(
     outputdir='',
     blocksize=[],
     blockmargin=[],
+    blockrange=[],
     blocks=[],
     grp='segm',
     ids='labels_memb_del_relabeled_fix',
@@ -131,8 +132,8 @@ def estimate(
     Y = im.dims[im.axlab.index('y')]
     im.close()
     from math import ceil
-    nx = int(ceil(X/bs))
-    ny = int(ceil(Y/bs))
+    nx = int(ceil(X/blocksize[im.axlab.index('x')]))
+    ny = int(ceil(Y/blocksize[im.axlab.index('y')]))
     n_seams_yx = [ny - 1, nx - 1]
     seams = list(range(np.prod(n_seams_yx)))
     seamgrid = np.reshape(seams, n_seams_yx)
