@@ -95,11 +95,9 @@ def estimate(
     params = get_params(locals(), parameter_file, step_id)
 
     if not params['channels']:
-        im = Image(image_in, permission='r')
-        im.load()
-        n_channels = im.dims[im.axlab.index('c')]
+        props = get_imageprops(image_in)
+        n_channels = props['shape'][props['axlab'].index('c')]
         params['channels'] = list(range(n_channels))
-        im.close()
 
     n_workers = get_n_workers(len(params['channels']), params)
 
