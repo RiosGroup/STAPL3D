@@ -483,12 +483,14 @@ mergeblocks:
 
 features:
     ids: segm/labels_memb_del_relabeled_fix
-    segm00: full
-    segm01: memb
-    segm02: nucl
+    seg_names:
+        - full
+        - memb
+        - nucl
     min_labelsize: 50
-    featset_morph: maximal
-    featset_intens: maximal
+    fset_morph: minimal
+    fset_intens: minimal
+    blocksize_xy: 1280
     conda:
         env: stapl3d
     submit:

@@ -1364,6 +1364,8 @@ function get_cmd_features {
         "\${idx}"
 
 }
+
+
 function get_py_features_postproc {
 
     echo '#!/usr/bin/env python'
@@ -1371,13 +1373,11 @@ function get_py_features_postproc {
     echo 'import sys'
     echo 'image_in = sys.argv[1]'
     echo 'parameter_file = sys.argv[2]'
-    echo 'idx = int(sys.argv[3])'
     echo ''
     echo 'from stapl3d.segmentation import features'
     echo "features.postproc(
         image_in,
         parameter_file,
-        blocks=[idx],
         )"
 
 }
@@ -1388,7 +1388,6 @@ function get_cmd_features_postproc {
 
     echo python "${pyfile}" \
         "\${biasfield_stem}.ims" \
-        "\${filestem}.yml" \
-        "\${idx}"
+        "\${filestem}.yml"
 
 }
