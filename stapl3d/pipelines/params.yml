@@ -166,7 +166,7 @@ bias_estimation:
         y: 5
         x: 5
     conda:
-        env: simpleitk
+        env: stapl3d
     submit:
         array: channel
         nodes: 1
@@ -176,7 +176,7 @@ bias_estimation:
 
 bias_stack:
     conda:
-        env: simpleitk
+        env: stapl3d
     submit:
         array: no
         nodes: 1
@@ -196,7 +196,7 @@ biasfield_apply:
 
 bias_apply:
     conda:
-        env: simpleitk
+        env: stapl3d
     submit:
         array: channel
         nodes: 1
@@ -206,7 +206,7 @@ bias_apply:
 
 ims_aggregate:
     conda:
-        env: segmentation
+        env: stapl3d
     submit:
         array: no
         nodes: 1
