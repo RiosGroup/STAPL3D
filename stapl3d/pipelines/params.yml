@@ -126,6 +126,7 @@ generate_mask:
 
 biasfield:
     postfix: _biasfield
+    mask_in: true
     resolution_level: 1
     downsample_factors:
         z: 1

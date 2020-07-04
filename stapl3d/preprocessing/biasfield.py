@@ -103,6 +103,14 @@ def estimate(
 
     n_workers = get_n_workers(len(params['channels']), params)
 
+    if isinstance(params['mask_in'], bool):
+        if params['mask_in']:
+            filestem = os.path.splitext(get_paths(image_in)['fname'])[0]
+            mpars = get_params(dict(), parameter_file, 'mask')
+            maskfile = '{}{}.h5/mask'.format(filestem, mpars['postfix'])
+            maskdir = get_outputdir(image_in, parameter_file, '', 'mask')
+            params['mask_in'] = os.path.join(maskdir, maskfile)
+
     arglist = [
         (
             image_in,
