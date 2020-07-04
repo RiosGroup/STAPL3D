@@ -1,50 +1,122 @@
 import os
+import sys
+import argparse
+import logging
+import pickle
+import shutil
+import multiprocessing
+
 import pathlib
 import h5py
-import shutil
+
 import numpy as np
-from stapl3d import Image
+
+import yaml
+
+from stapl3d import (
+    get_n_workers,
+    get_outputdir,
+    prep_outputdir,
+    get_imageprops,
+    get_params,
+    get_paths,
+    Image,
+    )
+
+def split_channels(
+    image_in,
+    parameter_file,
+    outputdir='',
+    channels=[],
+    image_ref='',
+    outputpat='',
+    channel_re='_ch{:02d}',
+    insert=False,
+    replace=False,
+    ):
+    """Split imarisfile into separate channels."""
+
+    step_id = 'splitchannels'
+
+    outputdir = get_outputdir(image_in, parameter_file, outputdir, step_id, 'channels')
+
+    params = get_params(locals(), parameter_file, step_id)
+
+    if not params['channels']:
+        props = get_imageprops(image_in)
+        n_channels = props['shape'][props['axlab'].index('c')]
+        params['channels'] = list(range(n_channels))
+
+    n_workers = get_n_workers(len(params['channels']), params)
+
+    with open(parameter_file, 'r') as ymlfile:
+        cfg = yaml.safe_load(ymlfile)
+
+    paths = get_paths(image_in)
+    filestem = os.path.splitext(paths['fname'])[0]
+
+    if not params['image_ref']:
+        filename = '{}{}.ims'.format(filestem, cfg['dataset']['ims_ref_postfix'])
+        params['image_ref'] = os.path.join(paths['dir'], filename)
+
+    if not params['outputpat']:
+        params['outputpat'] = '{}{}.ims'.format(filestem, params['channel_re'])
+        if params['insert']:
+            dataset = cfg['dataset']['name']
+            postfix = filestem.split(dataset)[-1]
+            params['outputpat'] = '{}{}{}.ims'.format(dataset, params['channel_re'], postfix)
+
+    arglist = [
+        (
+            image_in,
+            params['image_ref'],
+            ch,
+            os.path.join(outputdir, params['outputpat'].format(ch)),
+        )
+        for ch in params['channels']]
+
+    with multiprocessing.Pool(processes=n_workers) as pool:
+        pool.starmap(extract_channel, arglist)
+
+    if params['replace']:
+        channel_paths = [os.path.join(outputdir, params['outputpat'].format(ch))
+                         for ch in params['channels']]
+        make_aggregate(channel_paths, image_in, params['image_ref'])
 
 
-def split_channels(ims_path, ref_path, channels=[], outputpat=''):
+def extract_channel(ims_path, ref_path, channel, outputpath):
     """Split an imarisfile into channels."""
 
     f = h5py.File(ims_path, 'r')
     n_channels = len(f['/DataSet/ResolutionLevel 0/TimePoint 0'])
     n_reslev = len(f['/DataSet'])
 
-    if not channels:
-        channels = list(range(n_channels))
-    if not outputpat:
-        outputpat = '{}{}.ims'.format(os.path.splitext(ims_path)[0], '_ch{:02d}')
+    outputdir = os.path.dirname(outputpath)
+    os.makedirs(outputdir, exist_ok=True)
+    shutil.copy2(ref_path, outputpath)
+    g = h5py.File(outputpath, 'r+')
 
-    for ch in channels:
+    diloc = '/DataSetInfo'
+    chloc = '{}/Channel {}'.format(diloc, channel)
+    g.require_group(diloc)
+    try:
+        del g['{}/Channel {}'.format(diloc, 0)]
+    except KeyError:
+        pass
+    f.copy(f[chloc], g[diloc], name='Channel 0')
 
-        outpath = outputpat.format(ch)
-        shutil.copy2(ref_path, outpath)
-        g = h5py.File(outpath, 'r+')
+    for rl in range(n_reslev):
 
-        diloc = '/DataSetInfo'
-        chloc = '{}/Channel {}'.format(diloc, ch)
-        g.require_group(diloc)
+        tploc = '/DataSet/ResolutionLevel {}/TimePoint 0'.format(rl)
+        chloc = '{}/Channel {}'.format(tploc, channel)
+        g.require_group(tploc)
         try:
-            del g['{}/Channel {}'.format(diloc, 0)]
+            del g['{}/Channel {}'.format(tploc, 0)]
         except KeyError:
             pass
-        f.copy(f[chloc], g[diloc], name='Channel 0')
+        f.copy(chloc, g[tploc], name='Channel 0')
 
-        for rl in range(n_reslev):
-
-            tploc = '/DataSet/ResolutionLevel {}/TimePoint 0'.format(rl)
-            chloc = '{}/Channel {}'.format(tploc, ch)
-            g.require_group(tploc)
-            try:
-                del g['{}/Channel {}'.format(tploc, 0)]
-            except KeyError:
-                pass
-            f.copy(chloc, g[tploc], name='Channel 0')
-
-        g.close()
+    g.close()
 
     f.close()
 

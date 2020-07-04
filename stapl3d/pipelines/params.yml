@@ -11,6 +11,7 @@ dirtree:
         jobfiles: jobfiles
 
 dataset:
+    name: HFK16w
     alias: HFK16w
     ims_ref_postfix: _ref_uint16
     reslev: 4
@@ -95,6 +96,19 @@ shading_estimation:
 
 stitching:
     postfix: _stitching
+
+splitchannels:
+    channel_re: _ch{:02d}
+    insert: true
+    replace: true
+    conda:
+        env: stapl3d
+    submit:
+        array: no
+        nodes: 1
+        tasks: 1
+        mem: 60G
+        wtime: 02:00:00
 
 mask:
     postfix: _mask
