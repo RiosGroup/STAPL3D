@@ -1010,14 +1010,13 @@ function get_py_splitblocks {
     echo 'import sys'
     echo 'image_in = sys.argv[1]'
     echo 'parameter_file = sys.argv[2]'
-    echo 'br_lower = int(sys.argv[3])'
-    echo 'br_upper = int(sys.argv[4])'
+    echo 'idx = int(sys.argv[3])'
     echo ''
-    echo "from stapl3d.channels import process_channels"
-    echo "process_channels(
+    echo "from stapl3d import blocks"
+    echo "blocks.split(
         image_in,
         parameter_file,
-        blockrange=[br_lower, br_upper],
+        blocks=[idx],
         )"
 }
 function get_cmd_splitblocks {
@@ -1028,7 +1027,7 @@ function get_cmd_splitblocks {
     echo python "${pyfile}" \
         "\${filestem}${biasfield__postfix}.ims" \
         "\${filestem}.yml" \
-        "\${idx}" "\$((idx+1))"
+        "\${idx}"
 
 }
 

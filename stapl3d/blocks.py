@@ -70,7 +70,7 @@ def split(
     outputdir='',
     blocksize=[],
     blockmargin=[],
-    blockrange=[],
+    blocks=[],
     bias_image='',
     bias_dsfacs=[1, 64, 64, 1],
     memb_idxs=None,
@@ -100,7 +100,7 @@ def split(
             image_in,
             blocksize,
             blockmargin,
-            [b_idx, b_idx+1],
+            [b_idx, b_idx + 1],
             params['bias_image'],
             params['bias_dsfacs'],
             params['memb_idxs'],
@@ -369,6 +369,9 @@ def merge(
     props = get_imageprops(image_in)
 
     dataset = os.path.splitext(get_paths(image_in)['fname'])[0]
+
+    if params['blocks']:
+        idss = [ids for idx, ids in enumerate(idss) if idx in params['blocks']]
 
     arglist = [
         (
