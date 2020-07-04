@@ -1039,7 +1039,7 @@ def generate_report(image_in, info_dict={}, ioff=True):
         report_type,
         reseg_id,
         )
-    figpath = '{}_{}_{}-report.pdf'.format(
+    figpath = '{}_{}_{}.pdf'.format(
         info_dict['paths']['out_base'],
         report_type,
         reseg_id,
