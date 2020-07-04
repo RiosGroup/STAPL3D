@@ -103,9 +103,9 @@ def estimate(
 
     params = get_params(locals(), parameter_file, step_id)
 
-    filepaths, blocks = get_blockfiles(image_in, outputdir, params['blocks'])
+    filepaths, _ = get_blockfiles(image_in, outputdir, params['blocks'])
 
-    blocksize, blockmargin, _ = get_blockinfo(image_in, parameter_file, params)
+    blocksize, blockmargin, blocks = get_blockinfo(image_in, parameter_file, params)
 
     n_workers = get_n_workers(len(blocks), params)
 
