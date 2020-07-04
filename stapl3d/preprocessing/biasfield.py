@@ -127,9 +127,9 @@ def estimate(
         for ch in params['channels']]
 
     # NOTE: per-channel processing as ITK uses multithreading on each channel
-    for ch in params['channels']:
+    for idx, ch in enumerate(params['channels']):
         with multiprocessing.Pool(processes=n_workers) as pool:
-            pool.starmap(estimate_channel, [arglist[ch]])
+            pool.starmap(estimate_channel, [arglist[idx]])
 
 
 def estimate_channel(
