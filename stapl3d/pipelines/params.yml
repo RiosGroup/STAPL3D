@@ -225,7 +225,6 @@ block_segmentation:
         wtime: 05:00:00
 
 splitblocks:
-    n_workers: 8
     bias_apply: true
     conda:
         env: stapl3d
@@ -237,7 +236,6 @@ splitblocks:
         wtime: 00:30:00
 
 membrane_enhancement:
-    n_workers: 8
     median_filter_par: 0.5
     membrane_filter_par: 1.1
     conda:
@@ -250,7 +248,6 @@ membrane_enhancement:
         wtime: 01:00:00
 
 segmentation:
-    n_workers: 8
     ids_memb_mask: memb/planarity
     ids_memb_chan: memb/mean
     ids_nucl_chan: chan/ch00

@@ -2034,12 +2034,17 @@ def split_filename(filename, blockoffset=[0, 0, 0]):
 def get_n_workers(n_workers, params):
     """Determine the number of workers."""
 
-    n_workers = min(n_workers, multiprocessing.cpu_count())
+    cpu_count = multiprocessing.cpu_count()
+
+    n_workers = cpu_count
 
     try:
-        n_workers = min(n_workers, params['n_workers'])
-    except:
+        if params['n_workers'] > 0:
+            n_workers = params['n_workers']
+    except KeyError:
         pass
+
+    n_workers = min(n_workers, cpu_count)
 
     return n_workers
 

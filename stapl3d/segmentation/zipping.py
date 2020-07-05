@@ -82,6 +82,7 @@ def estimate(
     image_in,
     parameter_file,
     outputdir='',
+    n_workers=0,
     blocksize=[],
     blockmargin=[],
     blockrange=[],
@@ -101,8 +102,6 @@ def estimate(
     filepaths, blocks = get_blockfiles(image_in, outputdir, params['blocks'])
 
     blocksize, blockmargin, _ = get_blockinfo(image_in, parameter_file, params)
-
-    n_workers = get_n_workers(len(blocks), params)
 
     path_int = '{}/{}'.format(params['grp'], params['ids'])
     dataset = os.path.splitext(get_paths(image_in)['fname'])[0]
@@ -137,6 +136,8 @@ def estimate(
     n_seams_yx = [ny - 1, nx - 1]
     seams = list(range(np.prod(n_seams_yx)))
     seamgrid = np.reshape(seams, n_seams_yx)
+
+    n_workers = get_n_workers(len(blocks), params)
 
     for axis, n_seams in zip([1, 2], n_seams_yx):
         n_proc = min(n_workers, int(np.ceil(n_seams / 2)))
@@ -718,6 +719,7 @@ def relabel(
     image_in,
     parameter_file,
     outputdir='',
+    n_workers=0,
     blocks=[],
     grp='segm',
     ids='labels_memb_del',
@@ -732,8 +734,6 @@ def relabel(
     params = get_params(locals(), parameter_file, step_id)
 
     filepaths, blocks = get_blockfiles(image_in, outputdir, params['blocks'])
-
-    n_workers = get_n_workers(len(blocks), params)
 
     path_int = '{}/{}'.format(params['grp'], params['ids'])
     dataset = os.path.splitext(get_paths(image_in)['fname'])[0]
@@ -750,6 +750,7 @@ def relabel(
         )
         for block_idx, filepath in zip(blocks, filepaths)]
 
+    n_workers = get_n_workers(len(blocks), params)
     with multiprocessing.Pool(processes=n_workers) as pool:
         pool.starmap(relabel_parallel, arglist)
 
@@ -800,6 +801,7 @@ def copyblocks(
     image_in,
     parameter_file,
     outputdir='',
+    n_workers=0,
     blocks=[],
     grp='segm',
     ids='labels_memb_del_relabeled',
@@ -815,8 +817,6 @@ def copyblocks(
 
     filepaths, blocks = get_blockfiles(image_in, outputdir, params['blocks'])
 
-    n_workers = get_n_workers(len(blocks), params)
-
     path_int = '{}/{}'.format(params['grp'], params['ids'])
     dataset = os.path.splitext(get_paths(image_in)['fname'])[0]
     filename = '{}_maxlabels_{}.txt'.format(dataset, params['ids'])
@@ -831,6 +831,7 @@ def copyblocks(
         )
         for block_idx, filepath in zip(blocks, filepaths)]
 
+    n_workers = get_n_workers(len(blocks), params)
     with multiprocessing.Pool(processes=n_workers) as pool:
         pool.starmap(copy_blocks_parallel, arglist)
 

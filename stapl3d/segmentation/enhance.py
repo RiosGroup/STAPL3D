@@ -70,6 +70,7 @@ def estimate(
     image_in,
     parameter_file,
     outputdir='',
+    n_workers=0,
     blocks=[],
     ACMEdir='',
     median_filter_par=0.5,
@@ -85,8 +86,6 @@ def estimate(
 
     filepaths, blocks = get_blockfiles(image_in, outputdir, params['blocks'])
 
-    n_workers = get_n_workers(len(blocks), params)
-
     ACMEdir = ACMEdir or os.environ.get('ACME')
 
     arglist = [
@@ -99,6 +98,7 @@ def estimate(
         )
         for block_idx, filepath in zip(blocks, filepaths)]
 
+    n_workers = get_n_workers(len(blocks), params)
     with multiprocessing.Pool(processes=n_workers) as pool:
         pool.starmap(membrane_enhancement, arglist)
 

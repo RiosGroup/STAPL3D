@@ -68,6 +68,7 @@ def split(
     image_in,
     parameter_file='',
     outputdir='',
+    n_workers=0,
     blocksize=[],
     blockmargin=[],
     blocks=[],
@@ -93,8 +94,6 @@ def split(
 
     blocksize, blockmargin, blocks = get_blockinfo(image_in, parameter_file, params)
 
-    n_workers = get_n_workers(len(blocks), params)
-
     arglist = [
         (
             image_in,
@@ -116,6 +115,7 @@ def split(
         )
         for b_idx in blocks]
 
+    n_workers = get_n_workers(len(blocks), params)
     with multiprocessing.Pool(processes=n_workers) as pool:
         pool.starmap(combine_channels, arglist)
 

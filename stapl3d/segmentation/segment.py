@@ -103,6 +103,7 @@ def estimate(
     image_in,
     parameter_file,
     outputdir='',
+    n_workers=0,
     blocks=[],
     dapi_shift_planes=0,
     nucl_opening_footprint=[3, 7, 7],
@@ -138,8 +139,6 @@ def estimate(
 
     filepaths, blocks = get_blockfiles(image_in, outputdir, params['blocks'])
 
-    n_workers = get_n_workers(len(blocks), params)
-
     arglist = [
         (
             filepath,
@@ -174,6 +173,7 @@ def estimate(
         )
         for block_idx, filepath in zip(blocks, filepaths)]
 
+    n_workers = get_n_workers(len(blocks), params)
     with multiprocessing.Pool(processes=n_workers) as pool:
         pool.starmap(cell_segmentation, arglist)
 
@@ -998,6 +998,7 @@ def subsegment(
     image_in,
     parameter_file,
     outputdir='',
+    n_workers=0,
     blocks=[],
     ids='segm/labels_memb_del_relabeled_fix',
     ods_full='segm/labels_memb_del_relabeled_fix_full',
@@ -1014,8 +1015,6 @@ def subsegment(
 
     filepaths, blocks = get_blockfiles(image_in, outputdir, params['blocks'])
 
-    n_workers = get_n_workers(len(blocks), params)
-
     arglist = [
         (
             filepath,
@@ -1027,6 +1026,7 @@ def subsegment(
         )
         for block_idx, filepath in zip(blocks, filepaths)]
 
+    n_workers = get_n_workers(len(blocks), params)
     with multiprocessing.Pool(processes=n_workers) as pool:
         pool.starmap(split_segments, arglist)
 

@@ -76,6 +76,7 @@ def estimate(
     image_in,
     parameter_file,
     outputdir='',
+    n_workers=0,
     blocks=[],
     seg_paths=[],
     seg_names=['full', 'memb', 'nucl'],
@@ -106,8 +107,6 @@ def estimate(
     filepaths, _ = get_blockfiles(image_in, outputdir, params['blocks'])
 
     blocksize, blockmargin, blocks = get_blockinfo(image_in, parameter_file, params)
-
-    n_workers = get_n_workers(len(blocks), params)
 
     with open(parameter_file, 'r') as ymlfile:
         cfg = yaml.safe_load(ymlfile)
@@ -157,6 +156,7 @@ def estimate(
         )
         for block_idx, filepath in zip(blocks, filepaths)]
 
+    n_workers = get_n_workers(len(blocks), params)
     with multiprocessing.Pool(processes=n_workers) as pool:
         pool.starmap(export_regionprops, arglist)
 

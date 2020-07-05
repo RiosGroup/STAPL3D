@@ -27,6 +27,7 @@ def split_channels(
     image_in,
     parameter_file,
     outputdir='',
+    n_workers=0,
     channels=[],
     image_ref='',
     outputpat='',
@@ -46,8 +47,6 @@ def split_channels(
         props = get_imageprops(image_in)
         n_channels = props['shape'][props['axlab'].index('c')]
         params['channels'] = list(range(n_channels))
-
-    n_workers = get_n_workers(len(params['channels']), params)
 
     with open(parameter_file, 'r') as ymlfile:
         cfg = yaml.safe_load(ymlfile)
@@ -75,6 +74,7 @@ def split_channels(
         )
         for ch in params['channels']]
 
+    n_workers = get_n_workers(len(params['channels']), params)
     with multiprocessing.Pool(processes=n_workers) as pool:
         pool.starmap(extract_channel, arglist)
 

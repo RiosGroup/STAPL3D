@@ -80,6 +80,7 @@ def estimate(
     image_in,
     parameter_file,
     outputdir='',
+    n_workers=0,
     channels=[],
     mask_in='',
     resolution_level=-1,
@@ -100,8 +101,6 @@ def estimate(
         props = get_imageprops(image_in)
         n_channels = props['shape'][props['axlab'].index('c')]
         params['channels'] = list(range(n_channels))
-
-    n_workers = get_n_workers(len(params['channels']), params)
 
     if isinstance(params['mask_in'], bool):
         if params['mask_in']:
@@ -127,6 +126,7 @@ def estimate(
         for ch in params['channels']]
 
     # NOTE: per-channel processing as ITK uses multithreading on each channel
+    n_workers = get_n_workers(len(params['channels']), params)
     for idx, ch in enumerate(params['channels']):
         with multiprocessing.Pool(processes=n_workers) as pool:
             pool.starmap(estimate_channel, [arglist[idx]])
@@ -357,6 +357,7 @@ def apply(
     image_in,
     parameter_file,
     outputdir='',
+    n_workers=0,
     image_ref='',
     channels=[],
     downsample_factors={'z': 1, 'y': 1, 'x': 1, 'c': 1, 't': 1},
@@ -374,8 +375,6 @@ def apply(
         props = get_imageprops(image_in)
         n_channels = props['shape'][props['axlab'].index('c')]
         params['channels'] = list(range(n_channels))
-
-    n_workers = get_n_workers(len(params['channels']), params)
 
     channeldir = get_outputdir(image_in, parameter_file, '', 'channels', 'channels')
 
@@ -410,6 +409,7 @@ def apply(
             )
         )
 
+    n_workers = get_n_workers(len(params['channels']), params)
     with multiprocessing.Pool(processes=n_workers) as pool:
         pool.starmap(apply_channel, arglist)
 

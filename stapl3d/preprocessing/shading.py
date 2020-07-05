@@ -64,6 +64,7 @@ def estimate(
     image_in,
     parameter_file,
     outputdir='',
+    n_workers=0,
     channels=[],
     metric='median',
     noise_threshold=None,
@@ -88,8 +89,6 @@ def estimate(
         czi = czifile.CziFile(image_in)
         params['channels'] = list(range(czi.shape[czi.axes.index('C')]))
 
-    n_workers = get_n_workers(len(params['channels']), params)
-
     arglist = [
         (
             image_in,
@@ -103,6 +102,7 @@ def estimate(
         )
         for ch in params['channels']]
 
+    n_workers = get_n_workers(len(params['channels']), params)
     with multiprocessing.Pool(processes=n_workers) as pool:
         pool.starmap(estimate_channel, arglist)
 
