@@ -5,9 +5,7 @@ dirtree:
         shading: shading
         mask:
         biasfield: biasfield
-        profiling:
-            base: profiling
-            featdir: features
+        profiling: profiling
         jobfiles: jobfiles
 
 dataset:
