@@ -83,6 +83,7 @@ def split(
     output_channels=None,
     datatype='',
     chunksize=[],
+    outputtemplate='',
     ):
     """Average membrane and nuclear channels and write as blocks."""
 
@@ -111,16 +112,17 @@ def split(
             params['output_channels'],
             params['datatype'],
             params['chunksize'],
+            params['outputtemplate'],
             outputdir,
         )
         for b_idx in blocks]
 
     n_workers = get_n_workers(len(blocks), params)
     with multiprocessing.Pool(processes=n_workers) as pool:
-        pool.starmap(combine_channels, arglist)
+        pool.starmap(split_with_combinechannels, arglist)
 
 
-def combine_channels(
+def split_with_combinechannels(
     image_in,
     blocksize,
     blockmargin=[0, 64, 64],
@@ -136,6 +138,7 @@ def combine_channels(
     output_channels=None,
     datatype='',
     chunksize=[],
+    outputtemplate='',
     outputdir='',
     ):
     """Average membrane and nuclear channels and write as blocks."""
@@ -168,7 +171,7 @@ def combine_channels(
     else:
         bf = None
 
-    outputtemplate = '{}_{}.h5/ods'.format(outputstem, '{}')
+    outputtemplate = outputtemplate or '{}_{}.h5/ods'.format(outputstem, '{}')
     mpi.set_blocks(im, blocksize, blockmargin, blockrange, outputtemplate)
     mpi.scatter_series()
 
@@ -176,12 +179,23 @@ def combine_channels(
     for i in mpi.series:
         block = mpi.blocks[i]
         print('Processing blocknr {:4d} with id: {}'.format(i, block['id']))
-        add_volumes(im, block, props, bf, bias_dsfacs,
-                    memb_idxs, memb_weights,
-                    nucl_idxs, nucl_weights,
-                    mean_idxs, mean_weights,
-                    output_channels,
-                    )
+        if len(im.dims) == 3:
+            data = im.slice_dataset().astype('float')
+            if bf is not None:
+                bias = get_bias_field_block(bf, im.slices, data.shape, bias_dsfacs)
+                bias = np.reshape(bias, data.shape)
+                data /= bias
+                data = np.nan_to_num(data, copy=False)
+            outputpostfix = ".h5/{}".format(output['ods'])
+            outpath = block['path'].replace(".h5/ods", outputpostfix)
+            write_output(outpath, output['data'].astype(output['dtype']), props)
+        else:
+            add_volumes(im, block, props, bf, bias_dsfacs,
+                        memb_idxs, memb_weights,
+                        nucl_idxs, nucl_weights,
+                        mean_idxs, mean_weights,
+                        output_channels,
+                        )
 
     im.close()
 
