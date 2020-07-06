@@ -124,18 +124,7 @@ def estimate(
     args = [images_in, blocksize, blockmargin, axis, seamnumbers, mask_dataset,
             relabel, maxlabel, in_place, outputstem, save_steps]
 
-    # Set the number of seams in the data.
-    im = Image(image_in)
-    im.load(load_data=False)
-    X = im.dims[im.axlab.index('x')]
-    Y = im.dims[im.axlab.index('y')]
-    im.close()
-    from math import ceil
-    nx = int(ceil(X/blocksize[im.axlab.index('x')]))
-    ny = int(ceil(Y/blocksize[im.axlab.index('y')]))
-    n_seams_yx = [ny - 1, nx - 1]
-    seams = list(range(np.prod(n_seams_yx)))
-    seamgrid = np.reshape(seams, n_seams_yx)
+    n_seams_yx, seamgrid = get_zip_layout(image_in, blocksize)
 
     n_workers = get_n_workers(len(blocks), params)
 
@@ -157,6 +146,24 @@ def estimate(
                 n_proc=n_workers,
             )
             maxlabels = get_maxlabels_from_attribute(filepaths, path_int, maxlabelfile)
+
+
+def get_zip_layout(image_in, blocksize):
+    """Determine the number of seams in the blocked dataset."""
+
+    im = Image(image_in)
+    im.load(load_data=False)
+    X = im.dims[im.axlab.index('x')]
+    Y = im.dims[im.axlab.index('y')]
+    im.close()
+    from math import ceil
+    nx = int(ceil(X/blocksize[im.axlab.index('x')]))
+    ny = int(ceil(Y/blocksize[im.axlab.index('y')]))
+    n_seams_yx = [ny - 1, nx - 1]
+    seams = list(range(np.prod(n_seams_yx)))
+    seamgrid = np.reshape(seams, n_seams_yx)
+
+    return n_seams_yx, seamgrid
 
 
 def get_arglist(args, axis, starts, stops, steps):
