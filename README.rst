@@ -65,6 +65,7 @@ dependencies:
  - pyyaml>=5.3.1
  - scipy>=1.4.1
  - pandas>=1.0.4
+ - pypdf2>=1.26.0
 
  - czifile>=2019.7.2
  - nibabel>=3.1.0
