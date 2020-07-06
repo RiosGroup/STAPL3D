@@ -347,6 +347,7 @@ def merge(
     image_in,
     parameter_file='',
     outputdir='',
+    n_workers=0,
     blocksize=[],
     blockmargin=[],
     blockrange=[],
@@ -362,7 +363,6 @@ def merge(
 
     params = get_params(locals(), parameter_file, step_id)
     idss = [v['ids'] for ids, v in params.items() if ids.startswith('ids')]
-    n_workers = get_n_workers(len(idss), params)
 
     filepaths, blocks = get_blockfiles(image_in, blockdir, params['blocks'])
     blocksize, blockmargin, _ = get_blockinfo(image_in, parameter_file, params)
@@ -386,6 +386,7 @@ def merge(
         )
         for ids in idss]
 
+    n_workers = get_n_workers(len(idss), params)
     with multiprocessing.Pool(processes=n_workers) as pool:
         pool.starmap(mergeblocks, arglist)
 
