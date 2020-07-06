@@ -2099,13 +2099,18 @@ def get_blockinfo(image_in, parameter_file, params=dict(blocksize=[], blockmargi
         bm = ds_par['bm'] or 64
         params['blockmargin'] = get_blockmargin(image_in, bm)
 
+    n_blocks = get_n_blocks(image_in, params['blocksize'], params['blockmargin'])
+
     if 'blockrange' in params.keys():
         if params['blockrange']:
             params['blocks'] = list(range(params['blockrange'][0], params['blockrange'][1]))
+            return params['blocksize'], params['blockmargin'], params['blocks']
 
-    if 'blocks' not in params.keys():
-        n_blocks = get_n_blocks(image_in, params['blocksize'], params['blockmargin'])
-        params['blocks'] = list(range(n_blocks))
+    if 'blocks' in params.keys():
+        if params['blocks']:
+            return params['blocksize'], params['blockmargin'], params['blocks']
+
+    params['blocks'] = list(range(n_blocks))
 
     return params['blocksize'], params['blockmargin'], params['blocks']
 
