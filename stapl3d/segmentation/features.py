@@ -111,10 +111,11 @@ def estimate(
     with open(parameter_file, 'r') as ymlfile:
         cfg = yaml.safe_load(ymlfile)
     idss = [cfg['subsegment']['ods_{}'.format(seg_name)] for seg_name in seg_names]
-    datadir = get_outputdir(image_in, parameter_file, '', '', '')
-    dataset = os.path.splitext(get_paths(image_in)['fname'])[0]
-    filestem = os.path.join(datadir, dataset)
-    seg_paths = ['{}_{}.h5/{}'.format(filestem, ids.replace('/', '-'), ids) for ids in idss]
+    if not params['seg_paths']:
+        datadir = get_outputdir(image_in, parameter_file, '', '', '')
+        dataset = os.path.splitext(get_paths(image_in)['fname'])[0]
+        filestem = os.path.join(datadir, dataset)
+        params['seg_paths'] = ['{}_{}.h5/{}'.format(filestem, ids.replace('/', '-'), ids) for ids in idss]
 
     #outputstem = os.path.join(featdir, dataset) # TODO
     # TODO: blocksize_xy like in biasfield apply???
@@ -136,7 +137,7 @@ def estimate(
     arglist = [
         (
             #['{}/{}'.format(filepath, ids) for ids in idss],
-            seg_paths,
+            params['seg_paths'],
             params['seg_names'],
             [image_in],
             params['data_names'],
@@ -182,8 +183,7 @@ def export_regionprops(
     ):
 
     # TODO: generalize
-    dataset = os.path.splitext(get_paths(data_paths[0])['fname'])[0]
-    filestem = os.path.join(outputdir, dataset)
+    filestem = os.path.splitext(get_paths(data_paths[0])['fname'])[0]
     outputstem = os.path.join(outputdir, filestem)
 
     # load the segments: ['full'] or ['full', 'memb', 'nucl']
@@ -914,10 +914,11 @@ def postproc(
     with open(parameter_file, 'r') as ymlfile:
         cfg = yaml.safe_load(ymlfile)
     idss = [cfg['subsegment']['ods_{}'.format(seg_name)] for seg_name in cfg['features']['seg_names']]
-    datadir = get_outputdir(image_in, parameter_file, '', '', '')
-    dataset = os.path.splitext(get_paths(image_in)['fname'])[0]
-    filestem = os.path.join(datadir, dataset)
-    seg_paths = ['{}_{}.h5/{}'.format(filestem, ids.replace('/', '-'), ids) for ids in idss]
+    if not params['seg_paths']:
+        datadir = get_outputdir(image_in, parameter_file, '', '', '')
+        dataset = os.path.splitext(get_paths(image_in)['fname'])[0]
+        filestem = os.path.join(datadir, dataset)
+        params['seg_paths'] = ['{}_{}.h5/{}'.format(filestem, ids.replace('/', '-'), ids) for ids in idss]
 
     # NOTE: as outputdir in estimate
     params['csv_dir'] = get_outputdir(image_in, parameter_file, params['csv_dir'], 'features', 'blocks')
@@ -925,7 +926,7 @@ def postproc(
     params['csv_stem'] = os.path.splitext(get_paths(image_in)['fname'])[0]
 
     postprocess_features(
-        seg_paths,
+        params['seg_paths'],
         params['blocksize'],
         params['blockmargin'],
         params['blockrange'],
