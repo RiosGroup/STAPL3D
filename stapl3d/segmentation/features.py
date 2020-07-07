@@ -102,7 +102,8 @@ def estimate(
 
     outputdir = get_outputdir(image_in, parameter_file, outputdir, step_id, 'blocks')
 
-    params = get_params(locals(), parameter_file, step_id)
+    params = get_params(locals().copy(), parameter_file, step_id)
+    subparams = get_params(locals().copy(), parameter_file, step_id, 'submit')
 
     filepaths, _ = get_blockfiles(image_in, outputdir, params['blocks'])
 
@@ -110,7 +111,7 @@ def estimate(
 
     with open(parameter_file, 'r') as ymlfile:
         cfg = yaml.safe_load(ymlfile)
-    idss = [cfg['subsegment']['ods_{}'.format(seg_name)] for seg_name in seg_names]
+    idss = [cfg['subsegment']['params']['ods_{}'.format(seg_name)] for seg_name in seg_names]
     if not params['seg_paths']:
         datadir = get_outputdir(image_in, parameter_file, '', '', '')
         dataset = os.path.splitext(get_paths(image_in)['fname'])[0]
@@ -157,7 +158,7 @@ def estimate(
         )
         for block_idx, filepath in zip(blocks, filepaths)]
 
-    n_workers = get_n_workers(len(blocks), params)
+    n_workers = get_n_workers(len(blocks), subparams)
     with multiprocessing.Pool(processes=n_workers) as pool:
         pool.starmap(export_regionprops, arglist)
 
@@ -907,13 +908,15 @@ def postproc(
 
     outputdir = get_outputdir(image_in, parameter_file, outputdir, step_id, '')
 
-    params = get_params(locals(), parameter_file, step_id)
+    params = get_params(locals().copy(), parameter_file, 'features')
+    subparams = get_params(locals().copy(), parameter_file, step_id, 'submit')
 
     blocksize, blockmargin, _ = get_blockinfo(image_in, parameter_file, params)
 
     with open(parameter_file, 'r') as ymlfile:
         cfg = yaml.safe_load(ymlfile)
-    idss = [cfg['subsegment']['ods_{}'.format(seg_name)] for seg_name in cfg['features']['seg_names']]
+    idss = [cfg['subsegment']['params']['ods_{}'.format(seg_name)]
+            for seg_name in cfg['features']['params']['seg_names']]
     if not params['seg_paths']:
         datadir = get_outputdir(image_in, parameter_file, '', '', '')
         dataset = os.path.splitext(get_paths(image_in)['fname'])[0]
@@ -995,8 +998,6 @@ def postprocess_features(
         # metrics=['mean', 'median', 'variance', 'min', 'max']
         metrics=['mean'] # TODO
         feat_names = get_feature_names(fset_morph, fset_intens, metrics)
-        print(feat_names)
-        print(dfs['full'].columns)
         df = select_features(dfs, feat_names, min_size_nucl, split_features)
         #df = rename_columns(df, metrics=metrics)
 

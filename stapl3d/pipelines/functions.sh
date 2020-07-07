@@ -902,8 +902,8 @@ function get_py_bias_stack {
     echo "from stapl3d.reporting import merge_reports"
     echo "from glob import glob"
     echo "merge_reports(
-        glob('${biasfielddir}/${dataset}_ch??${biasfield__postfix}').sort(),
-        '${datadir}/${dataset}${biasfield__postfix}.pdf',
+        glob('${biasfielddir}/${dataset}_ch??${biasfield__params__postfix}').sort(),
+        '${datadir}/${dataset}${biasfield__params__postfix}.pdf',
         )"
 
 }
@@ -913,17 +913,17 @@ function get_cmd_bias_stack {
     eval get_py_${stage} > "${pyfile}"
 
     local channels_in=()
-    local stitch_stem="${biasfielddir}/${dataset}${shading__postfix}${stitching__postfix}"
+    local stitch_stem="${biasfielddir}/${dataset}${shading__params__postfix}${stitching__params__postfix}"
     for c in `seq 0 $(( C - 1 ))`; do
-        channels_in+=("${stitch_stem}_ch`printf %02d $c`${biasfield__postfix}")
+        channels_in+=("${stitch_stem}_ch`printf %02d $c`${biasfield__params__postfix}")
     done
 
     echo python "${pyfile}" \
         "\${biasfield_stem}" \
         "${channels_in[@]}"
 
-    # echo "rm ${biasfielddir}/${dataset}_ch??${biasfield__postfix}.pdf"
-    # echo "rm ${biasfielddir}/${dataset}_ch??${biasfield__postfix}.pickle"
+    # echo "rm ${biasfielddir}/${dataset}_ch??${biasfield__params__postfix}.pdf"
+    # echo "rm ${biasfielddir}/${dataset}_ch??${biasfield__params__postfix}.pickle"
 
 }
 
@@ -980,7 +980,7 @@ function get_cmd_ims_aggregate {
     pyfile="${datadir}/${jobname}.py"
     eval get_py_${stage} > "${pyfile}"
 
-    local chpat="${channeldir}/${dataset}_ch??${shading__postfix}${stitching__postfix}${biasfield__postfix}.ims"
+    local chpat="${channeldir}/${dataset}_ch??${shading__params__postfix}${stitching__params__postfix}${biasfield__params__postfix}.ims"
     echo python "${pyfile}" \
         "\${biasfield_stem}.ims" \
         "\${stitching_stem}${dataset__ims_ref_postfix}.ims" \
@@ -1054,8 +1054,8 @@ function get_cmd_membrane_enhancement {
         "\${idx}"
 
     echo ''
-    echo "rm \${blockstem}${biasfield__postfix}_memb-eigen.mha"
-    echo "rm \${blockstem}${biasfield__postfix}_memb-*.nii.gz"
+    echo "rm \${blockstem}${biasfield__params__postfix}_memb-eigen.mha"
+    echo "rm \${blockstem}${biasfield__params__postfix}_memb-*.nii.gz"
 
 }
 
@@ -1141,10 +1141,10 @@ function get_cmd_relabel {
     eval get_py_${stage} > "${pyfile}"
 
     echo python "${pyfile}" \
-        "\${blockstem}.h5/segm/${segmentation__segments_ods}" \
+        "\${blockstem}.h5/segm/${segmentation__params__segments_ods}" \
         "\${idx}" \
         "${blockdir}/${dataset_preproc}_maxlabels.txt" \
-        "${relabel__postfix}"
+        "${relabel__params__postfix}"
 
 }
 
@@ -1170,7 +1170,7 @@ function get_cmd_copyblocks {
     eval get_py_${stage} > "$pyfile"
 
     echo python "${pyfile}" \
-    "\${blockstem}.h5/segm/${segmentation__segments_ods}_${relabel__postfix}" \
+    "\${blockstem}.h5/segm/${segmentation__params__segments_ods}${relabel__params__postfix}" \
     "\${idx}"
 
 }
@@ -1213,7 +1213,7 @@ function get_cmd_zipping {
     eval get_py_zipping > "$pyfile"
 
     local axis="${1}"
-    local ids="segm/${segmentation__segments_ods}${zipping__postfix}"
+    local ids="segm/${segmentation__params__segments_ods}${zipping__params__postfix}"
 
     echo ''
     echo set_images_in "${blockdir}/${dataset_preproc}" "${ids}"
@@ -1224,7 +1224,7 @@ function get_cmd_zipping {
         "0" "${bm}" "${bm}" \
         "${axis}" \
         "\${seamnumbers}" \
-        "${blockdir}/${dataset_preproc}_maxlabels${zipping__postfix}.txt" \
+        "${blockdir}/${dataset_preproc}_maxlabels${zipping__params__postfix}.txt" \
         "${blockdir}/${dataset_preproc}" \
         "\${images_in[@]}"
 
@@ -1265,11 +1265,11 @@ function get_cmd_zipping_gather { get_cmd_gather "${stage}" ; }
 function get_cmd_gather {
 
     local stage="${1}"
-    eval postfix="\${${stage}__postfix}"
+    eval postfix="\${${stage}__params__postfix}"
 
     echo set_images_in \
         "${blockdir}/${dataset_preproc}" \
-        "segm/${segmentation__segments_ods}${postfix}"
+        "segm/${segmentation__params__segments_ods}${postfix}"
     echo maxlabelfile="${blockdir}/${dataset_preproc}_maxlabels${postfix}.txt"
     echo gather_maxlabels "\${maxlabelfile}"
 

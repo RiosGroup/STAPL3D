@@ -24,7 +24,6 @@ from scipy.ndimage import distance_transform_edt
 
 from stapl3d import (
     get_outputdir,
-    prep_outputdir,
     get_imageprops,
     get_params,
     get_paths,
@@ -78,6 +77,7 @@ def estimate(
     median_factor=1,
     abs_threshold=1000,
     thresholds=[500, 1000, 2000, 3000, 4000, 5000],
+    postfix='',
     ):
     """Generate a mask that covers the tissue."""
 
@@ -85,7 +85,7 @@ def estimate(
 
     outputdir = get_outputdir(image_in, parameter_file, outputdir, step_id)
 
-    params = get_params(locals(), parameter_file, step_id)
+    params = get_params(locals().copy(), parameter_file, step_id)
 
     generate_dataset_mask(
         image_in,
@@ -96,6 +96,7 @@ def estimate(
         params['abs_threshold'],
         params['thresholds'],
         params['distance_to_edge'],
+        params['postfix'],
         outputdir,
         )
 
@@ -109,21 +110,22 @@ def generate_dataset_mask(
     abs_threshold=1000,
     thresholds=[500, 1000, 2000, 3000, 4000, 5000],
     distance_to_edge=True,
+    postfix='',
     outputdir='',
     ):
     """Generate a mask that covers the tissue."""
 
     # Prepare the output.
     step_id = 'mask'
-    postfix = '{}'.format(step_id)
+    postfix = postfix or '_{}'.format(step_id)
 
-    outputdir = prep_outputdir(outputdir, image_in, subdir=step_id)
+    outputdir = get_outputdir(image_in, '', outputdir, step_id, step_id)
 
     paths = get_paths(image_in, resolution_level)
     datadir, filename = os.path.split(paths['base'])
     dataset, ext = os.path.splitext(filename)
 
-    filestem = '{}_{}'.format(dataset, postfix)
+    filestem = '{}{}'.format(dataset, postfix)
     outputstem = os.path.join(outputdir, filestem)
     outputpat = '{}.h5/{}'.format(outputstem, '{}')
 

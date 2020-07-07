@@ -82,7 +82,8 @@ def estimate(
 
     outputdir = get_outputdir(image_in, parameter_file, outputdir, step_id, fallback='blocks')
 
-    params = get_params(locals(), parameter_file, step_id)
+    params = get_params(locals().copy(), parameter_file, step_id)
+    subparams = get_params(locals().copy(), parameter_file, step_id, 'submit')
 
     filepaths, blocks = get_blockfiles(image_in, outputdir, params['blocks'])
 
@@ -98,7 +99,7 @@ def estimate(
         )
         for block_idx, filepath in zip(blocks, filepaths)]
 
-    n_workers = get_n_workers(len(blocks), params)
+    n_workers = get_n_workers(len(blocks), subparams)
     with multiprocessing.Pool(processes=n_workers) as pool:
         pool.starmap(membrane_enhancement, arglist)
 

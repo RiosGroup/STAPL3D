@@ -72,6 +72,7 @@ def estimate(
     z_range=[],
     quantile_threshold=0.8,
     polynomial_order=3,
+    postfix='',
     ):
     """Correct z-stack shading."""
 
@@ -79,11 +80,16 @@ def estimate(
 
     outputdir = get_outputdir(image_in, parameter_file, outputdir, step_id, step_id)
 
-    params = get_params(locals(), parameter_file, step_id)
+    params = get_params(locals().copy(), parameter_file, step_id)
+    subparams = get_params(locals().copy(), parameter_file, step_id, 'submit')
 
-    if not params['channels']:
-        czi = czifile.CziFile(image_in)
-        params['channels'] = list(range(czi.shape[czi.axes.index('C')]))
+    if not subparams['channels']:
+        if image_in.endswith('.czi'):
+            czi = czifile.CziFile(image_in)
+            subparams['channels'] = list(range(czi.shape[czi.axes.index('C')]))
+        else:
+            print('Sorry, only czi implemented for now...')
+            return
 
     arglist = [
         (
@@ -94,11 +100,12 @@ def estimate(
             params['z_range'],
             params['quantile_threshold'],
             params['polynomial_order'],
+            params['postfix'],
             outputdir,
         )
-        for ch in params['channels']]
+        for ch in subparams['channels']]
 
-    n_workers = get_n_workers(len(params['channels']), params)
+    n_workers = get_n_workers(len(subparams['channels']), subparams)
     with multiprocessing.Pool(processes=n_workers) as pool:
         pool.starmap(estimate_channel, arglist)
 
@@ -111,6 +118,7 @@ def estimate_channel(
     z_range=[],
     quantile_threshold=0.8,
     polynomial_order=3,
+    postfix='',
     outputdir='',
     ):
     """Estimate the x- and y-profiles for a channel in a czi file.
@@ -125,9 +133,10 @@ def estimate_channel(
 
     # Prepare the output.
     step_id = 'shading'
-    postfix = 'ch{:02d}_{}'.format(channel, step_id)
+    postfix = postfix or '_{}'.format(step_id)
+    postfix = 'ch{:02d}{}'.format(channel, postfix)
 
-    outputdir = prep_outputdir(outputdir, image_in, subdir=step_id)
+    outputdir = get_outputdir(image_in, '', outputdir, step_id, step_id)
 
     paths = get_paths(image_in, channel=channel)
     datadir, filename = os.path.split(paths['base'])
@@ -139,7 +148,6 @@ def estimate_channel(
 
     logging.basicConfig(filename='{}.log'.format(outputstem), level=logging.INFO)
     report = {'parameters': locals()}
-
 
     # Get the list of subblocks for the channel.
     if image_in.endswith('.czi'):  # order of subblock_directory: CZM

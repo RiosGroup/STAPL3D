@@ -16,7 +16,6 @@ import yaml
 from stapl3d import (
     get_n_workers,
     get_outputdir,
-    prep_outputdir,
     get_imageprops,
     get_params,
     get_paths,
@@ -41,12 +40,13 @@ def split_channels(
 
     outputdir = get_outputdir(image_in, parameter_file, outputdir, step_id, 'channels')
 
-    params = get_params(locals(), parameter_file, step_id)
+    params = get_params(locals().copy(), parameter_file, step_id)
+    subparams = get_params(locals().copy(), parameter_file, step_id, 'submit')
 
-    if not params['channels']:
+    if not subparams['channels']:
         props = get_imageprops(image_in)
         n_channels = props['shape'][props['axlab'].index('c')]
-        params['channels'] = list(range(n_channels))
+        subparams['channels'] = list(range(n_channels))
 
     with open(parameter_file, 'r') as ymlfile:
         cfg = yaml.safe_load(ymlfile)
@@ -72,15 +72,15 @@ def split_channels(
             ch,
             os.path.join(outputdir, params['outputpat'].format(ch)),
         )
-        for ch in params['channels']]
+        for ch in subparams['channels']]
 
-    n_workers = get_n_workers(len(params['channels']), params)
+    n_workers = get_n_workers(len(subparams['channels']), subparams)
     with multiprocessing.Pool(processes=n_workers) as pool:
         pool.starmap(extract_channel, arglist)
 
     if params['replace']:
         channel_paths = [os.path.join(outputdir, params['outputpat'].format(ch))
-                         for ch in params['channels']]
+                         for ch in subparams['channels']]
         make_aggregate(channel_paths, image_in, params['image_ref'])
 
 

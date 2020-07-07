@@ -2126,14 +2126,17 @@ def get_n_blocks(image_in, blocksize, blockmargin):
     return len(mpi.blocks)
 
 
-def get_params(params, parameter_file, pfile_entry):
+def get_params(params, parameter_file, pfile_entry, sub_entry='params'):
     """Merge parameters from arguments and parameterfile(=leading)."""
 
     file_params = {}
     if parameter_file:
         with open(parameter_file, 'r') as ymlfile:
             cfg = yaml.safe_load(ymlfile)
-            file_params = cfg[pfile_entry]
+            if sub_entry in cfg[pfile_entry].keys():
+                file_params = cfg[pfile_entry][sub_entry]
+            else:
+                file_params = cfg[pfile_entry]
 
     params.update(file_params)
 

@@ -88,6 +88,7 @@ def estimate(
     n_iterations=50,
     n_fitlevels=4,
     n_bspline_cps={'z': 5, 'y': 5, 'x': 5},
+    postfix='',
     ):
     """Perform N4 bias field correction."""
 
@@ -95,12 +96,13 @@ def estimate(
 
     outputdir = get_outputdir(image_in, parameter_file, outputdir, step_id, step_id)
 
-    params = get_params(locals(), parameter_file, step_id)
+    params = get_params(locals().copy(), parameter_file, step_id)
+    subparams = get_params(locals().copy(), parameter_file, step_id, 'submit')
 
-    if not params['channels']:
+    if not subparams['channels']:
         props = get_imageprops(image_in)
         n_channels = props['shape'][props['axlab'].index('c')]
-        params['channels'] = list(range(n_channels))
+        subparams['channels'] = list(range(n_channels))
 
     if isinstance(params['mask_in'], bool):
         if params['mask_in']:
@@ -114,20 +116,21 @@ def estimate(
         (
             image_in,
             ch,
-            params['submit']['tasks'],
+            subparams['tasks'],
             params['mask_in'],
             params['resolution_level'],
             [params['downsample_factors'][dim] for dim in 'zyxct'],
             params['n_iterations'],
             params['n_fitlevels'],
             [params['n_bspline_cps'][dim] for dim in 'zyx'],
+            params['postfix'],
             outputdir,
         )
-        for ch in params['channels']]
+        for ch in subparams['channels']]
 
     # NOTE: per-channel processing as ITK uses multithreading on each channel
-    n_workers = get_n_workers(len(params['channels']), params)
-    for idx, ch in enumerate(params['channels']):
+    n_workers = get_n_workers(len(subparams['channels']), subparams)
+    for idx, ch in enumerate(subparams['channels']):
         with multiprocessing.Pool(processes=n_workers) as pool:
             pool.starmap(estimate_channel, [arglist[idx]])
 
@@ -142,6 +145,7 @@ def estimate_channel(
     n_iterations=50,
     n_fitlevels=4,
     n_bspline_cps=[5, 5, 5],
+    postfix='',
     outputdir='',
     ):
     """Estimate the x- and y-profiles for a channel in a czi file.
@@ -150,9 +154,10 @@ def estimate_channel(
 
     # Prepare the output.
     step_id = 'biasfield'
-    postfix = 'ch{:02d}_{}'.format(channel, step_id)
+    postfix = postfix or '_{}'.format(step_id)
+    postfix = 'ch{:02d}{}'.format(channel, postfix)
 
-    outputdir = prep_outputdir(outputdir, image_in, subdir=step_id)
+    outputdir = get_outputdir(image_in, '', outputdir, step_id, step_id)
 
     paths = get_paths(image_in, resolution_level, channel)
     datadir, filename = os.path.split(paths['base'])
@@ -362,6 +367,7 @@ def apply(
     channels=[],
     downsample_factors={'z': 1, 'y': 1, 'x': 1, 'c': 1, 't': 1},
     blocksize_xy=1280,
+    postfix=''
     ):
     """Perform N4 bias field correction."""
 
@@ -369,12 +375,13 @@ def apply(
 
     outputdir = get_outputdir(image_in, parameter_file, outputdir, 'biasfield', 'biasfield')
 
-    params = get_params(locals(), parameter_file, 'biasfield_apply')
+    params = get_params(locals().copy(), parameter_file, step_id)
+    subparams = get_params(locals().copy(), parameter_file, step_id, 'submit')
 
-    if not params['channels']:
+    if not subparams['channels']:
         props = get_imageprops(image_in)
         n_channels = props['shape'][props['axlab'].index('c')]
-        params['channels'] = list(range(n_channels))
+        subparams['channels'] = list(range(n_channels))
 
     channeldir = get_outputdir(image_in, parameter_file, '', 'channels', 'channels')
 
@@ -393,23 +400,24 @@ def apply(
         params['image_ref'] = os.path.join(paths['dir'], filename)
 
     arglist = []
-    for ch in params['channels']:
+    for ch in subparams['channels']:
         chstem = chstem_pat.format(ch)
         os.path.join(channeldir, chstem)
-        bias_fname = '{}{}_ch{:02d}{}.h5/bias'.format(dataset, postfix, ch, cfg['biasfield']['postfix'])
+        bias_fname = '{}{}_ch{:02d}{}.h5/bias'.format(dataset, postfix, ch, cfg['biasfield']['params']['postfix'])
         arglist.append(
             (
                 image_in,
                 os.path.join(outputdir, bias_fname),
-                os.path.join(channeldir, '{}{}.ims'.format(chstem, cfg['biasfield']['postfix'])),
+                os.path.join(channeldir, '{}{}.ims'.format(chstem, cfg['biasfield']['params']['postfix'])),
                 params['image_ref'],
                 ch,
                 [params['downsample_factors'][dim] for dim in 'zyxct'],
                 params['blocksize_xy'],
+                params['postfix'],
             )
         )
 
-    n_workers = get_n_workers(len(params['channels']), params)
+    n_workers = get_n_workers(len(subparams['channels']), params)
     with multiprocessing.Pool(processes=n_workers) as pool:
         pool.starmap(apply_channel, arglist)
 
@@ -422,6 +430,7 @@ def apply_channel(
     channel=None,
     downsample_factors=[1, 1, 1, 1, 1],
     blocksize_xy=1280,
+    postfix=''
     ):
     """Correct inhomogeneity of a channel."""
 

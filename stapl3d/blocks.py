@@ -87,11 +87,12 @@ def split(
     ):
     """Average membrane and nuclear channels and write as blocks."""
 
-    step_id = 'blocks'
+    step_id = 'splitblocks'
 
-    outputdir = get_outputdir(image_in, parameter_file, outputdir, step_id, fallback=step_id)
+    outputdir = get_outputdir(image_in, parameter_file, outputdir, 'blocks', 'blocks')
 
-    params = get_params(locals(), parameter_file, step_id)
+    params = get_params(locals().copy(), parameter_file, step_id)
+    subparams = get_params(locals().copy(), parameter_file, step_id, 'submit')
 
     blocksize, blockmargin, blocks = get_blockinfo(image_in, parameter_file, params)
 
@@ -117,7 +118,7 @@ def split(
         )
         for b_idx in blocks]
 
-    n_workers = get_n_workers(len(blocks), params)
+    n_workers = get_n_workers(len(blocks), subparams)
     with multiprocessing.Pool(processes=n_workers) as pool:
         pool.starmap(split_with_combinechannels, arglist)
 
@@ -144,10 +145,10 @@ def split_with_combinechannels(
     """Average membrane and nuclear channels and write as blocks."""
 
     # Prepare the output.
-    step_id = 'blocks'
+    step_id = 'splitblocks'
     postfix = ''
 
-    outputdir = prep_outputdir(outputdir, image_in, subdir=step_id)
+    outputdir = get_outputdir(image_in, '', outputdir, 'blocks', 'blocks')
 
     paths = get_paths(image_in)
     datadir, filename = os.path.split(paths['base'])
@@ -372,10 +373,12 @@ def merge(
 
     step_id = 'mergeblocks'
 
-    blockdir = get_outputdir(image_in, parameter_file, outputdir, 'blocks', fallback='blocks')
-    outputdir = get_outputdir(image_in, parameter_file, outputdir, step_id, fallback='')
+    blockdir = get_outputdir(image_in, parameter_file, outputdir, 'blocks', 'blocks')
+    outputdir = get_outputdir(image_in, parameter_file, outputdir, step_id, '')
 
-    params = get_params(locals(), parameter_file, step_id)
+    params = get_params(locals().copy(), parameter_file, step_id)
+    subparams = get_params(locals().copy(), parameter_file, step_id, 'submit')
+
     idss = [v['ids'] for ids, v in params.items() if ids.startswith('ids')]
 
     filepaths, blocks = get_blockfiles(image_in, blockdir, params['blocks'])
@@ -400,7 +403,7 @@ def merge(
         )
         for ids in idss]
 
-    n_workers = get_n_workers(len(idss), params)
+    n_workers = get_n_workers(len(idss), subparams)
     with multiprocessing.Pool(processes=n_workers) as pool:
         pool.starmap(mergeblocks, arglist)
 

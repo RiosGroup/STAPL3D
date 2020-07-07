@@ -89,15 +89,16 @@ def estimate(
     blocks=[],
     grp='segm',
     ids='labels_memb_del_relabeled_fix',
-    postfix='fix',
+    postfix='',
     ):
     """Correct z-stack shading."""
 
-    step_id = 'copyblocks'
+    step_id = 'zipping'
 
     outputdir = get_outputdir(image_in, parameter_file, outputdir, step_id, fallback='blocks')
 
-    params = get_params(locals(), parameter_file, step_id)
+    params = get_params(locals().copy(), parameter_file, step_id)
+    subparams = get_params(locals().copy(), parameter_file, step_id, 'submit')
 
     filepaths, blocks = get_blockfiles(image_in, outputdir, params['blocks'])
 
@@ -126,7 +127,7 @@ def estimate(
 
     n_seams_yx, seamgrid = get_zip_layout(image_in, blocksize)
 
-    n_workers = get_n_workers(len(blocks), params)
+    n_workers = get_n_workers(len(blocks), subparams)
 
     for axis, n_seams in zip([1, 2], n_seams_yx):
         n_proc = min(n_workers, int(np.ceil(n_seams / 2)))
@@ -220,6 +221,7 @@ def resegment_block_boundaries(
     images_in.sort()
 
     step = 'resegment'
+
     # paths = get_paths(images_in[0], -1, 0, outputstem, step, save_steps)
     paths = {}
     paths['out_base'] = outputstem
@@ -730,15 +732,16 @@ def relabel(
     blocks=[],
     grp='segm',
     ids='labels_memb_del',
-    postfix='relabeled',
+    postfix='_relabeled',
     ):
     """Correct z-stack shading."""
 
     step_id = 'relabel'
 
-    outputdir = get_outputdir(image_in, parameter_file, outputdir, step_id, fallback='blocks')
+    outputdir = get_outputdir(image_in, parameter_file, outputdir, step_id, 'blocks')
 
-    params = get_params(locals(), parameter_file, step_id)
+    params = get_params(locals().copy(), parameter_file, step_id)
+    subparams = get_params(locals().copy(), parameter_file, step_id, 'submit')
 
     filepaths, blocks = get_blockfiles(image_in, outputdir, params['blocks'])
 
@@ -757,12 +760,12 @@ def relabel(
         )
         for block_idx, filepath in zip(blocks, filepaths)]
 
-    n_workers = get_n_workers(len(blocks), params)
+    n_workers = get_n_workers(len(blocks), subparams)
     with multiprocessing.Pool(processes=n_workers) as pool:
         pool.starmap(relabel_parallel, arglist)
 
 
-def relabel_parallel(image_in, block_idx, maxlabelfile, pf='relabeled'):
+def relabel_parallel(image_in, block_idx, maxlabelfile, pf='_relabeled'):
 
     maxlabels = np.loadtxt(maxlabelfile, dtype=np.uint32)
     maxlabel = np.sum(maxlabels[:block_idx])
@@ -773,7 +776,7 @@ def relabel_parallel(image_in, block_idx, maxlabelfile, pf='relabeled'):
     relabel_block(seg, pf, maxlabel)
 
 
-def relabel_block(im, pf='relabeled', maxlabel=1, bg_label=0, force_sequential=False):
+def relabel_block(im, pf='_relabeled', maxlabel=1, bg_label=0, force_sequential=False):
     """Relabel dataset sequentially."""
 
     data = im.slice_dataset()
@@ -785,7 +788,7 @@ def relabel_block(im, pf='relabeled', maxlabel=1, bg_label=0, force_sequential=F
         data[~mask] += maxlabel
 
     comps = im.split_path()
-    outpath = '{}.h5{}_{}'.format(comps['base'], comps['int'], pf)
+    outpath = '{}.h5{}{}'.format(comps['base'], comps['int'], pf)
     mo = write_output(outpath, data, props=im.get_props(), imtype='Label')
 
     try:
@@ -812,15 +815,16 @@ def copyblocks(
     blocks=[],
     grp='segm',
     ids='labels_memb_del_relabeled',
-    postfix='fix',
+    postfix='_fix',
     ):
     """Correct z-stack shading."""
 
     step_id = 'copyblocks'
 
-    outputdir = get_outputdir(image_in, parameter_file, outputdir, step_id, fallback='blocks')
+    outputdir = get_outputdir(image_in, parameter_file, outputdir, step_id, 'blocks')
 
-    params = get_params(locals(), parameter_file, step_id)
+    params = get_params(locals().copy(), parameter_file, step_id)
+    subparams = get_params(locals().copy(), parameter_file, step_id, 'submit')
 
     filepaths, blocks = get_blockfiles(image_in, outputdir, params['blocks'])
 
@@ -838,19 +842,18 @@ def copyblocks(
         )
         for block_idx, filepath in zip(blocks, filepaths)]
 
-    n_workers = get_n_workers(len(blocks), params)
+    n_workers = get_n_workers(len(blocks), subparams)
     with multiprocessing.Pool(processes=n_workers) as pool:
         pool.starmap(copy_blocks_parallel, arglist)
 
 
-def copy_blocks_parallel(image_in, block_idx, postfix='fix'):
+def copy_blocks_parallel(image_in, block_idx, postfix='_fix'):
 
     im = LabelImage(image_in)
     im.load(load_data=False)
 
-    vols = {postfix: ['Label', 'uint32'],
+    vols = {'{}'.format(postfix): ['Label', 'uint32'],
             '{}_reseg_mask'.format(postfix): ['Mask', 'bool'],
-            #'{}_peaks'.format(postfix): ['Mask', 'bool'],
             'block_idxs': ['Label', 'uint16']}
 
     #vols = {postfix: ['Mask', 'bool']}
@@ -859,18 +862,18 @@ def copy_blocks_parallel(image_in, block_idx, postfix='fix'):
         copy_h5_dataset(im, imtype, pf, dtype, k=block_idx)
 
 
-def copy_h5_dataset(im, imtype='Label', pf='fix', dtype='uint32', k=0):
+def copy_h5_dataset(im, imtype='Label', pf='_fix', dtype='uint32', k=0):
     """Copy an image to a new h5 dataset."""
 
     comps = im.split_path()
     if '_reseg_mask' in pf: #  or '_peaks' in pf
-        outpath = '{}.h5{}_{}'.format(comps['base'], comps['int'], pf)
+        outpath = '{}.h5{}{}'.format(comps['base'], comps['int'], pf)
         data = np.zeros(im.dims, dtype='bool')
     elif pf == 'block_idxs':
         outpath = '{}.h5/segm/{}'.format(comps['base'], pf)
         data = np.ones(im.dims, dtype='uint16') * (k+1)
     else:
-        outpath = '{}.h5{}_{}'.format(comps['base'], comps['int'], pf)
+        outpath = '{}.h5{}{}'.format(comps['base'], comps['int'], pf)
         data = im.slice_dataset()
 
     mo = write_output(outpath, data, props=im.get_props(), imtype=imtype)
@@ -891,7 +894,7 @@ def copy_h5_dataset(im, imtype='Label', pf='fix', dtype='uint32', k=0):
     return mo
 
 
-def delete_blocks_parallel(image_in, block_idx, postfix='fix'):
+def delete_blocks_parallel(image_in, block_idx, postfix='_fix'):
 
     im = LabelImage(image_in)
     im.load(load_data=False)
@@ -904,11 +907,11 @@ def delete_blocks_parallel(image_in, block_idx, postfix='fix'):
         delete_h5_dataset(im, pf=pf)
 
 
-def delete_h5_dataset(im, pf='fix'):
+def delete_h5_dataset(im, pf='_fix'):
     """Copy an image to a new h5 dataset."""
 
     comps = im.split_path()
-    ids = '{}_{}'.format(comps['int'], pf)
+    ids = '{}{}'.format(comps['int'], pf)
     print(ids)
     del im.file[ids]
 
