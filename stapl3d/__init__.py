@@ -2041,7 +2041,7 @@ def get_n_workers(n_workers, params):
     try:
         if params['n_workers'] > 0:
             n_workers = params['n_workers']
-    except KeyError:
+    except (KeyError, TypeError):
         pass
 
     n_workers = min(n_workers, cpu_count)
