@@ -9,9 +9,9 @@ projectdir='/hpc/pmc_rios/Kidney'
 dataset='HFK16w'
 
 load_dataset "${projectdir}" "${dataset}"
-cp "${STAPL3D}/pipelines/params.yml" "${datadir}/${dataset}.yml"
-set_ZYXCT_ims -v "${datadir}/${dataset}_shading_stitching.ims"
-write_ZYXCT_to_yml ${dataset} "${datadir}/${dataset}_dims.yml"
+# cp "${STAPL3D}/pipelines/params.yml" "${datadir}/${dataset}.yml"
+# set_ZYXCT_ims -v "${datadir}/${dataset}_shading_stitching.ims"
+# write_ZYXCT_to_yml ${dataset} "${datadir}/${dataset}_dims.yml"
 # [[ -f "${datadir}/${dataset}.yml" ]] || init_dataset 'copy_yaml'
 # [[ -f "${datadir}/${dataset}_dims.yml" ]] && init_dataset
 
@@ -21,24 +21,27 @@ load_parameters "${dataset}" -v
 ###==========================================================================###
 ### preprocessing
 jid=''
-submit $( generate_script shading_estimation ) $jid
+submit $( generate_script shading ) $jid
 # submit $( generate_script shading_apply ) $jid  # TODO: non-proprietary
 # submit $( generate_script stitching ) $jid  # TODO: non-proprietary
 
 jid=''
-submit $( generate_script generate_mask ) $jid
-# submit $( generate_script splitchannels ) $jid  # TODO
-submit $( generate_script bias_estimation ) $jid
-submit $( generate_script bias_stack ) $jid
-submit $( generate_script bias_apply ) $jid
-submit $( generate_script ims_aggregate ) $jid
+submit $( generate_script mask ) $jid
+submit $( generate_script splitchannels ) $jid
+submit $( generate_script ims_aggregate1 ) $jid
+submit $( generate_script biasfield ) $jid
+submit $( generate_script biasfield_stack ) $jid
+submit $( generate_script biasfield_apply ) $jid
+submit $( generate_script ims_aggregate2 ) $jid
 
 
 ###==========================================================================###
 ### segmentation
+# submit $( generate_script block_segmentation ) $jid
 submit $( generate_script splitblocks ) $jid
 submit $( generate_script membrane_enhancement ) $jid
 submit $( generate_script segmentation ) $jid
+
 submit $( generate_script segmentation_postproc ) $jid
 submit $( generate_script segmentation_gather ) $jid
 
@@ -76,6 +79,7 @@ submit $( generate_script zipping_postproc ) $jid
 ### merging
 submit $( generate_script subsegment ) $jid
 submit $( generate_script mergeblocks ) $jid
+# TODO: merge the idss?
 
 ###==========================================================================###
 ### features

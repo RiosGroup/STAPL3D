@@ -59,9 +59,9 @@ splitchannels:
     params:
         channel_re: _ch{:02d}
         insert: true
-        replace: true
+        replace: false
     submit:
-        array: channels
+        array: channel
         nodes: 1
         tasks: 1
         mem: 60G
@@ -95,6 +95,17 @@ mask:
     conda:
         env: stapl3d
 
+ims_aggregate1:
+    params:
+    conda:
+        env: stapl3d
+    submit:
+        array: no
+        nodes: 1
+        tasks: 1
+        mem: 20G
+        wtime: 00:30:00
+
 biasfield:
     params:
         postfix: _biasfield
@@ -121,7 +132,7 @@ biasfield:
     conda:
         env: stapl3d
 
-bias_stack:
+biasfield_stack:
     conda:
         env: stapl3d
     submit:
@@ -150,7 +161,7 @@ biasfield_apply:
     conda:
         env: stapl3d
 
-ims_aggregate:
+ims_aggregate2:
     params:
     conda:
         env: stapl3d
@@ -160,6 +171,17 @@ ims_aggregate:
         tasks: 1
         mem: 20G
         wtime: 00:30:00
+
+block_segmentation:
+    params:
+    conda:
+        env: stapl3d
+    submit:
+        array: block
+        nodes: 1
+        tasks: 1
+        mem: 60G
+        wtime: 05:00:00
 
 splitblocks:
     params:
@@ -231,7 +253,7 @@ segmentation:
         ids_memb_chan: memb/mean
         ids_nucl_chan: chan/ch00
         ids_dset_mean: mean
-        segments_ods: labels_memb_del  # TODO
+        segments_ods: labels_memb_del
         dapi_shift_planes: 3
         nucl_opening_footprint:
             - 3
@@ -426,7 +448,7 @@ copydataset:
 
 subsegment:
     params:
-        ids: /segm/labels_memb_del_relabeled_fix
+        ids: segm/labels_memb_del_relabeled_fix
         ods_full: segm/labels_memb_del_relabeled_fix_full
         ods_memb: segm/labels_memb_del_relabeled_fix_memb
         ods_nucl: segm/labels_memb_del_relabeled_fix_nucl

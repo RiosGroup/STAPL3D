@@ -75,7 +75,7 @@ function load_parameters {
     bs="${dataset__bs}" && check_dims bs "$bs" || set_blocksize
     bm="${dataset__bm}" && check_dims bm "$bm" || bm=64
 
-    dataset_preproc="${dataset}${shading__postfix}${stitching__postfix}${biasfield__postfix}"
+    dataset_preproc="${dataset}${shading__params__postfix}${stitching__params__postfix}${biasfield__params__postfix}"
 
     set_channelstems "${dataset_preproc}"
 
@@ -167,10 +167,10 @@ function set_dirtree {
     biasfielddir="${datadir}/${dirtree__datadir__biasfield}"
     mkdir -p "${biasfielddir}"
 
-    profdir="${datadir}/${dirtree__datadir__profiling__base}"
+    profdir="${datadir}/${dirtree__datadir__profiling}"
     mkdir -p "${profdir}"
 
-    featdir="${profdir}/${dirtree__datadir__profiling__featdir}"
+    featdir="${profdir}/${dirtree__datadir__blocks}"
     mkdir -p "${featdir}"
 
     jobdir="${datadir}/${dirtree__datadir__jobfiles}"
@@ -621,9 +621,9 @@ function base_cmds {
 
     echo idx="\$((SLURM_ARRAY_TASK_ID-1))"
     echo filestem="${datadir}/${dataset}"
-    echo shading_stem="\${filestem}${shading__postfix}"
-    echo stitching_stem="\${shading_stem}${stitching__postfix}"
-    echo biasfield_stem="\${stitching_stem}${biasfield__postfix}"
+    echo shading_stem="\${filestem}${shading__params__postfix}"
+    echo stitching_stem="\${shading_stem}${stitching__params__postfix}"
+    echo biasfield_stem="\${stitching_stem}${biasfield__params__postfix}"
     echo channelstem="${channeldir}/\${channelstems[idx]}"
     echo blockstem="${blockdir}/\${blockstems[idx]}"
 
@@ -733,7 +733,7 @@ function set_submit_pars {
             range="1-${#zipquads[@]}:1"
             ;;
         'idss')
-            set_idss "${stage}__ids..__ids=" '='
+            set_idss "${stage}__params__ids..__ids=" '='
             range="1-${#idss[@]}:1"
             ;;
     esac
@@ -792,7 +792,7 @@ function generate_script {
 ### functions to generate bash commands
 ###==========================================================================###
 
-function get_py_shading_estimation {
+function get_py_shading {
 
     echo '#!/usr/bin/env python'
     echo ''
@@ -809,7 +809,7 @@ function get_py_shading_estimation {
         )"
 
 }
-function get_cmd_shading_estimation {
+function get_cmd_shading {
 
     pyfile="${datadir}/${jobname}.py"
     eval get_py_${stage} > "${pyfile}"
@@ -822,7 +822,7 @@ function get_cmd_shading_estimation {
 }
 
 
-function get_py_generate_mask {
+function get_py_mask {
 
     echo '#!/usr/bin/env python'
     echo ''
@@ -837,7 +837,7 @@ function get_py_generate_mask {
         )"
 
 }
-function get_cmd_generate_mask {
+function get_cmd_mask {
 
     pyfile="${datadir}/${jobname}.py"
     eval get_py_${stage} > "${pyfile}"
@@ -849,7 +849,65 @@ function get_cmd_generate_mask {
 }
 
 
-function get_py_bias_estimation {
+function get_py_splitchannels {
+
+    echo '#!/usr/bin/env python'
+    echo ''
+    echo 'import sys'
+    echo 'image_in = sys.argv[1]'
+    echo 'parameter_file = sys.argv[2]'
+    echo ''
+    echo "from stapl3d import imarisfiles"
+    echo "imarisfiles.split_channels(
+        image_in,
+        parameter_file,
+        )"
+
+}
+function get_cmd_splitchannels {
+
+    pyfile="${datadir}/${jobname}.py"
+    eval get_py_${stage} > "${pyfile}"
+
+    echo python "${pyfile}" \
+        "\${stitching_stem}.ims" \
+        "\${filestem}.yml"
+
+}
+
+
+function get_py_ims_aggregate1 {
+
+    echo '#!/usr/bin/env python'
+    echo ''
+    echo 'import sys'
+    echo 'out_path = sys.argv[1]'
+    echo 'ref_path = sys.argv[2]'
+    echo 'inputfiles = sys.argv[3:]'
+    echo ''
+    echo "from stapl3d.imarisfiles import make_aggregate"
+    echo "make_aggregate(
+        inputfiles,
+        out_path,
+        ref_path,
+        )"
+
+}
+function get_cmd_ims_aggregate1 {
+
+    pyfile="${datadir}/${jobname}.py"
+    eval get_py_${stage} > "${pyfile}"
+
+    local chpat="${channeldir}/${dataset}_ch??${shading__params__postfix}${stitching__params__postfix}.ims"
+    echo python "${pyfile}" \
+        "\${stitching_stem}.ims" \
+        "\${stitching_stem}${dataset__ims_ref_postfix}.ims" \
+        `ls ${chpat}`
+
+}
+
+
+function get_py_biasfield {
 
     echo '#!/usr/bin/env python'
     echo ''
@@ -866,7 +924,7 @@ function get_py_bias_estimation {
         )"
 
 }
-function get_cmd_bias_estimation {
+function get_cmd_biasfield {
 
     pyfile="${datadir}/${jobname}.py"
     eval get_py_${stage} > "${pyfile}"
@@ -879,7 +937,7 @@ function get_cmd_bias_estimation {
 }
 
 
-function get_py_bias_stack {
+function get_py_biasfield_stack {
 
     echo '#!/usr/bin/env python'
     echo ''
@@ -907,7 +965,7 @@ function get_py_bias_stack {
         )"
 
 }
-function get_cmd_bias_stack {
+function get_cmd_biasfield_stack {
 
     pyfile="${datadir}/${jobname}.py"
     eval get_py_${stage} > "${pyfile}"
@@ -928,7 +986,7 @@ function get_cmd_bias_stack {
 }
 
 
-function get_py_bias_apply {
+function get_py_biasfield_apply {
 
     echo '#!/usr/bin/env python'
     echo ''
@@ -945,7 +1003,7 @@ function get_py_bias_apply {
         )"
 
 }
-function get_cmd_bias_apply {
+function get_cmd_biasfield_apply {
 
     pyfile="${datadir}/${jobname}.py"
     eval get_py_${stage} > "${pyfile}"
@@ -958,7 +1016,7 @@ function get_cmd_bias_apply {
 }
 
 
-function get_py_ims_aggregate {
+function get_py_ims_aggregate2 {
 
     echo '#!/usr/bin/env python'
     echo ''
@@ -975,7 +1033,7 @@ function get_py_ims_aggregate {
         )"
 
 }
-function get_cmd_ims_aggregate {
+function get_cmd_ims_aggregate2 {
 
     pyfile="${datadir}/${jobname}.py"
     eval get_py_${stage} > "${pyfile}"
@@ -991,8 +1049,11 @@ function get_cmd_ims_aggregate {
 
 function get_cmd_block_segmentation {
 
+    jobname="go_${dataset__alias}_splitblocks"
     get_cmd_splitblocks
+    jobname="go_${dataset__alias}_membrane_enhancement"
     get_cmd_membrane_enhancement
+    jobname="go_${dataset__alias}_segmentation"
     get_cmd_segmentation
 
 }
@@ -1054,8 +1115,8 @@ function get_cmd_membrane_enhancement {
         "\${idx}"
 
     echo ''
-    echo "rm \${blockstem}${biasfield__params__postfix}_memb-eigen.mha"
-    echo "rm \${blockstem}${biasfield__params__postfix}_memb-*.nii.gz"
+    echo "rm \${blockdir}/${dataset}${shading__params__postfix}${stitching__params__postfix}${biasfield__params__postfix}_memb-eigen.mha"
+    echo "rm \${blockdir}/${dataset}${shading__params__postfix}${stitching__params__postfix}${biasfield__params__postfix}_memb-*.nii.gz"
 
 }
 
@@ -1177,7 +1238,7 @@ function get_cmd_copyblocks {
 
 
 function get_cmd_ziplines { get_cmd_zipping "${axis}" ; }
-function get_cmd_zipquads { get_cmd_zipping "${zipquads__axis}" ; }
+function get_cmd_zipquads { get_cmd_zipping "${zipquads__params__axis}" ; }
 function get_py_zipping {
 
     echo '#!/usr/bin/env python'
