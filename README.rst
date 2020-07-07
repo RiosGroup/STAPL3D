@@ -56,6 +56,7 @@ This software runs on Linux, MacOS and Windows. It has been tested on:
  - Windows: 10 Pro
 
 dependencies:
+Python (auto-installed through with conda or pip)
 
  - python=3
  - scikit-image>=0.16.2
@@ -71,8 +72,11 @@ dependencies:
  - nibabel>=3.1.0
  - simpleitk>=2.0.0rc1.post285
 
- - ACME
- - Ilastik (optional)
+Other software packages:
+
+ - `ACME <https://wiki.med.harvard.edu/SysBio/Megason/ACME>`_
+ - `Ilastik <https://www.ilastik.org/documentation/basics/installation.html>`_ (optional)
+
 
 Installation
 ------------
@@ -83,6 +87,7 @@ STAPL-3D is most easily installed (< 5 min) with `conda <https://docs.conda.io/e
 
   git clone https://github.com/RiosGroup/STAPL3D.git
   cd STAPL3D
+
   conda env create -f environment.yml
   conda activate stapl3d
 

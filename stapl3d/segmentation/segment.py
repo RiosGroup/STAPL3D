@@ -698,7 +698,12 @@ def perform_watershed(
     # TODO: try masked watershed, e.g.:
     # 1) simple dataset mask from channel-mean,
     # 2) dilated dapi mask for contraining cells
-    ws = watershed(im_memb.ds[:], seeds, compactness=compactness)
+    try:
+        ws = watershed(im_memb.ds[:], seeds, compactness=compactness, spacing=im_memb.elsize)
+    except TypeError:
+        print('WARNING: possibly not using correct spacing for compact watershed')
+        ws = watershed(im_memb.ds[:], seeds, compactness=compactness)
+
     im_ws = write(ws, outstem, '_memb', im_memb, imtype='Label')
 
     return im_ws
