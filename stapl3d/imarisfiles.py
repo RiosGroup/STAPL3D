@@ -243,3 +243,26 @@ def ims_to_zeros(image_in):
                 ds[:] = np.zeros(ds.shape, dtype=ds.dtype)
 
     im.close()
+
+
+def find_resolution_level(image_in):
+    """Find the smallest resolution level not downsampled in Z."""
+
+    mo = Image(image_in, permission='r')
+    mo.load(load_data=False)
+
+    def att2str(att):
+        return ''.join([t.decode('utf-8') for t in att])
+
+    Z = int(mo.dims[0])
+    Z = Z_rl
+    rl_idx = 0
+    while Z == Z_rl:
+        rl_idx += 1
+        rl = mo.file['/DataSet/ResolutionLevel {}'.format(rl_idx)]
+        im_info = rl['TimePoint 0/Channel 0']
+        Z_rl = int(att2str(im_info.attrs['ImageSizeZ']))
+
+    mo.close()
+
+    return rl_idx - 1

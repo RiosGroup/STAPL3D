@@ -31,6 +31,10 @@ from stapl3d import (
     MaskImage,
     )
 
+from stapl3d.imarisfiles import (
+    find_resolution_level,
+    )
+
 from stapl3d.reporting import (
     gen_orthoplot_with_colorbar,
     get_centreslices,
@@ -132,7 +136,8 @@ def generate_dataset_mask(
     logging.basicConfig(filename='{}.log'.format(outputstem), level=logging.INFO)
     report = {'parameters': locals()}
 
-
+    if '.ims' in image_in and resolution_level == -1:
+        resolution_level = find_resolution_level(image_in)
     im_data = extract_resolution_level(image_in, resolution_level)
 
     im_mean, slc_thrs = extract_mean(im_data, 'c', True, outputpat)

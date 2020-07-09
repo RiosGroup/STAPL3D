@@ -12,10 +12,6 @@ dataset:
     name: HFK16w
     alias: HFK16w
     ims_ref_postfix: _ref_uint16
-    reslev: 4
-    dsr: 16
-    dsa: 4
-    dst: 64
     dapi_chan: 0
     dapi_thr: 0
     dapi_shift: 0
@@ -72,7 +68,6 @@ splitchannels:
 mask:
     params:
         postfix: _mask
-        resolution_level: 1
         sigma: 48.0
         use_median_thresholds: true
         median_factor: 3
