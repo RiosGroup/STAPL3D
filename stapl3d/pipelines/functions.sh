@@ -861,11 +861,13 @@ function get_py_splitchannels {
     echo 'import sys'
     echo 'image_in = sys.argv[1]'
     echo 'parameter_file = sys.argv[2]'
+    echo 'idx = int(sys.argv[3])'
     echo ''
     echo "from stapl3d import imarisfiles"
     echo "imarisfiles.split_channels(
         image_in,
         parameter_file,
+        channels=[idx],
         )"
 
 }
@@ -876,7 +878,8 @@ function get_cmd_splitchannels {
 
     echo python "${pyfile}" \
         "\${stitching_stem}.ims" \
-        "\${filestem}.yml"
+        "\${filestem}.yml" \
+        "\${idx}"
 
 }
 
