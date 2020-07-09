@@ -4,7 +4,6 @@
 ### analysis preparation
 source "${HOME}/.my_config.ini" && load_config
 
-compute_env='HPC'
 projectdir='/hpc/pmc_rios/Kidney'
 dataset='HFK16w'
 

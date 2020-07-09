@@ -10,12 +10,13 @@ function load_dataset {
     local projectdir="${1}"
     local dataset="${2}"
 
-    echo "###==========================================================================###"
-    echo "### processing dataset ${dataset}"
-
     set_datadir "${projectdir}" "${dataset}"
-    echo "### data directory is ${datadir}"
-    # TODO: exit on undefined PROJECT directory?
+
+    echo ""
+    echo " --- project directory is '${projectdir}'"
+    echo " --- processing dataset '${dataset}'"
+    echo " --- data directory is '${datadir}'"
+    echo ""
 
 }
 
@@ -49,42 +50,37 @@ function load_parameters {
 
     parfile="${datadir}/${dataset}.yml"
     eval $( parse_yaml "${parfile}" "" )
-    [[ "$2" == '-v' ]] &&
-        echo "### dataset details provided:" && parse_yaml "${parfile}"
-
-    #parfile="${datadir}/${dataset}_params.yml"
-    #eval $( parse_yaml "${parfile}" "" )
-    #[[ "$2" == '-v' ]] && {
-    #    echo "### using parameters:" && parse_yaml "${parfile}"
-    #    echo "###==========================================================================###"
-    #    echo "" ; }
-    # TODO: exit on missing parameterfile [or revert to a default one in the package]
-    # cp <package/pipelines/params.yml ${datadir}/${dataset}_params.yml
 
     set_dirtree "${datadir}"
 
     check_dims Z "$Z" || set_ZYXCT "${datadir}/${dataset}_dims.yml"
     check_dims Z "$Z" -v
-    echo "### data dimensions are ZYXCT='${Z} ${Y} ${X} ${C} ${T}'"
-
-    [[ "$2" == '-v' ]] && {
-        echo "###==========================================================================###"
-        echo "" ; }
     # TODO: exit on undefined ZYXCT
 
     bs="${dataset__bs}" && check_dims bs "$bs" || set_blocksize
     bm="${dataset__bm}" && check_dims bm "$bm" || bm=64
 
-    dataset_preproc="${dataset}${shading__params__postfix}${stitching__params__postfix}${biasfield__params__postfix}"
+    dataset_shading="${dataset}${shading__params__postfix}"
+    dataset_stitching="${dataset_shading}${stitching__params__postfix}"
+    dataset_biasfield="${dataset_stitching}${biasfield__params__postfix}"
+    dataset_preproc="${dataset_biasfield}"
 
     set_channelstems "${dataset_preproc}"
 
     set_blocks "${bs}" "${bm}"
 
-    echo "### parallelization: ${#channelstems[@]} channels"
-    echo "### parallelization: ${#blockstems[@]} blocks (${nx} x ${ny}) of blocksize ${bs} with margin ${bm}"
-    echo "###==========================================================================###"
     echo ""
+    echo " --- data dimensions are ZYXCT='${Z} ${Y} ${X} ${C} ${T}'"
+    echo ""
+    echo " --- parallelization: ${#channelstems[@]} channels"
+    echo " --- parallelization: ${#blockstems[@]} blocks (${nx} x ${ny}) of blocksize ${bs} with margin ${bm}"
+    echo ""
+    [[ "$2" == '-v' ]] && {
+        echo ""
+        echo " --- parameters imported from parameter file:"
+        echo ""
+        parse_yaml "${parfile}"
+        echo "" ; }
 
 }
 
@@ -619,7 +615,16 @@ function base_cmds {
     echo load_parameters "${dataset}"
     echo ''
 
-    echo idx="\$((SLURM_ARRAY_TASK_ID-1))"
+    case "${compute_env}" in
+        'SGE')
+            echo TASK_ID="\${SGE_TASK_ID}"
+            ;;
+        'SLURM')
+            echo TASK_ID="\${SLURM_ARRAY_TASK_ID}"
+            ;;
+    esac
+    echo idx="\$((TASK_ID - 1))"
+    echo ''
     echo filestem="${datadir}/${dataset}"
     echo shading_stem="\${filestem}${shading__params__postfix}"
     echo stitching_stem="\${shading_stem}${stitching__params__postfix}"
@@ -1278,7 +1283,7 @@ function get_cmd_zipping {
 
     echo ''
     echo set_images_in "${blockdir}/${dataset_preproc}" "${ids}"
-    echo set_seamnumbers "${axis}" "\${SLURM_ARRAY_TASK_ID}" "${start_x}" "${start_y}" $((nx - 1)) $((ny - 1))
+    echo set_seamnumbers "${axis}" "\${TASK_ID}" "${start_x}" "${start_y}" $((nx - 1)) $((ny - 1))
 
     echo python "${pyfile}" \
         "${Z}" "${bs}" "${bs}" \
