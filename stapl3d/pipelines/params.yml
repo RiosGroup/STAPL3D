@@ -29,7 +29,7 @@ dataset:
     bm: 64
 
 shading:
-    file_format: 'czi'
+    file_format: czi
     params:
         postfix: _shading
         metric: median
