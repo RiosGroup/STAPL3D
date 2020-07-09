@@ -958,7 +958,7 @@ function get_py_biasfield_stack {
     echo "from stapl3d.preprocessing import biasfield"
     echo "from stapl3d import reporting"
     echo ''
-    echo "inputpat = glob('{}_ch??{}'.format(inputstem, biasfield_postfix))"
+    echo "inputpat = '{}_ch??{}'.format(inputstem, biasfield_postfix)"
     echo ''
     echo "inputfiles = glob('{}.h5'.format(inputpat))"
     echo "inputfiles.sort()"
@@ -968,12 +968,12 @@ function get_py_biasfield_stack {
     echo "pdfs = glob('{}.pdf'.format(inputpat))"
     echo "pdfs.sort()"
     echo "pdf_out = '{}.pdf'.format(outputstem)"
-    echo "reporting.zip_parameters(inputstem, 'biasfield')"
+    echo "reporting.merge_reports(pdfs, pdf_out)"
     echo ''
     echo "pickles = glob('{}.pickle'.format(inputpat))"
     echo "pickles.sort()"
     echo "zip_out = '{}.zip'.format(outputstem)"
-    echo "reporting.merge_reports(pdfs, pdf_out)"
+    echo "reporting.zip_parameters(pickles, zip_out)"
 
 }
 function get_cmd_biasfield_stack {
