@@ -36,6 +36,10 @@ from stapl3d import (
     wmeMPI,
     )
 
+from stapl3d.imarisfiles import (
+    find_downsample_factors,
+    find_resolution_level,
+    )
 from stapl3d.preprocessing.masking import (write_data)
 from stapl3d.reporting import (
     gen_orthoplot,
@@ -84,7 +88,7 @@ def estimate(
     channels=[],
     mask_in='',
     resolution_level=-1,
-    downsample_factors={'z': 1, 'y': 1, 'x': 1, 'c': 1, 't': 1},
+    downsample_factors=[],
     n_iterations=50,
     n_fitlevels=4,
     n_bspline_cps={'z': 5, 'y': 5, 'x': 5},
@@ -119,10 +123,10 @@ def estimate(
             subparams['tasks'],
             params['mask_in'],
             params['resolution_level'],
-            [params['downsample_factors'][dim] for dim in 'zyxct'],
+            params['downsample_factors'],
             params['n_iterations'],
             params['n_fitlevels'],
-            [params['n_bspline_cps'][dim] for dim in 'zyx'],
+            params['n_bspline_cps'],
             params['postfix'],
             outputdir,
         )
@@ -141,16 +145,25 @@ def estimate_channel(
     n_threads=1,
     mask_in='',
     resolution_level=-1,
-    downsample_factors=[1, 1, 1, 1, 1],
+    downsample_factors=[],
     n_iterations=50,
     n_fitlevels=4,
-    n_bspline_cps=[5, 5, 5],
+    n_bspline_cps={'z': 5, 'y': 5, 'x': 5},
     postfix='',
     outputdir='',
     ):
     """Estimate the x- and y-profiles for a channel in a czi file.
 
     """
+
+    if isinstance(downsample_factors, dict):
+        downsample_factors = [downsample_factors[dim] for dim in 'zyxct']
+
+    if isinstance(n_bspline_cps, dict):
+        n_bspline_cps = [n_bspline_cps[dim] for dim in 'zyx']
+
+    if not downsample_factors:
+        downsample_factors, _, resolution_level = calculate_downsample_factors(image_in, resolution_level)
 
     # Prepare the output.
     step_id = 'biasfield'
@@ -169,7 +182,6 @@ def estimate_channel(
 
     logging.basicConfig(filename='{}.log'.format(outputstem), level=logging.INFO)
     report = {'parameters': locals()}
-
 
     ds_im = downsample_channel(image_in, channel, resolution_level,
                                downsample_factors, False, outputpat)
@@ -199,7 +211,7 @@ def estimate_channel(
 
 
 def downsample_channel(image_in, ch, resolution_level=-1,
-                       dsfacs=[1, 4, 4, 1, 1], ismask=False, output=''):
+                       dsfacs=[1, 1, 1, 1, 1], ismask=False, output=''):
     """Downsample an image."""
 
     ods = 'data' if not ismask else 'mask'
@@ -364,7 +376,8 @@ def apply(
     n_workers=0,
     image_ref='',
     channels=[],
-    downsample_factors={'z': 1, 'y': 1, 'x': 1, 'c': 1, 't': 1},
+    resolution_level=-1,
+    downsample_factors=[],
     blocksize_xy=1280,
     postfix=''
     ):
@@ -410,7 +423,8 @@ def apply(
                 os.path.join(channeldir, '{}{}.ims'.format(chstem, cfg['biasfield']['params']['postfix'])),
                 params['image_ref'],
                 ch,
-                [params['downsample_factors'][dim] for dim in 'zyxct'],
+                params['resolution_level'],
+                params['downsample_factors'],
                 params['blocksize_xy'],
                 params['postfix'],
             )
@@ -427,11 +441,19 @@ def apply_channel(
     image_out,
     image_ref='',
     channel=None,
-    downsample_factors=[1, 1, 1, 1, 1],
+    resolution_level=-1,
+    downsample_factors=[],
     blocksize_xy=1280,
     postfix=''
     ):
     """Correct inhomogeneity of a channel."""
+
+    if isinstance(downsample_factors, dict):
+        downsample_factors = [downsample_factors[dim] for dim in 'zyxct']
+
+    if not downsample_factors:
+        dsfacs_bf, dsfacs_rl, _ = calculate_downsample_factors(image_in, resolution_level)
+        downsample_factors = list(np.array(dsfacs_bf) * np.array(dsfacs_rl))
 
     im = Image(image_in, permission='r')
     im.load(load_data=False)
@@ -505,6 +527,30 @@ def get_bias_field_block(bf, slices, outdims, dsfacs):
     bias = resize(bf_block, outdims, preserve_range=True)
 
     return bias
+
+
+def calculate_downsample_factors(image_in, resolution_level=-1):
+
+    if '.ims' in image_in:
+        if resolution_level == -1:
+            resolution_level = find_resolution_level(image_in)
+        rl_path = '{}/DataSet/ResolutionLevel {}'.format(image_in, resolution_level)
+        dsfacs = find_downsample_factors(image_in, 0, resolution_level)
+        downsample_factors_reslev = list(dsfacs) + [1, 1]
+    else:
+        rl_path = image_in
+
+    im = Image(rl_path, permission='r')
+    im.load(load_data=False)
+
+    target = {'z': im.elsize[im.axlab.index('z')], 'x': 20, 'y': 20}
+    dsfacs = [target[dim] / im.elsize[im.axlab.index(dim)] for dim in 'zyx']
+    dsfacs = [np.round(dsfac).astype('int') for dsfac in dsfacs]
+    downsample_factors = dsfacs + [1, 1]
+
+    im.close()
+
+    return downsample_factors, downsample_factors_reslev, resolution_level
 
 
 def get_data(h5_path, ids, ch=0, dim=''):
