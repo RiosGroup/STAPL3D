@@ -251,9 +251,6 @@ def find_resolution_level(image_in):
     mo = Image(image_in, permission='r')
     mo.load(load_data=False)
 
-    def att2str(att):
-        return ''.join([t.decode('utf-8') for t in att])
-
     Z = int(mo.dims[0])
     Z_rl = Z
     rl_idx = 0
@@ -266,3 +263,29 @@ def find_resolution_level(image_in):
     mo.close()
 
     return rl_idx - 1
+
+
+def att2str(att):
+    return ''.join([t.decode('utf-8') for t in att])
+
+
+def find_downsample_factors(image_in, rl0_idx, rl1_idx):
+    """Find downsample factors."""
+
+    def find_dims(im, idx):
+        rl = im.file['/DataSet/ResolutionLevel {}'.format(idx)]
+        im_info = rl['TimePoint 0/Channel 0']
+        return [int(att2str(im_info.attrs['ImageSize{}'.format(dim)]))
+                for dim in 'ZYX']
+
+    im = Image(image_in, permission='r')
+    im.load(load_data=False)
+
+    dims0 = find_dims(im, rl0_idx)
+    dims1 = find_dims(im, rl1_idx)
+
+    im.close()
+
+    dsfacs = np.around(np.array(dims0) / np.array(dims1)).astype('int')
+
+    return dsfacs
