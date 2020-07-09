@@ -622,9 +622,12 @@ function conda_cmds {
 
     eval conda_env="\$${stage}__conda__env"
 
-    echo source "${CONDA_SH}"
-    echo conda activate "${conda_env}"
-    echo ''
+    if [ ! -z $conda_env ]
+    then
+        echo source "${CONDA_SH}"
+        echo conda activate "${conda_env}"
+        echo ''
+    fi
 
 }
 
@@ -726,9 +729,15 @@ function _parallelization {
 function finishing_directives {
     # Generate directives for parallel channels.
 
-    echo ''
-    echo 'conda deactivate'
-    echo ''
+    eval conda_env="\$${stage}__conda__env"
+
+    if [ ! -z $conda_env ]
+    then
+        echo ''
+        echo conda deactivate
+        echo ''
+    fi
+
     # echo "sacct --format=JobID,Timelimit,elapsed,ReqMem,MaxRss,AllocCPUs,AveVMSize,MaxVMSize,CPUTime,ExitCode -j \${SLURM_JOB_ID} > ${subfile}.a\${SLURM_JOB_ID}"  # TODO $PBS_JOBID
     # echo ''
 
