@@ -950,27 +950,30 @@ function get_py_biasfield_stack {
     echo '#!/usr/bin/env python'
     echo ''
     echo 'import sys'
-    echo 'outputstem = sys.argv[1]'
-    echo 'inputfiles = sys.argv[2:]'
+    echo 'inputstem = sys.argv[1]'
+    echo 'outputstem = sys.argv[2]'
+    echo 'biasfield_postfix = sys.argv[3]'
     echo ''
-    echo "from stapl3d.preprocessing.biasfield import stack_bias"
-    echo "stack_bias(
-        inputfiles,
-        outputstem,
-        )"
-    echo ''
-    echo "from stapl3d.reporting import zip_parameters"
-    echo "zip_parameters(
-        '${biasfielddir}/${dataset}',
-        'biasfield',
-        )"
-    echo ''
-    echo "from stapl3d.reporting import merge_reports"
     echo "from glob import glob"
-    echo "merge_reports(
-        glob('${biasfielddir}/${dataset}_ch??${biasfield__params__postfix}').sort(),
-        '${datadir}/${dataset}${biasfield__params__postfix}.pdf',
-        )"
+    echo "from stapl3d.preprocessing import biasfield"
+    echo "from stapl3d import reporting"
+    echo ''
+    echo "inputpat = glob('{}_ch??{}'.format(inputstem, biasfield_postfix))"
+    echo ''
+    echo "inputfiles = glob('{}.h5'.format(inputpat))"
+    echo "inputfiles.sort()"
+    echo "outputfile = '{}.h5'.format(outputstem)"
+    echo "biasfield.stack_bias(inputfiles, outputfile)"
+    echo ''
+    echo "pdfs = glob('{}.pdf'.format(inputpat))"
+    echo "pdfs.sort()"
+    echo "pdf_out = '{}.pdf'.format(outputstem)"
+    echo "reporting.zip_parameters(inputstem, 'biasfield')"
+    echo ''
+    echo "pickles = glob('{}.pickle'.format(inputpat))"
+    echo "pickles.sort()"
+    echo "zip_out = '{}.zip'.format(outputstem)"
+    echo "reporting.merge_reports(pdfs, pdf_out)"
 
 }
 function get_cmd_biasfield_stack {
@@ -978,18 +981,10 @@ function get_cmd_biasfield_stack {
     pyfile="${datadir}/${jobname}.py"
     eval get_py_${stage} > "${pyfile}"
 
-    local channels_in=()
-    local stitch_stem="${biasfielddir}/${dataset}${shading__params__postfix}${stitching__params__postfix}"
-    for c in `seq 0 $(( C - 1 ))`; do
-        channels_in+=("${stitch_stem}_ch`printf %02d $c`${biasfield__params__postfix}")
-    done
-
     echo python "${pyfile}" \
-        "\${biasfield_stem}" \
-        "${channels_in[@]}"
-
-    # echo "rm ${biasfielddir}/${dataset}_ch??${biasfield__params__postfix}.pdf"
-    # echo "rm ${biasfielddir}/${dataset}_ch??${biasfield__params__postfix}.pickle"
+        "${biasfielddir}/${dataset_stitching}" \
+        "${datadir}/${dataset_biasfield}" \
+        "${biasfield__params__postfix}"
 
 }
 

@@ -11,6 +11,8 @@ import os
 import numpy as np
 import pickle
 
+from glob import glob
+
 import matplotlib
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
@@ -316,13 +318,18 @@ def merge_reports(pdfs, outputpath):
     if not pdfs:
         return
 
-    from PyPDF2 import PdfFileMerger
-
-    merger = PdfFileMerger()
-    for pdf in pdfs:
-        merger.append(pdf)
-    merger.write(outputpath)
-    merger.close()
+    try:
+        from PyPDF2 import PdfFileMerger
+        merger = PdfFileMerger()
+        for pdf in pdfs:
+            merger.append(pdf)
+        merger.write(outputpath)
+        merger.close()
+    except:
+        print('NOTICE: could not merge report pdfs')
+    else:
+        for pdf in pdfs:
+            os.remove(pdf)
 
 
 def add_titles(axs, info_dict):
@@ -331,15 +338,17 @@ def add_titles(axs, info_dict):
     return
 
 
-def zip_parameters(filestem, report_type='bfc'):
+def zip_parameters(pickles, outputpath):
     """Zip a set of parameterfiles for archiving."""
 
-    import zipfile
-    from glob import glob
-    zips = glob('{}_*_{}.pickle'.format(filestem, report_type))
-    zips.sort()
-    outputpath = '{}_{}.zip'.format(filestem, report_type)
-    zf = zipfile.ZipFile(outputpath, mode='w')
-    for pfile in zips:
-        zf.write(pfile, os.path.basename(pfile))
-    zf.close()
+    try:
+        import zipfile
+        zf = zipfile.ZipFile(outputpath, mode='w')
+        for pfile in pickles:
+            zf.write(pfile, os.path.basename(pfile))
+        zf.close()
+    except:
+        print('NOTICE: could not zip parameter files')
+    else:
+        for pfile in pickles:
+            os.remove(pfile)

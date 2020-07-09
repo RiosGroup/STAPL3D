@@ -349,12 +349,11 @@ def stack_channels(images_in, outputpath=''):
     return mo
 
 
-def stack_bias(inputfiles, outputstem, idss=['data', 'bias', 'corr']):
+def stack_bias(inputfiles, outputfile, idss=['data', 'bias', 'corr']):
 
     for ids in idss:
-        images_in = ['{}.h5/{}'.format(filepath, ids) for filepath in inputfiles]
-        outputpath = '{}.h5/{}'.format(outputstem, ids)
-        outputpath_nii = '{}_{}.nii.gz'.format(outputstem, ids)
+        images_in = ['{}/{}'.format(filepath, ids) for filepath in inputfiles]
+        outputpath = '{}/{}'.format(outputfile, ids)
         stack_channels(images_in, outputpath)
 
 
