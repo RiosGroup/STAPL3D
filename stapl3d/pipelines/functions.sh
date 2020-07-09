@@ -122,9 +122,9 @@ function set_ZYXCT {
     then
         set_ZYXCT_ims '-v' "${datadir}/${dataset}.ims"
         write_ZYXCT_to_yml ${dataset} "${1}"
-    elif ! [ -z "${datadir}/${dataset}_bfc.ims" ]
+    elif ! [ -z "${datadir}/${dataset_stitching}.ims" ]
     then
-        set_ZYXCT_ims '-v' "${datadir}/${dataset}.ims"
+        set_ZYXCT_ims '-v' "${datadir}/${dataset_stitching}.ims"
         write_ZYXCT_to_yml ${dataset} "${1}"
     fi
 
