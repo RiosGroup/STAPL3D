@@ -255,7 +255,7 @@ def find_resolution_level(image_in):
         return ''.join([t.decode('utf-8') for t in att])
 
     Z = int(mo.dims[0])
-    Z = Z_rl
+    Z_rl = Z
     rl_idx = 0
     while Z == Z_rl:
         rl_idx += 1
