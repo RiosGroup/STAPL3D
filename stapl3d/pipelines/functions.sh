@@ -57,8 +57,8 @@ function load_parameters {
     check_dims Z "$Z" -v
     # TODO: exit on undefined ZYXCT
 
-    bs="${dataset__bs}" && check_dims bs "$bs" || set_blocksize
-    bm="${dataset__bm}" && check_dims bm "$bm" || bm=64
+    bs="${dataset__blocksize_xy}" && check_dims bs "$bs" || set_blocksize
+    bm="${dataset__blockmargin_xy}" && check_dims bm "$bm" || bm=64
 
     dataset_shading="${dataset}${shading__params__postfix}"
     dataset_stitching="${dataset_shading}${stitching__params__postfix}"
