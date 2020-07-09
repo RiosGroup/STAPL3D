@@ -540,15 +540,32 @@ function submit {
     local scriptfile="${1}"
     local dep_jid="${2}"
 
-    [[ -z $dep_jid ]] && dep='' || dep="--dependency=afterok:$dep_jid"
-    if [ "$dep_jid" == 'h' ]
-    then
-        echo "not submitting $scriptfile"
-        echo "sbatch --parsable $dep $scriptfile"
-    else
-        jid=$( sbatch --parsable $dep $scriptfile )
-        echo "submitted $scriptfile as ${jid} with ${dep}"
-    fi
+    case "${compute_env}" in
+        'SGE')
+            [[ -z $dep_jid ]] && dep='' || dep="-hold_jid $dep_jid"
+            [[ -z $array ]] && arrayspec='' || arrayspec="-t $range"
+            if [ "$dep_jid" == 'h' ]
+            then
+                echo "not submitting $scriptfile"
+                echo "qsub -cwd $arrayspec $dep $scriptfile"
+            else
+                jid=$( qsub -cwd $arrayspec $dep $scriptfile )
+                jid=`echo $jid | awk 'match($0,/[0-9]+/){print substr($0, RSTART, RLENGTH)}'`
+                echo "submitted $scriptfile as ${jid} with ${dep}"
+            fi
+            ;;
+        'SLURM')
+            [[ -z $dep_jid ]] && dep='' || dep="--dependency=afterok:$dep_jid"
+            if [ "$dep_jid" == 'h' ]
+            then
+                echo "not submitting $scriptfile"
+                echo "sbatch --parsable $dep $scriptfile"
+            else
+                jid=$( sbatch --parsable $dep $scriptfile )
+                echo "submitted $scriptfile as ${jid} with ${dep}"
+            fi
+            ;;
+    esac
 
 }
 
@@ -576,9 +593,25 @@ function sbatch_directives {
     [[ -z $array ]] &&
         { output="${subfile}.o%A"; error="${subfile}.e%A"; } ||
         { echo "#SBATCH --array=$range" &&
-        { output="${subfile}.o%A_%a"; error="${subfile}.e%A_%a"; } ; }
+        { output="${subfile}.o%A.%a"; error="${subfile}.e%A.%a"; } ; }
     echo "#SBATCH --output=$output"
     echo "#SBATCH --error=$error"
+    echo ''
+
+}
+
+
+function pbs_directives {
+    # Generate pbs directives for submission script.
+
+    expand_submit_pars "$@"
+
+    echo "#PBS -N EM_$jobname"
+    echo "#PBS -l mem=$mem"
+    echo "#PBS -l walltime=$wtime"
+    echo "#PBS -l nodes=$nodes:ppn=$tasks"
+    [[ -z $array ]] || echo "#PBS -t $range"
+    echo "#PBS -V"
     echo ''
 
 }
@@ -599,6 +632,17 @@ function conda_cmds {
 function base_cmds {
     # Generate basic dataset directives.
 
+    case "${compute_env}" in
+        'SGE')
+            echo TASK_ID="\${SGE_TASK_ID}"
+            ;;
+        'SLURM')
+            echo TASK_ID="\${SLURM_ARRAY_TASK_ID}"
+            ;;
+    esac
+    echo idx="\$((TASK_ID - 1))"
+    echo ''
+
     echo ''
     echo dataset="${dataset}"
     echo ''
@@ -615,16 +659,6 @@ function base_cmds {
     echo load_parameters "${dataset}"
     echo ''
 
-    case "${compute_env}" in
-        'SGE')
-            echo TASK_ID="\${SGE_TASK_ID}"
-            ;;
-        'SLURM')
-            echo TASK_ID="\${SLURM_ARRAY_TASK_ID}"
-            ;;
-    esac
-    echo idx="\$((TASK_ID - 1))"
-    echo ''
     echo filestem="${datadir}/${dataset}"
     echo shading_stem="\${filestem}${shading__params__postfix}"
     echo stitching_stem="\${shading_stem}${stitching__params__postfix}"
@@ -777,7 +811,16 @@ function generate_script {
     [[ ${#submit_pars[@]} -eq 0 ]] && set_submit_pars ${stage}
 
     bash_directives > "${subfile}"
-    sbatch_directives "${submit_pars[@]}" >> "${subfile}"
+
+    case "${compute_env}" in
+        'SGE')
+            pbs_directives "${submit_pars[@]}" >> "${subfile}"
+            ;;
+        'SLURM')
+            sbatch_directives "${submit_pars[@]}" >> "${subfile}"
+            ;;
+    esac
+
     base_cmds >> "${subfile}"
 
     eval "${submit_pars[0]}"_parallelization >> "${subfile}"
