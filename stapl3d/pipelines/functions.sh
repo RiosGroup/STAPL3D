@@ -906,7 +906,7 @@ function get_cmd_ims_aggregate1 {
     pyfile="${datadir}/${jobname}.py"
     eval get_py_${stage} > "${pyfile}"
 
-    local chpat="${channeldir}/${dataset}_ch??${shading__params__postfix}${stitching__params__postfix}.ims"
+    local chpat="${channeldir}/${dataset_stitching}_ch??.ims"
     echo python "${pyfile}" \
         "\${stitching_stem}.ims" \
         "\${stitching_stem}${dataset__ims_ref_postfix}.ims" \

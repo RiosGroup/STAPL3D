@@ -58,7 +58,7 @@ stitching:
 splitchannels:
     params:
         channel_re: _ch{:02d}
-        insert: true
+        insert: false
         replace: false
     submit:
         array: channel
