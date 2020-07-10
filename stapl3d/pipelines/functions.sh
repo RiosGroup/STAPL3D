@@ -165,7 +165,7 @@ function set_dirtree {
     profdir="${datadir}/${dirtree__datadir__profiling}"
     mkdir -p "${profdir}"
 
-    featdir="${profdir}/${dirtree__datadir__blocks}"
+    featdir="${datadir}/${dirtree__datadir__blocks}"
     mkdir -p "${featdir}"
 
     jobdir="${datadir}/${dirtree__datadir__jobfiles}"
