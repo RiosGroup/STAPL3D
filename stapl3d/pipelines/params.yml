@@ -9,20 +9,18 @@ dirtree:
         jobfiles: jobfiles
 
 dataset:
-    name: HFK16w
-    alias: HFK16w
+    name: 200302_RL57_P30T_25x
+    alias: P30T_RL
     ims_ref_postfix: _ref_uint16
-    dapi_chan: 0
-    dapi_thr: 0
+    dapi_channel: 0
     dapi_shift: 0
-    memb_idxs: 3 5 6 7
-    memb_weights: 0.5 0.5 1.0 1.0
-    nucl_idxs: 0 1 2 4
-    nucl_weights: 1.0 1.0 1.0 1.0
-    mean_idxs: 0 1 2 3 4 5 6 7
-    mean_weights: 1.0 1.0 1.0 1.0 1.0 1.0 1.0 1.0
     blocksize_xy: 1280
     blockmargin_xy: 64
+    X: 13984
+    Y: 17625
+    Z: 109
+    C: 8
+    T: 1
 
 shading:
     file_format: czi
@@ -31,16 +29,14 @@ shading:
         metric: median
         noise_threshold: 1000
         z_range:
-        quantile_threshold: 0.9
+        quantile_threshold: 0.8
         polynomial_order: 3
     submit:
-        n_workers:
-        channels:
         array: channel
         nodes: 1
         tasks: 1
-        mem: 20G
-        wtime: 02:00:00
+        mem: 60G
+        wtime: 04:00:00
     conda:
         env: stapl3d
 
@@ -58,7 +54,7 @@ splitchannels:
         nodes: 1
         tasks: 1
         mem: 60G
-        wtime: 02:00:00
+        wtime: 05:00:00
     conda:
         env: stapl3d
 
@@ -102,7 +98,7 @@ biasfield:
     params:
         postfix: _biasfield
         mask_in: true
-        n_iterations: 2
+        n_iterations: 50
         n_fitlevels: 4
         n_bspline_cps:
             z: 5
@@ -111,9 +107,9 @@ biasfield:
     submit:
         array: channel
         nodes: 1
-        tasks: 2
+        tasks: 24
         mem: 20G
-        wtime: 02:00:00
+        wtime: 05:00:00
     conda:
         env: stapl3d
 
@@ -125,17 +121,11 @@ biasfield_stack:
         nodes: 1
         tasks: 1
         mem: 20G
-        wtime: 00:30:00
+        wtime: 01:30:00
 
 biasfield_apply:
     params:
         copy_from_ref: true
-        downsample_factors:
-            z: 1
-            y: 64
-            x: 64
-            c: 1
-            t: 1
         blocksize_xy: 1280
     submit:
         array: channel
@@ -228,7 +218,7 @@ membrane_enhancement:
         nodes: 1
         tasks: 1
         mem: 60G
-        wtime: 01:00:00
+        wtime: 05:00:00
     conda:
         env: stapl3d
 
@@ -239,7 +229,7 @@ segmentation:
         ids_nucl_chan: chan/ch00
         ids_dset_mean: mean
         segments_ods: labels_memb_del
-        dapi_shift_planes: 3
+        dapi_shift_planes: 0
         nucl_opening_footprint:
             - 3
             - 7
@@ -288,7 +278,7 @@ segmentation:
         nodes: 1
         tasks: 1
         mem: 60G
-        wtime: 02:00:00
+        wtime: 05:00:00
     conda:
         env: stapl3d
 
@@ -322,7 +312,7 @@ relabel:
         nodes: 1
         tasks: 1
         mem: 10G
-        wtime: 00:10:00
+        wtime: 01:10:00
     conda:
         env: stapl3d
 
@@ -346,7 +336,7 @@ copyblocks:
         nodes: 1
         tasks: 1
         mem: 10G
-        wtime: 00:10:00
+        wtime: 01:10:00
     conda:
         env: stapl3d
 
@@ -427,7 +417,7 @@ copydataset:
         nodes: 1
         tasks: 1
         mem: 10G
-        wtime: 00:10:00
+        wtime: 01:10:00
     conda:
         env: stapl3d
 
@@ -497,7 +487,7 @@ features:
         nodes: 1
         tasks: 1
         mem: 60G
-        wtime: 02:00:00
+        wtime: 05:00:00
     conda:
         env: stapl3d
 
