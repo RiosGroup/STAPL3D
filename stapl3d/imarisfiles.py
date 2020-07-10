@@ -217,7 +217,7 @@ def make_aggregate(outputfile, ref_path,
                    color=[1, 1, 1], crange=[0, 20000]):
     """Gather the inputfiles into an imarisfile by symbolic links."""
 
-    inputfiles = glob('{}{}.ims'.format(inputstem, channel_pat))
+    inputfiles = glob('{}{}{}.ims'.format(inputstem, channel_pat, postfix))
 
     channels = [
         {
