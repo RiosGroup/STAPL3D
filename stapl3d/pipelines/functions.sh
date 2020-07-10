@@ -37,8 +37,8 @@ function set_datadir {
 function init_dataset {
 
     cp "${STAPL3D}/pipelines/params.yml" "${datadir}/${dataset}.yml"
-    set_ZYXCT_ims -v "${datadir}/${dataset}.ims"
-    write_ZYXCT_to_yml ${dataset} "${datadir}/${dataset}_dims.yml"
+    # set_ZYXCT_ims -v "${datadir}/${dataset}.ims"
+    # write_ZYXCT_to_yml ${dataset} "${datadir}/${dataset}_dims.yml"
 
 }
 
@@ -51,22 +51,27 @@ function load_parameters {
     parfile="${datadir}/${dataset}.yml"
     eval $( parse_yaml "${parfile}" "" )
 
+    [[ "$2" == '-v' ]] && {
+        echo ""
+        echo " --- parameters imported from parameter file:"
+        echo ""
+        parse_yaml "${parfile}"
+        echo "" ; }
+
     set_dirtree "${datadir}"
-
-    check_dims Z "$Z" || set_ZYXCT "${datadir}/${dataset}_dims.yml"
-    check_dims Z "$Z" -v
-    # TODO: exit on undefined ZYXCT
-
-    bs="${dataset__blocksize_xy}" && check_dims bs "$bs" || set_blocksize
-    bm="${dataset__blockmargin_xy}" && check_dims bm "$bm" || bm=64
 
     dataset_shading="${dataset}${shading__params__postfix}"
     dataset_stitching="${dataset_shading}${stitching__params__postfix}"
     dataset_biasfield="${dataset_stitching}${biasfield__params__postfix}"
     dataset_preproc="${dataset_biasfield}"
 
+    # FIXME: need stitched file dimensions
+    check_dims Z "$Z" || set_ZYXCT "${datadir}/${dataset}_dims.yml"
+    check_dims Z "$Z" -v
+    # TODO: exit on undefined ZYXCT
+    bs="${dataset__blocksize_xy}" && check_dims bs "$bs" || set_blocksize
+    bm="${dataset__blockmargin_xy}" && check_dims bm "$bm" || bm=64
     set_channelstems "${dataset_preproc}"
-
     set_blocks "${bs}" "${bm}"
 
     echo ""
@@ -75,12 +80,6 @@ function load_parameters {
     echo " --- parallelization: ${#channelstems[@]} channels"
     echo " --- parallelization: ${#blockstems[@]} blocks (${nx} x ${ny}) of blocksize ${bs} with margin ${bm}"
     echo ""
-    [[ "$2" == '-v' ]] && {
-        echo ""
-        echo " --- parameters imported from parameter file:"
-        echo ""
-        parse_yaml "${parfile}"
-        echo "" ; }
 
 }
 

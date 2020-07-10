@@ -2091,12 +2091,12 @@ def get_blockinfo(image_in, parameter_file, params=dict(blocksize=[], blockmargi
 
     if not params['blocksize']:
         ds_par = get_params(dict(), parameter_file, 'dataset')
-        bs = ds_par['bs'] or 640
+        bs = ds_par['blocksize_xy'] or 640
         params['blocksize'] = get_blocksize(image_in, bs)
 
     if not params['blockmargin']:
         ds_par = get_params(dict(), parameter_file, 'dataset')
-        bm = ds_par['bm'] or 64
+        bm = ds_par['blockmargin_xy'] or 64
         params['blockmargin'] = get_blockmargin(image_in, bm)
 
     n_blocks = get_n_blocks(image_in, params['blocksize'], params['blockmargin'])
