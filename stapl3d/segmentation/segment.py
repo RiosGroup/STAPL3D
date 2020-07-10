@@ -909,12 +909,13 @@ def watershed_dog(im, markers, mask=None, inv=True, outpath=''):
 
 def shift_channel(data, n_planes=0, zdim_idx=0):
 
-    if zdim_idx == 0:
-        data[n_planes:, :, :] = data[:-n_planes, :, :]
-        data[:n_planes, :, :] = 0
-    elif zdim_idx == 2:
-        data[:, :, n_planes:] = data[:, :, :-n_planes]
-        data[:, :, :n_planes] = 0
+    if n_planes:
+        if zdim_idx == 0:
+            data[n_planes:, :, :] = data[:-n_planes, :, :]
+            data[:n_planes, :, :] = 0
+        elif zdim_idx == 2:
+            data[:, :, n_planes:] = data[:, :, :-n_planes]
+            data[:, :, :n_planes] = 0
 
     return data
 
