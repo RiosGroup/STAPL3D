@@ -268,6 +268,9 @@ function set_blockstems {
     local bx bX by bY bz bZ
     local dstem
 
+    unset block_ids
+    block_ids=()
+
     unset blockstems
     blockstems=()
 
@@ -281,7 +284,13 @@ function set_blockstems {
                 bZ=$( get_coords_upper $z 0 $Z $Z)
                 bz=$( get_coords_lower $z 0 )
 
-                dstem="$( get_blockstem $dataset $bx $bX $by $bY $bz $bZ )"
+                block_id="$( get_block_id $bx $bX $by $bY $bz $bZ )"
+                block_ids+=( "$block_id" )
+                if [ "$verbose" == "-v" ]; then
+                    echo "$block_id"
+                fi
+
+                dstem="${dataset}_${block_id}"
                 blockstems+=( "$dstem" )
                 if [ "$verbose" == "-v" ]; then
                     echo "$dstem"
@@ -331,24 +340,23 @@ function get_coords_lower {
 }
 
 
-function get_blockstem {
+function get_block_id {
     # Get a block identifier from coordinates.
 
-    local dataset=$1
-    local x=$2
-    local X=$3
-    local y=$4
-    local Y=$5
-    local z=$6
-    local Z=$7
+    local x=$1
+    local X=$2
+    local y=$3
+    local Y=$4
+    local z=$5
+    local Z=$6
 
     local xrange=`printf %05d $x`-`printf %05d $X`
     local yrange=`printf %05d $y`-`printf %05d $Y`
     local zrange=`printf %05d $z`-`printf %05d $Z`
 
-    local dstem=${dataset}_${xrange}_${yrange}_${zrange}
+    local block_id=${xrange}_${yrange}_${zrange}
 
-    echo "$dstem"
+    echo "$block_id"
 
 }
 
@@ -667,6 +675,7 @@ function base_cmds {
     echo stitching_stem="\${shading_stem}${stitching__params__postfix}"
     echo biasfield_stem="\${stitching_stem}${biasfield__params__postfix}"
     echo channelstem="${channeldir}/\${channelstems[idx]}"
+    echo block_id="\${block_ids[idx]}"
     echo blockstem="${blockdir}/\${blockstems[idx]}"
 
 }
@@ -1170,8 +1179,8 @@ function get_cmd_membrane_enhancement {
         "\${idx}"
 
     echo ''
-    echo "rm \${blockdir}/${dataset}${shading__params__postfix}${stitching__params__postfix}${biasfield__params__postfix}_memb-eigen.mha"
-    echo "rm \${blockdir}/${dataset}${shading__params__postfix}${stitching__params__postfix}${biasfield__params__postfix}_memb-*.nii.gz"
+    echo "rm \${blockdir}/${dataset_preproc}_\${block_id}_memb-eigen.mha"
+    echo "rm \${blockdir}/${dataset_preproc}_\${block_id}_memb-*.nii.gz"
 
 }
 
