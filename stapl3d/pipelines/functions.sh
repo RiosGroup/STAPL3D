@@ -951,14 +951,12 @@ function get_py_ims_aggregate1 {
     echo 'import sys'
     echo 'out_path = sys.argv[1]'
     echo 'ref_path = sys.argv[2]'
-    echo 'inputfiles = sys.argv[3:]'
+    echo 'inputstem = sys.argv[3]'
+    echo 'channel_pat = sys.argv[4]'
+    echo 'postfix = sys.argv[5]'
     echo ''
     echo "from stapl3d.imarisfiles import make_aggregate"
-    echo "make_aggregate(
-        inputfiles,
-        out_path,
-        ref_path,
-        )"
+    echo "make_aggregate(out_path, ref_path, inputstem, channel_pat, postfix)"
 
 }
 function get_cmd_ims_aggregate1 {
@@ -966,11 +964,11 @@ function get_cmd_ims_aggregate1 {
     pyfile="${datadir}/${jobname}.py"
     eval get_py_${stage} > "${pyfile}"
 
-    local chpat="${channeldir}/${dataset_stitching}_ch??.ims"
     echo python "${pyfile}" \
         "\${stitching_stem}.ims" \
         "\${stitching_stem}${dataset__ims_ref_postfix}.ims" \
-        `ls ${chpat}`
+        "${channeldir}/${dataset_stitching}" \
+        '_ch??' ''
 
 }
 
@@ -1086,14 +1084,12 @@ function get_py_ims_aggregate2 {
     echo 'import sys'
     echo 'out_path = sys.argv[1]'
     echo 'ref_path = sys.argv[2]'
-    echo 'inputfiles = sys.argv[3:]'
+    echo 'inputstem = sys.argv[3]'
+    echo 'channel_pat = sys.argv[4]'
+    echo 'postfix = sys.argv[5]'
     echo ''
     echo "from stapl3d.imarisfiles import make_aggregate"
-    echo "make_aggregate(
-        inputfiles,
-        out_path,
-        ref_path,
-        )"
+    echo "make_aggregate(out_path, ref_path, inputstem, channel_pat, postfix)"
 
 }
 function get_cmd_ims_aggregate2 {
@@ -1101,11 +1097,11 @@ function get_cmd_ims_aggregate2 {
     pyfile="${datadir}/${jobname}.py"
     eval get_py_${stage} > "${pyfile}"
 
-    local chpat="${channeldir}/${dataset_biasfield}_ch??.ims"
     echo python "${pyfile}" \
-        "\${biasfield_stem}.ims" \
+        "\${stitching_stem}.ims" \
         "\${stitching_stem}${dataset__ims_ref_postfix}.ims" \
-        `ls ${chpat}`
+        "${channeldir}/${dataset_stitching}" \
+        '_ch??' ${biasfield__params__postfix}
 
 }
 

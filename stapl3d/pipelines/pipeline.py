@@ -39,9 +39,7 @@ biasfield.estimate(ims_file, par_file)
 # [TODO: bias stack]
 biasfield.apply(ims_file, par_file)
 
-channels_pat = '{}*{}.ims'.format(dataset, cfg['biasfield']['params']['postfix'])
-biasfield_channels = glob.glob(os.path.join(channel_dir, channels_pat))
-imarisfiles.make_aggregate(biasfield_channels, im_preproc, ims_ref)
+imarisfiles.make_aggregate(im_preproc, ims_ref, os.path.join(channel_dir, stitch_stem), '_ch??', cfg['biasfield']['params']['postfix'])
 
 
 blocks.split(im_preproc, par_file)

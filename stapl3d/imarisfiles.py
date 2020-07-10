@@ -6,6 +6,8 @@ import pickle
 import shutil
 import multiprocessing
 
+from glob import glob
+
 import pathlib
 import h5py
 
@@ -210,15 +212,19 @@ def correct_histogram(infile):
     f.close()
 
 
-def make_aggregate(inputfiles, outputfile, ref_path):
+def make_aggregate(outputfile, ref_path,
+                   inputstem, channel_pat='_ch??', postfix='',
+                   color=[1, 1, 1], crange=[0, 20000]):
     """Gather the inputfiles into an imarisfile by symbolic links."""
+
+    inputfiles = glob('{}{}.ims'.format(inputstem, channel_pat))
 
     channels = [
         {
          'filepath': inputfile,
          'Name': 'chan',
-         'Color': ' '.join(['{:.3f}'.format(i) for i in [1, 1, 1]]),
-         'ColorRange': ' '.join(['{:.3f}'.format(i) for i in [0, 20000]]),
+         'Color': ' '.join(['{:.3f}'.format(i) for i in color]),
+         'ColorRange': ' '.join(['{:.3f}'.format(i) for i in crange]),
          'ColorMode': 'BaseColor',
          } for inputfile in inputfiles]
 
