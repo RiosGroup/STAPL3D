@@ -1101,7 +1101,7 @@ function get_cmd_ims_aggregate2 {
     pyfile="${datadir}/${jobname}.py"
     eval get_py_${stage} > "${pyfile}"
 
-    local chpat="${channeldir}/${dataset}_ch??${shading__params__postfix}${stitching__params__postfix}${biasfield__params__postfix}.ims"
+    local chpat="${channeldir}/${dataset_biasfield}_ch??.ims"
     echo python "${pyfile}" \
         "\${biasfield_stem}.ims" \
         "\${stitching_stem}${dataset__ims_ref_postfix}.ims" \
