@@ -650,6 +650,7 @@ function base_cmds {
             echo TASK_ID="\${SLURM_ARRAY_TASK_ID}"
             ;;
     esac
+    echo ''
     echo idx="\$((TASK_ID - 1))"
     echo ''
 
@@ -665,17 +666,17 @@ function base_cmds {
     echo jobdir="${jobdir}"
     echo ''
     echo source "${STAPL3D}/pipelines/functions.sh"
-    echo load_dataset "\${projectdir}" "\${dataset}"
+    echo load_dataset "${projectdir}" "${dataset}"
     echo load_parameters "${dataset}"
     echo ''
 
-    echo filestem="${datadir}/${dataset}"
+    echo filestem="\${datadir}/\${dataset}"
     echo shading_stem="\${filestem}${shading__params__postfix}"
     echo stitching_stem="\${shading_stem}${stitching__params__postfix}"
     echo biasfield_stem="\${stitching_stem}${biasfield__params__postfix}"
-    echo channelstem="${channeldir}/\${channelstems[idx]}"
+    echo channelstem="\${channeldir}/\${channelstems[idx]}"
     echo block_id="\${block_ids[idx]}"
-    echo blockstem="${blockdir}/\${blockstems[idx]}"
+    echo blockstem="\${blockdir}/\${dataset}_\${block_id}"
 
 }
 
@@ -1098,10 +1099,9 @@ function get_cmd_ims_aggregate2 {
     eval get_py_${stage} > "${pyfile}"
 
     echo python "${pyfile}" \
-        "\${stitching_stem}.ims" \
+        "\${biasfield_stem}.ims" \
         "\${stitching_stem}${dataset__ims_ref_postfix}.ims" \
-        "${channeldir}/${dataset_stitching}" \
-        '_ch??' ${biasfield__params__postfix}
+        "${channeldir}/${dataset_stitching}" '_ch??' "${biasfield__params__postfix}"
 
 }
 
