@@ -32,6 +32,17 @@ shading:
         quantile_threshold: 0.8
         polynomial_order: 3
     submit:
+        array: channel_plane
+        nodes: 1
+        tasks: 1
+        mem: 60G
+        wtime: 04:00:00
+    conda:
+        env: stapl3d
+
+shading_postproc:
+    params:
+    submit:
         array: channel
         nodes: 1
         tasks: 1

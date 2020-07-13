@@ -2,18 +2,14 @@
 ### RUN PIPELINE
 ###==========================================================================###
 ### analysis preparation
+
+projectdir='/hpc/pmc_rios/mkleinnijenhuis/Kidney'
+dataset='200302_RL57_P30T_25x'
+
 source "${HOME}/.my_config.ini" && load_config
 
-projectdir='/hpc/pmc_rios/Kidney'
-dataset='HFK16w'
-
 load_dataset "${projectdir}" "${dataset}"
-# cp "${STAPL3D}/pipelines/params.yml" "${datadir}/${dataset}.yml"
-# set_ZYXCT_ims -v "${datadir}/${dataset}_shading_stitching.ims"
-# write_ZYXCT_to_yml ${dataset} "${datadir}/${dataset}_dims.yml"
-# [[ -f "${datadir}/${dataset}.yml" ]] || init_dataset 'copy_yaml'
-# [[ -f "${datadir}/${dataset}_dims.yml" ]] && init_dataset
-
+[[ -f "${datadir}/${dataset}.yml" ]] || init_dataset
 load_parameters "${dataset}" -v
 
 
@@ -21,16 +17,19 @@ load_parameters "${dataset}" -v
 ### preprocessing
 jid=''
 submit $( generate_script shading ) $jid
+submit $( generate_script shading_postproc ) $jid
 # submit $( generate_script shading_apply ) $jid  # TODO: non-proprietary
+
 # submit $( generate_script stitching ) $jid  # TODO: non-proprietary
+# load_parameters "${dataset}" -v
 
 jid=''
 submit $( generate_script mask ) $jid
-submit $( generate_script splitchannels ) $jid
-submit $( generate_script ims_aggregate1 ) $jid
+# submit $( generate_script splitchannels ) $jid
+# submit $( generate_script ims_aggregate1 ) $jid
 submit $( generate_script biasfield ) $jid
-submit $( generate_script biasfield_stack ) $jid
 submit $( generate_script biasfield_apply ) $jid
+# submit $( generate_script biasfield_stack ) $jid
 submit $( generate_script ims_aggregate2 ) $jid
 
 

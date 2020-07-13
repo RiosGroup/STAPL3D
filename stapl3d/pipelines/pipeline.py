@@ -7,7 +7,7 @@ from stapl3d.preprocessing import shading, masking, biasfield
 from stapl3d.segmentation import enhance, segment, zipping, features
 
 projectdir = '.'
-dataset = 'HFK16w'
+dataset = '200302_RL57_P30T_25x'
 datadir = os.path.join(projectdir, dataset)
 filestem = os.path.join(datadir, dataset)
 
@@ -26,6 +26,9 @@ im_preproc ='{}{}.ims'.format(ims_stem, cfg['biasfield']['params']['postfix'])
 
 
 shading.estimate(czi_file, par_file)
+shading.postprocess(czi_file, par_file)
+#shading.estimate_channel(czi_file, 0, 0, **cfg['shading']['params'])
+
 ### BREAK - for shading-apply and stitching
 
 ### BREAK - for imaris channel extraction
@@ -40,7 +43,6 @@ biasfield.estimate(ims_file, par_file)
 biasfield.apply(ims_file, par_file)
 
 imarisfiles.make_aggregate(im_preproc, ims_ref, os.path.join(channel_dir, stitch_stem), '_ch??', cfg['biasfield']['params']['postfix'])
-
 
 blocks.split(im_preproc, par_file)
 

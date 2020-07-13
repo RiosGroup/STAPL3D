@@ -12,6 +12,8 @@ import pickle
 import shutil
 import multiprocessing
 
+from glob import glob
+
 import matplotlib
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
@@ -67,6 +69,7 @@ def estimate(
     outputdir='',
     n_workers=0,
     channels=[],
+    planes=[],
     metric='median',
     noise_threshold=None,
     z_range=[],
@@ -91,10 +94,16 @@ def estimate(
             print('Sorry, only czi implemented for now...')
             return
 
-    arglist = [
+    if not subparams['planes']:
+        if image_in.endswith('.czi'):
+            czi = czifile.CziFile(image_in)
+            subparams['planes'] = list(range(czi.shape[czi.axes.index('Z')]))
+
+    nested_arglist = [[
         (
             image_in,
             ch,
+            pl,
             params['noise_threshold'],
             params['metric'],
             params['z_range'],
@@ -104,15 +113,20 @@ def estimate(
             outputdir,
         )
         for ch in subparams['channels']]
+        for pl in subparams['planes']]
 
-    n_workers = get_n_workers(len(subparams['channels']), subparams)
+    arglist = [item for sublist in nested_arglist for item in sublist]
+
+    n_jobs = len(subparams['channels']) * len(subparams['planes'])
+    n_workers = get_n_workers(n_jobs, subparams)
     with multiprocessing.Pool(processes=n_workers) as pool:
-        pool.starmap(estimate_channel, arglist)
+        pool.starmap(estimate_plane, arglist)
 
 
-def estimate_channel(
+def estimate_plane(
     image_in,
     channel,
+    plane,
     noise_threshold=None,
     metric='median',
     z_range=[],
@@ -134,7 +148,7 @@ def estimate_channel(
     # Prepare the output.
     step_id = 'shading'
     postfix = postfix or '_{}'.format(step_id)
-    postfix = 'ch{:02d}{}'.format(channel, postfix)
+    postfix = 'ch{:02d}_Z{:03d}{}'.format(channel, plane, postfix)
 
     outputdir = get_outputdir(image_in, '', outputdir, step_id, step_id)
 
@@ -146,7 +160,7 @@ def estimate_channel(
     outputstem = os.path.join(outputdir, filestem)
     outputpat = '{}.h5/{}'.format(outputstem, '{}')
 
-    logging.basicConfig(filename='{}.log'.format(outputstem), level=logging.INFO)
+    # logging.basicConfig(filename='{}.log'.format(outputstem), level=logging.INFO)
     report = {'parameters': locals()}
 
     # Get the list of subblocks for the channel.
@@ -165,20 +179,127 @@ def estimate_channel(
 
     # Compute median values per plane for X and Y concatenation.
     meds_X, meds_Y = [], []
+
+    msg = 'Processing ch{:02d}:plane{:03d}'.format(channel, plane)
+    # logger.info(msg)
+    print(msg)
+
+    dstack = []
+    for sbd in sbd_channel[plane::n_planes]:
+        dstack.append(np.squeeze(sbd.data_segment().data()))
+
+    dstacked = np.concatenate(dstack, axis=0)
+    ma_data = np.ma.masked_array(dstacked, dstacked < noise_threshold)
+    meds_X = np.ma.median(ma_data, axis=0)
+
+    dstacked = np.concatenate(dstack, axis=1)
+    ma_data = np.ma.masked_array(dstacked, dstacked < noise_threshold)
+    meds_Y = np.ma.median(ma_data, axis=1)
+
+    out = [noise_threshold, metric, meds_X, meds_Y]
+    with open('{}.pickle'.format(outputstem), 'wb') as f:
+        pickle.dump(out, f, pickle.HIGHEST_PROTOCOL)
+
+
+def postprocess(
+    image_in,
+    parameter_file,
+    outputdir='',
+    n_workers=0,
+    channels=[],
+    metric='median',
+    z_range=[],
+    quantile_threshold=0.8,
+    polynomial_order=3,
+    postfix='',
+    outputdir='',
+    ):
+
+    step_id = 'shading_postproc'
+
+    outputdir = get_outputdir(image_in, parameter_file, outputdir, 'shading', 'shading')
+
+    params = get_params(locals().copy(), parameter_file, 'shading')
+    subparams = get_params(locals().copy(), parameter_file, step_id, 'submit')
+
+    if not subparams['channels']:
+        if image_in.endswith('.czi'):
+            czi = czifile.CziFile(image_in)
+            subparams['channels'] = list(range(czi.shape[czi.axes.index('C')]))
+        else:
+            print('Sorry, only czi implemented for now...')
+            return
+
+    arglist = [
+        (
+            image_in,
+            ch,
+            params['metric'],
+            params['z_range'],
+            params['quantile_threshold'],
+            params['polynomial_order'],
+            params['postfix'],
+            outputdir,
+        )
+        for ch in subparams['channels']]
+
+    n_workers = get_n_workers(len(subparams['channels']), subparams)
+    with multiprocessing.Pool(processes=n_workers) as pool:
+        pool.starmap(postprocess_channel, arglist)
+
+
+def postprocess_channel(
+    image_in,
+    channel,
+    metric='median',
+    z_range=[],
+    quantile_threshold=0.8,
+    polynomial_order=3,
+    postfix='',
+    outputdir='',
+    ):
+
+    step_id = 'shading'
+    postfix = postfix or '_{}'.format(step_id)
+    pf = postfix
+    postfix = 'ch{:02d}{}'.format(channel, postfix)
+
+    outputdir = get_outputdir(image_in, '', outputdir, step_id, step_id)
+
+    paths = get_paths(image_in, channel=channel)
+    datadir, filename = os.path.split(paths['base'])
+    dataset, ext = os.path.splitext(filename)
+
+    filestem = '{}_{}'.format(dataset, postfix)
+    outputstem = os.path.join(outputdir, filestem)
+    outputpat = '{}.h5/{}'.format(outputstem, '{}')
+
+    # Get the list of subblocks for the channel.
+    if image_in.endswith('.czi'):  # order of subblock_directory: CZM
+        czi = czifile.CziFile(image_in)
+        zstack0 = czi.subblock_directory[0]
+        dtype = zstack0.dtype
+        tilesize = [zstack0.shape[zstack0.axes.index('Y')],
+                    zstack0.shape[zstack0.axes.index('X')]]
+        n_planes = czi.shape[czi.axes.index('Z')]
+        n_chs = czi.shape[czi.axes.index('C')]
+        sbd_channel = [sbd for sbd in czi.subblock_directory[channel::n_chs]]
+    else:
+        print('Sorry, only czi implemented for now...')
+        return
+
+    # glob all planes of a channel
+    plane_pat = '{}_ch{:02d}_Z???{}'.format(dataset, channel, pf)
+    pickles = glob(os.path.join(outputdir, '{}.pickle'.format(plane_pat)))
+    pickles.sort()
+    meds_X, meds_Y = [], []
+    for pfile in pickles:
+        with open(pfile, 'rb') as f:
+            out = pickle.load(f)
+        meds_X.append(out[2])
+        meds_Y.append(out[3])
+
     img_fitted = np.ones(tilesize, dtype='float')
-    for plane in range(n_planes):
-        msg = 'Processing ch{:02d}:plane{:03d}'.format(channel, plane)
-        logger.info(msg)
-        #print(msg)
-
-        dstack = []
-        for sbd in sbd_channel[plane::n_planes]:
-            dstack.append(np.squeeze(sbd.data_segment().data()))
-
-        for ax, meds in {0: meds_X, 1: meds_Y}.items():
-            dstacked = np.concatenate(dstack, axis=ax)
-            ma_data = np.ma.masked_array(dstacked, dstacked < noise_threshold)
-            meds.append(np.ma.median(ma_data, axis=ax))
 
     # Estimate the profiles from the medians.
     out = [metric, z_range, quantile_threshold, polynomial_order]
@@ -194,7 +315,6 @@ def estimate_channel(
         elif dim == 'Y':
             img_fitted *= data_fitted_norm[:, np.newaxis]
 
-
     # Save estimated shading image.
     img = np.array(img_fitted * np.iinfo(dtype).max, dtype=dtype)
     imsave('{}.tif'.format(outputstem), img)
@@ -205,6 +325,10 @@ def estimate_channel(
 
     # Print a report page to pdf.
     generate_report(outputdir, dataset, channel=channel, ioff=True)
+
+    # Delete plane pickles
+    for pfile in pickles:
+        os.remove(pfile)
 
 
 def select_z_range(data, z_range=[], quant_thr=0.8):

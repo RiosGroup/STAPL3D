@@ -670,11 +670,19 @@ function base_cmds {
     echo load_parameters "${dataset}"
     echo ''
 
+    if [ "$array" == 'channel_plane' ]
+    then
+        echo ch_idx="\$((idx/Z))"
+        echo pl_idx="\$((idx%Z))"
+        echo channelstem="\${channeldir}/\${channelstems[ch_idx]}"
+    else
+        echo channelstem="\${channeldir}/\${channelstems[idx]}"
+    fi
+
     echo filestem="\${datadir}/\${dataset}"
     echo shading_stem="\${filestem}${shading__params__postfix}"
     echo stitching_stem="\${shading_stem}${stitching__params__postfix}"
     echo biasfield_stem="\${stitching_stem}${biasfield__params__postfix}"
-    echo channelstem="\${channeldir}/\${channelstems[idx]}"
     echo block_id="\${block_ids[idx]}"
     echo blockstem="\${blockdir}/\${dataset}_\${block_id}"
 
@@ -776,8 +784,14 @@ function set_submit_pars {
         'no')
             range="1-1:1"
             ;;
+        'plane')
+            range="1-$Z:1"
+            ;;
         'channel')
             range="1-$C:1"
+            ;;
+        'channel_plane')
+            range="1-$((C*Z)):1"
             ;;
         'block')
             range="1-${#blockstems[@]}:1"
@@ -865,17 +879,49 @@ function get_py_shading {
     echo 'import sys'
     echo 'image_in = sys.argv[1]'
     echo 'parameter_file = sys.argv[2]'
-    echo 'idx = int(sys.argv[3])'
+    echo 'ch_idx = int(sys.argv[3])'
+    echo 'pl_idx = int(sys.argv[4])'
     echo ''
     echo "from stapl3d.preprocessing import shading"
     echo "shading.estimate(
+        image_in,
+        parameter_file,
+        channels=[ch_idx],
+        planes=[pl_idx],
+        )"
+
+}
+function get_cmd_shading {
+
+    pyfile="${datadir}/${jobname}.py"
+    eval get_py_${stage} > "${pyfile}"
+
+    echo python "${pyfile}" \
+        "\${filestem}.${shading__file_format}" \
+        "\${filestem}.yml" \
+        "\${ch_idx}" "\${pl_idx}"
+
+}
+
+
+function get_py_shading_postproc {
+
+    echo '#!/usr/bin/env python'
+    echo ''
+    echo 'import sys'
+    echo 'image_in = sys.argv[1]'
+    echo 'parameter_file = sys.argv[2]'
+    echo 'idx = int(sys.argv[3])'
+    echo ''
+    echo "from stapl3d.preprocessing import shading"
+    echo "shading.postprocess(
         image_in,
         parameter_file,
         channels=[idx],
         )"
 
 }
-function get_cmd_shading {
+function get_cmd_shading_postproc {
 
     pyfile="${datadir}/${jobname}.py"
     eval get_py_${stage} > "${pyfile}"
@@ -968,8 +1014,7 @@ function get_cmd_ims_aggregate1 {
     echo python "${pyfile}" \
         "\${stitching_stem}.ims" \
         "\${stitching_stem}${dataset__ims_ref_postfix}.ims" \
-        "${channeldir}/${dataset_stitching}" \
-        '_ch??' ''
+        "${channeldir}/${dataset_stitching}" '_ch??' ''
 
 }
 
