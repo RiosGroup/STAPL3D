@@ -212,7 +212,6 @@ def postprocess(
     quantile_threshold=0.8,
     polynomial_order=3,
     postfix='',
-    outputdir='',
     ):
 
     step_id = 'shading_postproc'
