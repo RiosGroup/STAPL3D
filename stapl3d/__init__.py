@@ -2138,7 +2138,8 @@ def get_params(params, parameter_file, pfile_entry, sub_entry='params'):
             else:
                 file_params = cfg[pfile_entry]
 
-    params.update(file_params)
+    if file_params:
+        params.update(file_params)
 
     return params
 
