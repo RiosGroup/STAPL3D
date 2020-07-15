@@ -653,8 +653,7 @@ function conda_cmds {
     # Generate conda directives for submission script.
 
     eval conda_env="\$${stage}__submit__conda_env"
-    [[ -z "${conda_env}" ]] && eval var=\$submit_defaults__submit__conda_env
-
+    [[ -z "${conda_env}" ]] && conda_env=${submit_defaults__submit__conda_env}
 
     if [ ! -z $conda_env ]
     then
@@ -790,8 +789,8 @@ function _parallelization {
 function finishing_directives {
     # Generate directives for parallel channels.
 
-    eval conda_env="\$${stage}__conda__env"
-
+    eval conda_env="\$${stage}__submit__conda_env"
+    [[ -z "${conda_env}" ]] && conda_env=${submit_defaults__submit__conda_env}
     if [ ! -z $conda_env ]
     then
         echo ''
@@ -1029,7 +1028,7 @@ function get_py_shading_apply {
     echo 'idx = int(sys.argv[3])'
     echo ''
     echo "from stapl3d.preprocessing import czi_split_zstacks"
-    echo "czi_split_zstacks.czi_split_zstacks(
+    echo "shading.czi_split_zstacks(
         image_in,
         offset=idx,
         nstacks=1,
@@ -1044,8 +1043,32 @@ function get_cmd_shading_apply {
 
     echo python "${pyfile}" \
         "\${filestem}.${shading__file_format}" \
-        "${datadir}/foo.yml" \
+        "\${filestem}.yml" \
         "\${idx}"
+
+}
+
+
+function get_py_stitching {
+
+    echo '#!/usr/bin/env python'
+    echo ''
+    echo 'import sys'
+    echo 'image_in = sys.argv[1]'
+    echo 'conffile = sys.argv[2]'
+    echo ''
+    echo "from stapl3d.preprocessing import czi_split_zstacks"
+    echo "shading.find_stack_offsets(image_in, conffile)"
+
+}
+function get_cmd_stitching {
+
+    pyfile="${datadir}/${jobname}.py"
+    eval get_py_${stage} > "${pyfile}"
+
+    echo python "${pyfile}" \
+        "\${filestem}.${shading__file_format}" \
+        "\${filestem}_tileoffsets.conf"
 
 }
 

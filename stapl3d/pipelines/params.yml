@@ -8,8 +8,7 @@ submit_defaults:
         mem: 60G
         nodes: 1
         tasks: 1
-    conda:
-        env: stapl3d
+        conda_env: stapl3d
 
 dirtree:
     datadir:

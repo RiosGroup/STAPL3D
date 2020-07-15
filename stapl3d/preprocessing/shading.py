@@ -427,7 +427,7 @@ def czi_split_zstacks(filepath, offset=0, nstacks=0, clipping_mask=False, correc
             mo.close()
 
 
-def  create_clipping_mask(data):
+def create_clipping_mask(data):
 
     try:
         dmax = np.iinfo(data.dtype).max
@@ -526,13 +526,17 @@ def read_zstack(czi, zstack_idx=0, out=None):
     return out
 
 
-def find_stack_offsets(czi, conffile=''):
+def find_stack_offsets(filepath, conffile=''):
+
+    czi = czifile.CziFile(filepath)
+
     ### get offsets of the zstack in XYZ
     nchannels = czi.shape[czi.axes.index('C')]
     ntimepoints = czi.shape[czi.axes.index('T')]
     nslices = czi.shape[czi.axes.index('Z')]
     ncols = czi.shape[czi.axes.index('Y')]
     nrows = czi.shape[czi.axes.index('X')]
+
     # first dir of eacxh zstack: C[8]Z[84]M[286]
     stack_stride = nchannels * ntimepoints * nslices
     sbd_zstacks0 = [sbd for sbd in czi.subblock_directory[::stack_stride]]
