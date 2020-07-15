@@ -11,6 +11,7 @@ dirtree:
 dataset:
     name: 200302_RL57_P30T_25x
     alias: P30T_RL
+    file_format: czi
     ims_ref_postfix: _ref_uint16
     dapi_channel: 0
     dapi_shift: 0
@@ -48,6 +49,17 @@ shading_postproc:
         tasks: 1
         mem: 60G
         wtime: 04:00:00
+    conda:
+        env: stapl3d
+
+shading_apply:
+    params:
+    submit:
+        array: stack
+        nodes: 1
+        tasks: 1
+        mem: 60G
+        wtime: 01:00:00
     conda:
         env: stapl3d
 

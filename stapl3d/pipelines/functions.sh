@@ -46,12 +46,13 @@ function init_dataset {
 function load_parameters {
 
     local dataset="${1}"
-    local parfile
+    local verbose="${2}"
+    local parfile="${3}"
 
-    parfile="${datadir}/${dataset}.yml"
+    [[ -z $parfile ]] && parfile="${datadir}/${dataset}.yml"
     eval $( parse_yaml "${parfile}" "" )
 
-    [[ "$2" == '-v' ]] && {
+    [[ "${verbose}" == '-v' ]] && {
         echo ""
         echo " --- parameters imported from parameter file:"
         echo ""
@@ -65,6 +66,9 @@ function load_parameters {
     dataset_biasfield="${dataset_stitching}${biasfield__params__postfix}"
     dataset_preproc="${dataset_biasfield}"
 
+    [[ -f "${datadir}/${dataset}.${dataset__file_format}" ]] &&
+        set_nstacks "${datadir}/${dataset}.${dataset__file_format}"
+
     # FIXME: need stitched file dimensions
     check_dims Z "$Z" || set_ZYXCT "${datadir}/${dataset}_dims.yml"
     check_dims Z "$Z" -v
@@ -77,6 +81,7 @@ function load_parameters {
     echo ""
     echo " --- data dimensions are ZYXCT='${Z} ${Y} ${X} ${C} ${T}'"
     echo ""
+    echo " --- parallelization: ${M} Z-stacks"
     echo " --- parallelization: ${#channelstems[@]} channels"
     echo " --- parallelization: ${#blockstems[@]} blocks (${nx} x ${ny}) of blocksize ${bs} with margin ${bm}"
     echo ""
@@ -142,6 +147,17 @@ function write_ZYXCT_to_yml {
     echo "T: ${T}" >> "${parfile}"
 
     echo " --- written ZYXCT='${Z} ${Y} ${X} ${C} ${T}' to ${parfile}"
+
+}
+
+
+function set_nstacks {
+
+    local filepath="${1}"
+
+    conda activate stapl3d
+    M=`python -c "import os; import czifile; from stapl3d.preprocessing import czi_split_zstacks; czi = czifile.CziFile('${filepath}'); _, n = czi_split_zstacks.get_zstack_shape(czi); print(int(n));"`
+    conda deactivate
 
 }
 
@@ -697,6 +713,14 @@ function no_parallelization {
 }
 
 
+function stack_parallelization {
+    # Generate directives for parallel stacks.
+
+    echo ''
+
+}
+
+
 function channel_parallelization {
     # Generate directives for parallel channels.
 
@@ -783,6 +807,9 @@ function set_submit_pars {
     case "${submit_pars[0]}" in
         'no')
             range="1-1:1"
+            ;;
+        'stack')
+            range="1-$M:1"
             ;;
         'plane')
             range="1-$Z:1"
@@ -929,6 +956,37 @@ function get_cmd_shading_postproc {
     echo python "${pyfile}" \
         "\${filestem}.${shading__file_format}" \
         "\${filestem}.yml" \
+        "\${idx}"
+
+}
+
+
+function get_py_shading_apply {
+
+    echo '#!/usr/bin/env python'
+    echo ''
+    echo 'import sys'
+    echo 'image_in = sys.argv[1]'
+    echo 'parameter_file = sys.argv[2]'
+    echo 'idx = int(sys.argv[3])'
+    echo ''
+    echo "from stapl3d.preprocessing import czi_split_zstacks"
+    echo "czi_split_zstacks.czi_split_zstacks(
+        image_in,
+        offset=idx,
+        nstacks=1,
+        correct=True,
+        )"
+
+}
+function get_cmd_shading_apply {
+
+    pyfile="${datadir}/${jobname}.py"
+    eval get_py_${stage} > "${pyfile}"
+
+    echo python "${pyfile}" \
+        "\${filestem}.${shading__file_format}" \
+        "${datadir}/foo.yml" \
         "\${idx}"
 
 }

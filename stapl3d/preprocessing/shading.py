@@ -20,6 +20,9 @@ import matplotlib.gridspec as gridspec
 
 import numpy as np
 
+from tifffile import create_output
+from xml.etree import cElementTree as etree
+
 from skimage.io import imread, imsave
 
 import czifile
@@ -30,6 +33,7 @@ from stapl3d import (
     prep_outputdir,
     get_params,
     get_paths,
+    Image,
 )
 
 logger = logging.getLogger(__name__)
@@ -364,6 +368,205 @@ def fit_profile(data, order=3):
     data_fitted_norm = data_fitted / np.amax(data_fitted)
 
     return data_fitted, data_fitted_norm
+
+
+def czi_split_zstacks(filepath, offset=0, nstacks=0, clipping_mask=False, correct=False, write_to_tif=True):
+    """Split czi file in zstacks."""
+
+    filestem = os.path.splitext(filepath)[0]
+    datadir, fstem = os.path.split(filestem)
+
+    czi = czifile.CziFile(filepath)
+    zss, n = get_zstack_shape(czi)
+    out = create_output(None, zss, czi.dtype)
+    nstacks = nstacks or n
+
+    props = {
+        'shape': [zss[8], zss[9], zss[10], zss[6]],
+        'elsize': get_elsize_zyx(czi) + [1],
+        'axlab': 'zyxc',
+        'dtype': czi.dtype,
+        }
+    props3D = {
+        'shape': [zss[8], zss[9], zss[10]],
+        'elsize': get_elsize_zyx(czi),
+        'axlab': 'zyx',
+        'dtype': czi.dtype,
+        }
+
+    for stack_idx in range(offset, offset + nstacks):
+
+        if stack_idx == nstacks:
+            return
+
+        read_zstack(czi, zstack_idx=stack_idx, out=out)
+        data = np.transpose(np.squeeze(out), axes=[1, 2, 3, 0])
+
+        if clipping_mask:
+            mask = create_clipping_mask(data)
+            data = np.append(data, mask.astype(data.dtype), axis=3)
+
+        if correct:
+            shadingstem = os.path.join(datadir, 'shading', fstem)
+            shading = []
+            for ch in range(data.shape[3]):
+                filepath_shading = '{}_ch{:02d}_shading.tif'.format(shadingstem, ch)
+                shading_img = imread(filepath_shading)
+                shading.append(np.tile(shading_img, (data.shape[0], 1, 1)))
+            data /= np.stack(shading, axis=3)
+
+        if write_to_tif:
+            outputstem = os.path.join(datadir, 'stacks', "{}_stack{:03d}".format(fstem, stack_idx))
+            stack2tifs(data, outputstem, props3D)
+        else:
+            outpath = "{}_stack{:03d}.h5/data".format(filestem, stack_idx)
+            # TODO blockdir
+            mo = Image(outpath, **props)
+            mo.create()
+            mo.write(data)
+            mo.close()
+
+
+def  create_clipping_mask(data):
+
+    try:
+        dmax = np.iinfo(data.dtype).max
+    except ValueError:
+        dmax = np.finfo(data.dtype).max
+
+    mask = np.any(data==dmax, axis=3)
+
+    return mask
+
+
+def stack2tifs(data, outputstem, props):
+
+    for ch in range(0, data.shape[3]):
+        outputpath = "{}_ch{:02d}.tif".format(outputstem, ch)
+        mo = Image(outputpath, **props)
+        mo.create()
+        mo.write(data[:, :, :, ch])
+        mo.close()
+
+
+def get_elsize_zyx(czi):
+    """Get the zyx resolutions from the czi metadata."""
+
+    segment = czifile.Segment(czi._fh, czi.header.metadata_position)
+    data = segment.data().data()
+    md = etree.fromstring(data.encode('utf-8'))
+
+    elsize_x = float(md[0][3][0][0][0].text) * 1e6
+    elsize_y = float(md[0][3][0][1][0].text) * 1e6
+    elsize_z = float(md[0][3][0][2][0].text) * 1e6
+
+    return [elsize_z, elsize_y, elsize_x]
+
+
+def get_offsets(czi):
+    """Get the zstack positions and shapes from the czi subblocks."""
+
+    nchannels = czi.shape[czi.axes.index('C')]
+    ntimepoints = czi.shape[czi.axes.index('T')]
+    nslices = czi.shape[czi.axes.index('Z')]
+
+    sbs = czi.filtered_subblock_directory[::nchannels * ntimepoints * nslices]
+
+    starts, shapes = [], []
+    for sb in sbs:
+        starts.append(sb.start)
+        shapes.append(sb.shape)
+
+    return starts, shapes
+
+
+def get_zstack_shape(czi):
+    """Get the shape and amount of the zstacks."""
+
+    nchannels = czi.shape[czi.axes.index('C')]
+    ntimepoints = czi.shape[czi.axes.index('T')]
+    nslices = czi.shape[czi.axes.index('Z')]
+    ncols = czi.shape[czi.axes.index('Y')]
+    nrows = czi.shape[czi.axes.index('X')]
+
+    zstack_shape = list(czi.filtered_subblock_directory[0].shape)
+    zstack_shape[czi.axes.index('C')] = nchannels
+    zstack_shape[czi.axes.index('T')] = ntimepoints
+    zstack_shape[czi.axes.index('Z')] = nslices
+    #zstack_shape[czi.axes.index('Y')] = ncols
+    #zstack_shape[czi.axes.index('X')] = nrows
+
+    n = nchannels * ntimepoints * nslices
+    nzstacks = len(czi.filtered_subblock_directory) // n
+
+    return zstack_shape, nzstacks
+
+
+def read_zstack(czi, zstack_idx=0, out=None):
+    """Read the zstack data."""
+
+    if out is None:
+        zss = get_zstack_shape(czi)
+        out = create_output(None, zstack_shape, czi.dtype)
+
+    start = czi.start
+    n = czi.shape[czi.axes.index('C')] * czi.shape[czi.axes.index('Z')]
+    start_idx = n * zstack_idx
+    stop_idx = start_idx + n
+    zstack = czi.filtered_subblock_directory[start_idx:stop_idx]
+
+    for directory_entry in zstack:
+        subblock = directory_entry.data_segment()
+        tile = subblock.data(resize=False, order=0)
+        index = [slice(i-j, i-j+k) for i, j, k in zip(directory_entry.start, start, tile.shape)]
+        index[czi.axes.index('Y')] = slice(0, tile.shape[czi.axes.index('Y')], None)
+        index[czi.axes.index('X')] = slice(0, tile.shape[czi.axes.index('X')], None)
+        out[tuple(index)] = tile
+
+    return out
+
+
+def find_stack_offsets(czi, conffile=''):
+    ### get offsets of the zstack in XYZ
+    nchannels = czi.shape[czi.axes.index('C')]
+    ntimepoints = czi.shape[czi.axes.index('T')]
+    nslices = czi.shape[czi.axes.index('Z')]
+    ncols = czi.shape[czi.axes.index('Y')]
+    nrows = czi.shape[czi.axes.index('X')]
+    # first dir of eacxh zstack: C[8]Z[84]M[286]
+    stack_stride = nchannels * ntimepoints * nslices
+    sbd_zstacks0 = [sbd for sbd in czi.subblock_directory[::stack_stride]]
+    nstacks = len(sbd_zstacks0)
+    stack_idxs = list(range(0, nstacks))
+    v_offsets = np.zeros([nstacks, 4])
+    c_offsets = np.zeros([nstacks, 4])
+    for i, directory_entry in zip(stack_idxs, sbd_zstacks0):
+        subblock = directory_entry.data_segment()
+        for sbdim in subblock.dimension_entries:
+            if sbdim.dimension == 'X':
+                x_osv = sbdim.start
+                x_osc = sbdim.start_coordinate
+            if sbdim.dimension == 'Y':
+                y_osv = sbdim.start
+                y_osc = sbdim.start_coordinate
+            if sbdim.dimension == 'Z':
+                z_osv = sbdim.start
+                z_osc = sbdim.start_coordinate
+        v_offsets[i, :] = [i, x_osv, y_osv, z_osv]
+        c_offsets[i, :] = [i, x_osc, y_osc, z_osc]
+    # print(v_offsets, c_offsets)
+
+    if conffile:
+        # conffile = '{}_stitch.conf'.format(filestem)
+        # entry per channelxtile
+        #vo = np.repeat(v_offsets, nchannels, axis=0)
+        vo = np.tile(v_offsets, [nchannels, 1])
+        vo[:, 0] = list(range(0, vo.shape[0]))
+        np.savetxt(conffile, vo,
+                   fmt='%d;;(%10.5f, %10.5f, %10.5f)',
+                   header='dim=3', comments='')
+
+    return v_offsets, c_offsets
 
 
 def plot_profiles(f, axdict, filestem, clip_threshold=0.75, res=10000, fac=0.05):
