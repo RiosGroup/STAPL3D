@@ -66,8 +66,14 @@ function load_parameters {
     dataset_biasfield="${dataset_stitching}${biasfield__params__postfix}"
     dataset_preproc="${dataset_biasfield}"
 
-    [[ -f "${datadir}/${dataset}.${dataset__file_format}" ]] &&
-        set_nstacks "${datadir}/${dataset}.${dataset__file_format}"
+    if [ -z "${dataset__M}" ]
+    then
+        fpath="${datadir}/${dataset}.${dataset__file_format}"
+        [[ -f "${fpath}" ]] && set_nstacks "${fpath}"
+    else
+        M="${dataset__M}"
+    fi
+    export M
 
     # FIXME: need stitched file dimensions
     check_dims Z "$Z" || set_ZYXCT "${datadir}/${dataset}_dims.yml"
@@ -165,6 +171,9 @@ function set_nstacks {
 function set_dirtree {
 
     local datadir="${1}"
+
+    stackdir="${datadir}/${dirtree__datadir__stacks}"
+    mkdir -p "${stackdir}"
 
     blockdir="${datadir}/${dirtree__datadir__blocks}"
     mkdir -p "${blockdir}"
@@ -643,7 +652,9 @@ function pbs_directives {
 function conda_cmds {
     # Generate conda directives for submission script.
 
-    eval conda_env="\$${stage}__conda__env"
+    eval conda_env="\$${stage}__submit__conda_env"
+    [[ -z "${conda_env}" ]] && eval var=\$submit_defaults__submit__conda_env
+
 
     if [ ! -z $conda_env ]
     then
@@ -675,6 +686,7 @@ function base_cmds {
     echo ''
     echo projectdir="${projectdir}"
     echo datadir="${datadir}"
+    echo stackdir="${stackdir}"
     echo channeldir="${channeldir}"
     echo blockdir="${blockdir}"
     echo profdir="${profdir}"
@@ -715,6 +727,14 @@ function no_parallelization {
 
 function stack_parallelization {
     # Generate directives for parallel stacks.
+
+    echo ''
+
+}
+
+
+function channel_plane_parallelization {
+    # Generate directives for parallel channels.
 
     echo ''
 
@@ -793,50 +813,88 @@ function finishing_directives {
 function set_submit_pars {
 
     local stage="$1"
-    local range
 
     unset submit_pars
     submit_pars=()
-
-    eval submit_pars+=( \$${stage}__submit__array )
-    eval submit_pars+=( \$${stage}__submit__nodes )
-    eval submit_pars+=( \$${stage}__submit__tasks )
-    eval submit_pars+=( \$${stage}__submit__mem )
-    eval submit_pars+=( \$${stage}__submit__wtime )
+    add_submit_par $stage 'array' 'no'
+    add_submit_par $stage 'nodes' '1'
+    add_submit_par $stage 'tasks' '1'
+    add_submit_par $stage 'mem' '10G'
+    add_submit_par $stage 'wtime' '01:00:00'
 
     case "${submit_pars[0]}" in
         'no')
-            range="1-1:1"
+            array_stop="1"
             ;;
         'stack')
-            range="1-$M:1"
+            array_stop="$M"
             ;;
         'plane')
-            range="1-$Z:1"
+            array_stop="$Z"
             ;;
         'channel')
-            range="1-$C:1"
+            array_stop="$C"
             ;;
         'channel_plane')
-            range="1-$((C*Z)):1"
+            array_stop="$((C*Z))"
             ;;
         'block')
-            range="1-${#blockstems[@]}:1"
+            array_stop="${#blockstems[@]}"
             ;;
         'zipline')
-            range="$((start + 1))-${stop}:2"
+            array_range="$((start + 1))"
+            array_stop="${stop}"
+            array_step=2
             ;;
         'zipquad')
             set_zipquads ${start_x} ${start_y} 2 2 $((nx-1)) $((ny-1))
-            range="1-${#zipquads[@]}:1"
+            array_stop="${#zipquads[@]}"
             ;;
         'idss')
             set_idss "${stage}__params__ids..__ids=" '='
-            range="1-${#idss[@]}:1"
+            array_stop="${#idss[@]}"
             ;;
     esac
 
-    submit_pars+=( $range )
+    unset array_range
+    build_array_range $stage 'start' '1' ''
+    build_array_range $stage 'stop' '1' '-'
+    build_array_range $stage 'step' '1' ':'
+    build_array_range $stage 'simul' '0' '%'
+
+    submit_pars+=( $array_range )
+
+}
+
+
+function add_submit_par {
+
+    local stage="${1}"
+    local varname="${2}"
+    local default="${3}"
+
+    eval var=\$${stage}__submit__${varname}
+    [[ -z "${var}" ]] && eval var=\$submit_defaults__submit__${varname}
+    [[ -z "${var}" ]] && var="${default}"
+
+    submit_pars+=( ${var} )
+
+}
+
+
+function build_array_range {
+
+    local stage="${1}"
+    local varname="${2}"
+    local default="${3}"
+    local divider="${4}"
+
+    eval var=\$array_${varname}
+    [[ -z "${var}" ]] && eval var=\$${stage}__submit__${varname}
+    [[ -z "${var}" ]] && eval var=\$submit_defaults__submit__${varname}
+    [[ -z "${var}" ]] && var="${default}"
+
+    [[ "${var}" != "0" ]] && array_range+="${divider}${var}"
 
 }
 
