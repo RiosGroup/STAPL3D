@@ -161,7 +161,7 @@ function set_nstacks {
 
     local filepath="${1}"
 
-    conda activate stapl3d
+    conda activate ${submit_defaults__submit__conda_env}
     M=`python -c "import os; import czifile; from stapl3d.preprocessing import czi_split_zstacks; czi = czifile.CziFile('${filepath}'); _, n = czi_split_zstacks.get_zstack_shape(czi); print(int(n));"`
     conda deactivate
 
@@ -1027,7 +1027,7 @@ function get_py_shading_apply {
     echo 'parameter_file = sys.argv[2]'
     echo 'idx = int(sys.argv[3])'
     echo ''
-    echo "from stapl3d.preprocessing import czi_split_zstacks"
+    echo "from stapl3d.preprocessing import shading"
     echo "shading.czi_split_zstacks(
         image_in,
         offset=idx,

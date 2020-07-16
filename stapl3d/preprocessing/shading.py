@@ -23,6 +23,7 @@ import numpy as np
 from tifffile import create_output
 from xml.etree import cElementTree as etree
 
+from skimage import img_as_float
 from skimage.io import imread, imsave
 
 import czifile
@@ -408,12 +409,12 @@ def czi_split_zstacks(filepath, offset=0, nstacks=0, clipping_mask=False, correc
 
         if correct:
             shadingstem = os.path.join(datadir, 'shading', fstem)
-            shading = []
+            shadingdata = []
             for ch in range(data.shape[3]):
                 filepath_shading = '{}_ch{:02d}_shading.tif'.format(shadingstem, ch)
-                shading_img = imread(filepath_shading)
-                shading.append(np.tile(shading_img, (data.shape[0], 1, 1)))
-            data /= np.stack(shading, axis=3)
+                shading_img = img_as_float(imread(filepath_shading))
+                shadingdata.append(np.tile(shading_img, (data.shape[0], 1, 1)))
+            data = data / np.stack(shadingdata, axis=3)
 
         if write_to_tif:
             outputstem = os.path.join(datadir, 'stacks', "{}_stack{:03d}".format(fstem, stack_idx))
