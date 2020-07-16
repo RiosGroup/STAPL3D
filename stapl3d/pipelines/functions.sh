@@ -37,6 +37,11 @@ function set_datadir {
 function init_dataset {
 
     cp "${STAPL3D}/pipelines/params.yml" "${datadir}/${dataset}.yml"
+
+    echo ""
+    echo " --- copied default parameter file to ${datadir}/${dataset}.yml"
+    echo ""
+
     # set_ZYXCT_ims -v "${datadir}/${dataset}.ims"
     # write_ZYXCT_to_yml ${dataset} "${datadir}/${dataset}_dims.yml"
 
@@ -161,8 +166,9 @@ function set_nstacks {
 
     local filepath="${1}"
 
+    source "${CONDA_SH}"
     conda activate ${submit_defaults__submit__conda_env}
-    M=`python -c "import os; import czifile; from stapl3d.preprocessing import czi_split_zstacks; czi = czifile.CziFile('${filepath}'); _, n = czi_split_zstacks.get_zstack_shape(czi); print(int(n));"`
+    M=`python -c "import os; import czifile; from stapl3d.preprocessing import shading; czi = czifile.CziFile('${filepath}'); _, n = shading.get_zstack_shape(czi); print(int(n));"`
     conda deactivate
 
 }
@@ -183,6 +189,9 @@ function set_dirtree {
 
     shadingdir="${datadir}/${dirtree__datadir__shading}"
     mkdir -p "${shadingdir}"
+
+    stitchingdir="${datadir}/${dirtree__datadir__stitching}"
+    mkdir -p "${stitchingdir}"
 
     biasfielddir="${datadir}/${dirtree__datadir__biasfield}"
     mkdir -p "${biasfielddir}"
@@ -1049,7 +1058,7 @@ function get_cmd_shading_apply {
 }
 
 
-function get_py_stitching {
+function get_py_stitching0 {
 
     echo '#!/usr/bin/env python'
     echo ''
@@ -1057,19 +1066,66 @@ function get_py_stitching {
     echo 'image_in = sys.argv[1]'
     echo 'conffile = sys.argv[2]'
     echo ''
-    echo "from stapl3d.preprocessing import czi_split_zstacks"
+    echo "from stapl3d.preprocessing import shading"
     echo "shading.find_stack_offsets(image_in, conffile)"
 
 }
-function get_cmd_stitching {
+function get_cmd_stitching0 {
 
     pyfile="${datadir}/${jobname}.py"
     eval get_py_${stage} > "${pyfile}"
 
     echo python "${pyfile}" \
         "\${filestem}.${shading__file_format}" \
-        "\${filestem}_tileoffsets.conf"
+        "\${filestem}_tileoffsets_chxx.conf"
 
+}
+function get_cmd_stitching1 {
+    echo 'ch_id=ch`printf %02g ${idx}`'
+    echo $FIJI --headless --console -macro \
+        "$STAPL3D/preprocessing/stitching.ijm" \
+        \"1 ${datadir} ${dataset} \${ch_id} dummy\"
+}
+function get_cmd_stitching2 {
+    echo ch_id0="ch`printf %02g ${stitching__params__channel}`"
+    echo $FIJI --headless --console -macro \
+        "$STAPL3D/preprocessing/stitching.ijm" \
+        \"2 ${datadir} ${dataset} \${ch_id0} dummy\"
+}
+function get_cmd_stitching3 {
+    echo ch_id0="ch`printf %02g ${stitching__params__channel}`"
+    echo $FIJI --headless --console -macro \
+        "$STAPL3D/preprocessing/stitching.ijm" \
+        \"3 ${datadir} ${dataset} \${ch_id0} dummy\"
+}
+function get_py_stitching4 {
+
+    echo '#!/usr/bin/env python'
+    echo ''
+    echo 'import sys'
+    echo 'filestem = sys.argv[1]'
+    echo 'channel = int(sys.argv[2])'
+    echo 'channel_ref = int(sys.argv[3])'
+    echo 'dapi_shift = float(sys.argv[4])'
+    echo ''
+    echo "from stapl3d.preprocessing import stitching"
+    echo "stitching.adapt_xml(filestem, channel, channel_ref, dapi_shift)"
+}
+function get_cmd_stitching4 {
+
+    pyfile="${datadir}/${jobname}.py"
+    eval get_py_${stage} > "${pyfile}"
+
+    echo python "${pyfile}" \
+        "\${filestem}" \
+        "\${idx}" \
+        "${stitching__params__channel}" \
+        "${dataset__dapi_shift}"
+
+    echo 'ch_id=ch`printf %02g ${idx}`'
+    echo $FIJI --headless --console -macro \
+        "$STAPL3D/preprocessing/stitching.ijm" \
+        \"4 ${datadir} ${dataset} \${ch_id} dummy\"
 }
 
 

@@ -16,6 +16,7 @@ dirtree:
         blocks: blocks
         channels: channels
         shading: shading
+        stitching: stitching
         mask:
         biasfield: biasfield
         profiling: profiling
@@ -62,12 +63,46 @@ shading_apply:
     submit:
         array: stack
         wtime: 01:00:00
+        mem: 30G
 
 stitching:
     params:
         postfix: _stitching
+        channel: 0
+
+stitching0:
+    params:
     submit:
         array: no
+
+stitching1:
+    params:
+    submit:
+        array: channel
+        mem: 20G
+        wtime: 03:00:00
+
+stitching2:
+    params:
+    submit:
+        array: no
+        tasks: 24
+        mem: 60G
+        wtime: 05:00:00
+
+stitching3:
+    params:
+    submit:
+        array: no
+        mem: 60G
+        wtime: 05:00:00
+
+stitching4:
+    params:
+    submit:
+        array: channel
+        mem: 60G
+        wtime: 10:00:00
 
 stitching_apply:
     params:
@@ -141,8 +176,6 @@ biasfield_apply:
 
 ims_aggregate2:
     params:
-    conda:
-        env: stapl3d
     submit:
         array: no
         mem: 20G
@@ -150,8 +183,6 @@ ims_aggregate2:
 
 block_segmentation:
     params:
-    conda:
-        env: stapl3d
     submit:
         array: block
         mem: 60G
