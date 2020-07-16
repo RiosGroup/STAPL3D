@@ -3,10 +3,10 @@
 ###==========================================================================###
 ### analysis preparation
 
+source "${HOME}/.my_config.ini" && load_config
+
 projectdir='/hpc/pmc_rios/mkleinnijenhuis/Kidney'
 dataset='200302_RL57_P30T_25x'
-
-source "${HOME}/.my_config.ini" && load_config
 
 load_dataset "${projectdir}" "${dataset}"
 [[ -f "${datadir}/${dataset}.yml" ]] || init_dataset
@@ -18,7 +18,7 @@ load_parameters "${dataset}" -v
 jid=''
 submit $( generate_script shading ) $jid
 submit $( generate_script shading_postproc ) $jid
-# submit $( generate_script shading_apply ) $jid  # TODO: non-proprietary
+submit $( generate_script shading_apply ) $jid
 
 # submit $( generate_script stitching ) $jid  # TODO: non-proprietary
 # load_parameters "${dataset}" -v

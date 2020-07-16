@@ -1,5 +1,18 @@
+submit_defaults:
+    submit:
+        array: no
+        start: 1
+        step: 1
+        simul: 0
+        wtime: 01:00:00
+        mem: 60G
+        nodes: 1
+        tasks: 1
+        conda_env: stapl3d
+
 dirtree:
     datadir:
+        stacks: stacks
         blocks: blocks
         channels: channels
         shading: shading
@@ -11,6 +24,7 @@ dirtree:
 dataset:
     name: 200302_RL57_P30T_25x
     alias: P30T_RL
+    file_format: czi
     ims_ref_postfix: _ref_uint16
     dapi_channel: 0
     dapi_shift: 0
@@ -33,41 +47,38 @@ shading:
         polynomial_order: 3
     submit:
         array: channel_plane
-        nodes: 1
-        tasks: 1
-        mem: 60G
-        wtime: 04:00:00
-    conda:
-        env: stapl3d
+        simul: 24
+        mem: 10G
+        wtime: 01:00:00
 
 shading_postproc:
     params:
     submit:
         array: channel
-        nodes: 1
-        tasks: 1
-        mem: 60G
-        wtime: 04:00:00
-    conda:
-        env: stapl3d
+        wtime: 01:00:00
+
+shading_apply:
+    params:
+    submit:
+        array: stack
+        wtime: 01:00:00
 
 stitching:
     params:
         postfix: _stitching
     submit:
-    conda:
-        env: stapl3d
+        array: no
+
+stitching_apply:
+    params:
+        postfix: _stitching
+    submit:
+        array: channel
 
 splitchannels:
     params:
     submit:
         array: channel
-        nodes: 1
-        tasks: 1
-        mem: 60G
-        wtime: 05:00:00
-    conda:
-        env: stapl3d
 
 mask:
     params:
@@ -87,22 +98,12 @@ mask:
         distance_to_edge: true
     submit:
         array: no
-        nodes: 1
-        tasks: 1
-        mem: 60G
-        wtime: 02:00:00
-    conda:
-        env: stapl3d
 
 ims_aggregate1:
     params:
-    conda:
-        env: stapl3d
     submit:
         array: no
-        nodes: 1
-        tasks: 1
-        mem: 20G
+        mem: 10G
         wtime: 00:30:00
 
 biasfield:
@@ -117,20 +118,15 @@ biasfield:
             x: 5
     submit:
         array: channel
-        nodes: 1
         tasks: 24
         mem: 20G
         wtime: 05:00:00
-    conda:
-        env: stapl3d
 
 biasfield_stack:
     conda:
         env: stapl3d
     submit:
         array: no
-        nodes: 1
-        tasks: 1
         mem: 20G
         wtime: 01:30:00
 
@@ -140,12 +136,8 @@ biasfield_apply:
         blocksize_xy: 1280
     submit:
         array: channel
-        nodes: 1
-        tasks: 1
         mem: 60G
         wtime: 10:00:00
-    conda:
-        env: stapl3d
 
 ims_aggregate2:
     params:
@@ -153,8 +145,6 @@ ims_aggregate2:
         env: stapl3d
     submit:
         array: no
-        nodes: 1
-        tasks: 1
         mem: 20G
         wtime: 00:30:00
 
@@ -164,8 +154,6 @@ block_segmentation:
         env: stapl3d
     submit:
         array: block
-        nodes: 1
-        tasks: 1
         mem: 60G
         wtime: 05:00:00
 
@@ -213,12 +201,8 @@ splitblocks:
             - 0
     submit:
         array: block
-        nodes: 1
-        tasks: 1
         mem: 60G
         wtime: 05:00:00
-    conda:
-        env: stapl3d
 
 membrane_enhancement:
     params:
@@ -226,12 +210,8 @@ membrane_enhancement:
         membrane_filter_par: 1.1
     submit:
         array: block
-        nodes: 1
-        tasks: 1
         mem: 60G
         wtime: 05:00:00
-    conda:
-        env: stapl3d
 
 segmentation:
     params:
@@ -286,82 +266,54 @@ segmentation:
             - 8
     submit:
         array: block
-        nodes: 1
-        tasks: 1
         mem: 60G
         wtime: 05:00:00
-    conda:
-        env: stapl3d
 
 segmentation_postproc:
     params:
     submit:
         array: no
-        nodes: 1
-        tasks: 1
         mem: 1G
         wtime: 00:10:00
-    conda:
-        env: stapl3d
 
 segmentation_gather:
     params:
     submit:
         array: no
-        nodes: 1
-        tasks: 1
         mem: 1G
         wtime: 00:10:00
-    conda:
-        env: stapl3d
 
 relabel:
     params:
         postfix: _relabeled
     submit:
         array: block
-        nodes: 1
-        tasks: 1
         mem: 10G
         wtime: 01:10:00
-    conda:
-        env: stapl3d
 
 relabel_gather:
     params:
         postfix: _relabeled
     submit:
         array: no
-        nodes: 1
-        tasks: 1
         mem: 1G
         wtime: 00:10:00
-    conda:
-        env: stapl3d
 
 copyblocks:
     params:
         postfix: _fix
     submit:
         array: block
-        nodes: 1
-        tasks: 1
         mem: 10G
         wtime: 01:10:00
-    conda:
-        env: stapl3d
 
 copyblocks_gather:
     params:
         postfix: _relabeled_fix
     submit:
         array: no
-        nodes: 1
-        tasks: 1
         mem: 1G
         wtime: 00:10:00
-    conda:
-        env: stapl3d
 
 zipping:
     params:
@@ -376,12 +328,8 @@ zipping:
 zipping_gather:
     params:
         postfix: _relabeled_fix
-    conda:
-        env: stapl3d
     submit:
         array: no
-        nodes: 1
-        tasks: 1
         mem: 1G
         wtime: 00:10:00
 
@@ -389,35 +337,23 @@ ziplines:
     params:
     submit:
         array: zipline
-        nodes: 1
-        tasks: 1
         mem: 60G
         wtime: 05:00:00
-    conda:
-        env: stapl3d
 
 zipquads:
     params:
         axis: 0
     submit:
         array: zipquad
-        nodes: 1
-        tasks: 1
         mem: 60G
         wtime: 05:00:00
-    conda:
-        env: stapl3d
 
 zipping_postproc:
     params:
     submit:
         array: no
-        nodes: 1
-        tasks: 1
         mem: 1G
         wtime: 00:10:00
-    conda:
-        env: stapl3d
 
 copydataset:
     params:
@@ -425,12 +361,8 @@ copydataset:
         ods: /segm/labels_memb_del_relabeled_fix_full
     submit:
         array: block
-        nodes: 1
-        tasks: 1
         mem: 10G
         wtime: 01:10:00
-    conda:
-        env: stapl3d
 
 subsegment:
     params:
@@ -440,12 +372,8 @@ subsegment:
         ods_nucl: segm/labels_memb_del_relabeled_fix_nucl
     submit:
         array: block
-        nodes: 1
-        tasks: 1
         mem: 10G
         wtime: 01:00:00
-    conda:
-        env: stapl3d
 
 mergeblocks:
     params:
@@ -475,12 +403,8 @@ mergeblocks:
             postfix:
     submit:
         array: idss
-        nodes: 1
-        tasks: 1
         mem: 20G
         wtime: 01:00:00
-    conda:
-        env: stapl3d
 
 features:
     params:
@@ -495,20 +419,12 @@ features:
         blocksize_xy: 1280
     submit:
         array: block
-        nodes: 1
-        tasks: 1
         mem: 60G
         wtime: 05:00:00
-    conda:
-        env: stapl3d
 
 features_postproc:
     params:
     submit:
         array: no
-        nodes: 1
-        tasks: 1
         mem: 60G
         wtime: 01:00:00
-    conda:
-        env: stapl3d
