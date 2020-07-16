@@ -397,7 +397,7 @@ def czi_split_zstacks(filepath, offset=0, nstacks=0, clipping_mask=False, correc
 
     for stack_idx in range(offset, offset + nstacks):
 
-        if stack_idx == nstacks:
+        if stack_idx == n:
             return
 
         read_zstack(czi, zstack_idx=stack_idx, out=out)
