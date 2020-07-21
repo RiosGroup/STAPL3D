@@ -176,7 +176,8 @@ def generate_dataset_mask(
     im_mean.close()
     im_smooth.close()
     im_mask.close()
-    im_edt.close()
+    if distance_to_edge:
+        im_edt.close()
     for im in im_thr:
         im.close()
 
