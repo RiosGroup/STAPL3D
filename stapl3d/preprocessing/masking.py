@@ -218,7 +218,10 @@ def extract_mean(im, dim='c', keep_dtype=True, output=''):
     for zstart in range(0, im.dims[zdim], nslcs):
         zstop = min(im.dims[zdim], zstart + nslcs)
         im.slices[zdim] = mo.slices[zdim] = slice(zstart, zstop, None)
-        data_mean = np.mean(im.slice_dataset(), axis=im.axlab.index(dim))
+        data = im.slice_dataset()
+        if im.slices[zdim].stop - im.slices[zdim].start == 1:
+            data = np.expand_dims(data, 0)
+        data_mean = np.mean(data, axis=im.axlab.index(dim))
         if keep_dtype:
             data_mean = data_mean.astype(im.dtype)
         mo.write(data_mean)
