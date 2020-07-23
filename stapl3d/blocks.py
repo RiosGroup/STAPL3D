@@ -213,20 +213,21 @@ def add_volumes(im, block, props, bf=None, bias_dsfacs=[1, 64, 64, 1],
     channel_list = [i for i in range(im.dims[c_axis])]
     size = get_outsize(im, block['slices'])
 
-    ch_ids = ['memb', 'nucl', 'mean']
     ch_idxs = [memb_idxs, nucl_idxs, mean_idxs]
     ch_weights = [memb_weights, nucl_weights, mean_weights]
     ch_out = ['memb/mean', 'nucl/mean', 'mean']
+    ch_ids = ['memb', 'nucl', 'mean']
 
     if output_channels is not None:
 
         if output_channels == [-1]:
             output_channels = channel_list
 
-        ch_ids += ["ch{:02d}".format(ch) for ch in output_channels]
+        ids = ["ch{:02d}".format(ch) for ch in output_channels]
         ch_idxs += [[ch] for ch in output_channels]
-        ch_weights += [[1.0]] * len(ch_idxs)
-        ch_out += ['chan/{}'.format(ch_id) for ch_id in ch_ids]
+        ch_weights += [[1.0]] * len(output_channels)
+        ch_out += ['chan/{}'.format(ch_id) for ch_id in ids]
+        ch_ids += ids
 
     outputs = {}
     for key, idxs, weights, ods in zip(ch_ids, ch_idxs, ch_weights, ch_out):
