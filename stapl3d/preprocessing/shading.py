@@ -528,12 +528,13 @@ def get_image_info(image_in):
         iminfo['nstacks'] = len(czi.filtered_subblock_directory) // n
 
         zstack_shape = list(czi.filtered_subblock_directory[0].shape)
-        zstack_shape[czi.axes.index('C')] = nchannels
-        zstack_shape[czi.axes.index('T')] = ntimepoints
-        zstack_shape[czi.axes.index('Z')] = nslices
-        iminfo['zss'] = zstack_shape
+        zstack_shape[czi.axes.index('C')] = iminfo['nchannels']
+        zstack_shape[czi.axes.index('T')] = iminfo['ntimepoints']
+        zstack_shape[czi.axes.index('Z')] = iminfo['nslices']
+        iminfo['zstack_shape'] = zstack_shape
 
-        iminfo['dims_zyxc'] = [zss[8], zss[9], zss[10], zss[6]]
+        zyxc_idxs = [8, 9, 10, 6]
+        iminfo['dims_zyxc'] = [iminfo['zstack_shape'][idx] for idx in zyxc_idxs]
         iminfo['elsize_zyxc'] = czi_get_elsize(czi) + [1]
 
     elif image_in.endswith('.lif'):
@@ -550,10 +551,10 @@ def get_image_info(image_in):
         iminfo['nrows'] = lim.dims[5]
 
         m_idx = 3
-        iminfo['zss'] = lim.dims[:m_idx] + lim.dims[m_idx+1:]
+        iminfo['zstack_shape'] = lim.dims[:m_idx] + lim.dims[m_idx+1:]
 
         zyxc_idxs = [1, 4, 5, 0]
-        iminfo['dims_zyxc'] = [lim.dims[idx] for idx in zyxc_idxs]
+        iminfo['dims_zyxc'] = [iminfo['zstack_shape'][idx] for idx in zyxc_idxs]
         iminfo['elsize_zyxc'] = [lim.scale[idx] for idx in zyxc_idxs]
 
     else:
