@@ -55,18 +55,19 @@ def estimate(
     step_id = 'stitching'
 
 
-def adapt_xml(filestem, channel, channel_ref, zshift=0, setups=[]):
+def adapt_xml(filestem, channel, channel_ref, zshift=0, setups=[], replace=True):
 
     xml_ref = '{}_ch{:02d}.xml'.format(filestem, channel_ref)
     xml_path = '{}_ch{:02d}.xml'.format(filestem, channel)
     h5_filename = '{}_ch{:02d}.h5'.format(os.path.basename(filestem), channel)
 
-    shutil.copy2(xml_ref, '{}.orig'.format(xml_path))
+    shutil.copy2(xml_path, '{}.orig'.format(xml_path))
+    shutil.copy2(xml_ref, xml_path)
 
     tree = ET.parse(xml_path)
     root = tree.getroot()
 
-    if replacement:
+    if replace:
         sd = root.find('SequenceDescription')
         il = sd.find('ImageLoader')
         h5 = il.find('hdf5')
