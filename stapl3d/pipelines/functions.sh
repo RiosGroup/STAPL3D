@@ -188,12 +188,12 @@ function write_tiled_to_yml {
 
     local parfile="${1}"
 
-    echo "M: ${M}" >> "${parfile}"
     echo "Z: ${Z}" > "${parfile}"
     echo "tY: ${tY}" >> "${parfile}"
     echo "tX: ${tX}" >> "${parfile}"
     echo "C: ${C}" >> "${parfile}"
     echo "T: ${T}" >> "${parfile}"
+    echo "M: ${M}" >> "${parfile}"
 
     echo " --- written M-Z-tY-tX-C-T='${M} ${Z} ${tY} ${tX} ${C} ${T}' to ${parfile}"
 
