@@ -720,7 +720,7 @@ function base_cmds {
     echo stitching_stem="\${shading_stem}${stitching__params__postfix}"
     echo biasfield_stem="\${stitching_stem}${biasfield__params__postfix}"
     echo block_id="\${block_ids[idx]}"
-    echo blockstem="\${blockdir}/\${dataset}_\${block_id}"
+    echo blockstem="\${blockdir}/\${dataset_preproc}_\${block_id}"
 
 }
 
