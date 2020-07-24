@@ -12,6 +12,8 @@ import pickle
 import shutil
 import multiprocessing
 
+import yaml
+
 import numpy as np
 
 from skimage.transform import resize
@@ -362,45 +364,59 @@ def merge(
     parameter_file='',
     outputdir='',
     n_workers=0,
+    idss_select=[],
     blocksize=[],
     blockmargin=[],
     blockrange=[],
     blocks=[],
     fullsize=[],
+    ims_ref_path='',
     ):
     """Average membrane and nuclear channels and write as blocks."""
 
     step_id = 'mergeblocks'
 
-    blockdir = get_outputdir(image_in, parameter_file, outputdir, 'blocks', 'blocks')
     outputdir = get_outputdir(image_in, parameter_file, outputdir, step_id, '')
 
     params = get_params(locals().copy(), parameter_file, step_id)
     subparams = get_params(locals().copy(), parameter_file, step_id, 'submit')
 
-    idss = [v['ids'] for ids, v in params.items() if ids.startswith('ids')]
-
-    filepaths, blocks = get_blockfiles(image_in, blockdir, params['blocks'])
+    blockdir = get_outputdir(image_in, parameter_file, outputdir, 'blocks', 'blocks')
+    blockfiles, blocks = get_blockfiles(image_in, blockdir, params['blocks'])
     blocksize, blockmargin, _ = get_blockinfo(image_in, parameter_file, params)
+
+    paths = get_paths(image_in)
     props = get_imageprops(image_in)
+    dataset = os.path.splitext(paths['fname'])[0]
+    ims_ref_path = get_ims_ref_path(image_in, parameter_file, params['ims_ref_path'])
 
-    dataset = os.path.splitext(get_paths(image_in)['fname'])[0]
+    idss_dicts = [v for k, v in sorted(params.items()) if k.startswith('ids')]
+    idss_select = idss_select or list(range(len(idss_dicts)))
+    idss_dicts = [ids for i, ids in enumerate(idss_dicts) if idx in idss_select]
 
-    if params['blocks']:
-        idss = [ids for idx, ids in enumerate(idss) if idx in params['blocks']]
+    idss, outputnames = [], []
+    for d in idss_dicts:
+        outname = '{}_{}'.format(dataset, d['ids'].replace('/', '-'))
+        if d['format'] == 'h5':
+            outname = '{}.h5/{}'.format(outname, d['ids'])
+        elif d['format'] == 'ims':
+            outname = '{}.ims'.format(outname)
+        idss.append(d['ids'])
+        outputnames.append(outname)
 
     arglist = [
         (
-            ['{}/{}'.format(filepath, ids) for filepath in filepaths],
+            ['{}/{}'.format(blockfile, ids) for blockfile in blockfiles],
             blocksize[:3],
             blockmargin[:3],
             [],
             [0, 0, 0],
             props['shape'][:3],
+            ims_ref_path,
             '',
-            os.path.join(outputdir, '{}_{}.h5/{}'.format(dataset, ids.replace('/', '-'), ids)),
+            os.path.join(outputdir, outputname),
         )
-        for ids in idss]
+        for ids, outputname in zip(idss, outputnames)]
 
     n_workers = get_n_workers(len(idss), subparams)
     with multiprocessing.Pool(processes=n_workers) as pool:
@@ -414,6 +430,7 @@ def mergeblocks(
         blockrange=[],
         blockoffset=[0, 0, 0],
         fullsize=[],
+        ims_ref_path='',
         datatype='',
         outputpath='',
         ):
@@ -439,8 +456,9 @@ def mergeblocks(
         outsize = list(outsize) + [im.ds.shape[3]]  # TODO: flexible insert
 
     if outputpath.endswith('.ims'):
-        mo = LabelImage(outputpath)
-        mo.create(comm=mpi.comm)
+        shutil.copy2(ims_ref_path, outputpath)
+        mo = Image(outputpath)
+        mo.load()
     else:
         props['shape'] = outsize
         mo = LabelImage(outputpath, **props)
