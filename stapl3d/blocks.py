@@ -377,12 +377,12 @@ def merge(
 
     step_id = 'mergeblocks'
 
+    blockdir = get_outputdir(image_in, parameter_file, '', 'blocks', 'blocks')
     outputdir = get_outputdir(image_in, parameter_file, outputdir, step_id, '')
 
     params = get_params(locals().copy(), parameter_file, step_id)
     subparams = get_params(locals().copy(), parameter_file, step_id, 'submit')
 
-    blockdir = get_outputdir(image_in, parameter_file, outputdir, 'blocks', 'blocks')
     blockfiles, blocks = get_blockfiles(image_in, blockdir, params['blocks'])
     blocksize, blockmargin, _ = get_blockinfo(image_in, parameter_file, params)
 
