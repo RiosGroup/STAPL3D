@@ -393,7 +393,7 @@ def merge(
 
     idss_dicts = [v for k, v in sorted(params.items()) if k.startswith('ids')]
     idss_select = idss_select or list(range(len(idss_dicts)))
-    idss_dicts = [ids for i, ids in enumerate(idss_dicts) if idx in idss_select]
+    idss_dicts = [ids for i, ids in enumerate(idss_dicts) if i in idss_select]
 
     idss, outputnames = [], []
     for d in idss_dicts:
