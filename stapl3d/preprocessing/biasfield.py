@@ -154,6 +154,7 @@ def estimate_channel(
     ):
     """Estimate the x- and y-profiles for a channel in a czi file.
 
+    # TODO: biasfield report is poorly scaled for many datasets => implement autoscaling
     """
 
     if isinstance(downsample_factors, dict):
@@ -542,6 +543,7 @@ def calculate_downsample_factors(image_in, resolution_level=-1):
     target = {'z': im.elsize[im.axlab.index('z')], 'x': 20, 'y': 20}
     dsfacs = [target[dim] / im.elsize[im.axlab.index(dim)] for dim in 'zyx']
     dsfacs = [np.round(dsfac).astype('int') for dsfac in dsfacs]
+    dsfacs[1] = dsfacs[2] = min(dsfacs[1], dsfacs[2])
     downsample_factors = dsfacs + [1, 1]
 
     im.close()
