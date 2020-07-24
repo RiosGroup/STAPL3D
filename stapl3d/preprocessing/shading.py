@@ -530,7 +530,7 @@ def get_image_info(image_in):
         zstack_shape = list(czi.filtered_subblock_directory[0].shape)
         zstack_shape[czi.axes.index('C')] = iminfo['nchannels']
         zstack_shape[czi.axes.index('T')] = iminfo['ntimepoints']
-        zstack_shape[czi.axes.index('Z')] = iminfo['nslices']
+        zstack_shape[czi.axes.index('Z')] = iminfo['nplanes']
         iminfo['zstack_shape'] = zstack_shape
 
         zyxc_idxs = [8, 9, 10, 6]
