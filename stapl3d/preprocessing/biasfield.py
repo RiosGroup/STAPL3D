@@ -398,11 +398,7 @@ def apply(
     channeldir = get_outputdir(image_in, parameter_file, '', 'channels', 'channels')
 
     paths = get_paths(image_in)
-    datadir, filename = os.path.split(paths['base'])
-    filestem = os.path.splitext(filename)[0]
-    dataset = filestem.split('_shading')[0]
-    postfix = filestem.split(dataset)[-1]
-    chstem_pat = '{}{}{}'.format(dataset, '_ch{:02d}', postfix)
+    chstem_pat = '{}{}'.format(paths['base'], '_ch{:02d}')
 
     with open(parameter_file, 'r') as ymlfile:
         cfg = yaml.safe_load(ymlfile)
