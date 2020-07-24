@@ -118,8 +118,8 @@ If you installed STAPL-3D using conda, you can start a notebook in the stapl3d e
 HPC deployment
 **************
 
- - copy the file stapl3d/pipelines/.my_config.ini to your HPC home directory
- - adapt the paths in .my_config.ini for:
+ - copy the file stapl3d/pipelines/.stapl3d.ini to your HPC home directory
+ - adapt the paths in .stapl3d.ini for:
     - STAPL3D: stapl3d package directory
     - ACME: directory with the ACME binaries
     - FIJI: path to fiji executable

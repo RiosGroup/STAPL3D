@@ -3,7 +3,7 @@
 ###==========================================================================###
 ### analysis preparation
 
-source "${HOME}/.my_config.ini" && load_config
+source "${HOME}/.stapl3d.ini" && load_stapl3d_config
 
 projectdir='/hpc/pmc_rios/mkleinnijenhuis/Kidney'
 dataset='200302_RL57_P30T_25x'
