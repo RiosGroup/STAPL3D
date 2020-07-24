@@ -10,8 +10,12 @@ import argparse
 import os
 import numpy as np
 import pandas as pd
-from wmem import Image, LabelImage, get_image
-from membrane.extract_segments import gen_outpath, write_output
+from stapl3d import (
+    Image,
+    LabelImage,
+    get_image,
+    )
+from stapl3d.segmentation.segment import gen_outpath, write_output
 
 def main(argv):
     """Write segment backprojection."""
