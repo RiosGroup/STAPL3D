@@ -850,7 +850,7 @@ function set_submit_pars {
             array_stop="${#blockstems[@]}"
             ;;
         'zipline')
-            array_range="$((start + 1))"
+            array_start="$((start + 1))"
             array_stop="${stop}"
             array_step=2
             ;;
@@ -928,9 +928,6 @@ function generate_script {
     subfile="${datadir}/${jobname}.sh"
 
     local submit_pars=( "$@" )
-    # local parset="${stage}"
-    # [[ "${stage}" == ziplines* ]] && parset='ziplines'
-    # [[ "${stage}" == zipquads* ]] && parset='zipquads'
     [[ "${stage}" == ziplines* ]] && stage='ziplines'
     [[ "${stage}" == zipquads* ]] && stage='zipquads'
     [[ ${#submit_pars[@]} -eq 0 ]] && set_submit_pars ${stage}
