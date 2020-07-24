@@ -1081,22 +1081,19 @@ function get_cmd_stitching0 {
 
 }
 function get_cmd_stitching1 {
-    echo 'ch_id=ch`printf %02g ${idx}`'
     echo $FIJI --headless --console -macro \
         "$STAPL3D/preprocessing/stitching.ijm" \
-        \"1 ${datadir} ${dataset} \${ch_id} dummy\"
+        \"1 ${datadir} ${dataset} \${idx} dummy\"
 }
 function get_cmd_stitching2 {
-    echo ch_id0="ch`printf %02g ${stitching__params__channel}`"
     echo $FIJI --headless --console -macro \
         "$STAPL3D/preprocessing/stitching.ijm" \
-        \"2 ${datadir} ${dataset} \${ch_id0} dummy\"
+        \"2 ${datadir} ${dataset} ${stitching__params__channel} dummy\"
 }
 function get_cmd_stitching3 {
-    echo ch_id0="ch`printf %02g ${stitching__params__channel}`"
     echo $FIJI --headless --console -macro \
         "$STAPL3D/preprocessing/stitching.ijm" \
-        \"3 ${datadir} ${dataset} \${ch_id0} dummy\"
+        \"3 ${datadir} ${dataset} ${stitching__params__channel} dummy\"
 }
 function get_py_stitching4 {
 
@@ -1122,10 +1119,9 @@ function get_cmd_stitching4 {
         "${stitching__params__channel}" \
         "${dataset__dapi_shift}"
 
-    echo 'ch_id=ch`printf %02g ${idx}`'
     echo $FIJI --headless --console -macro \
         "$STAPL3D/preprocessing/stitching.ijm" \
-        \"4 ${datadir} ${dataset} \${ch_id} dummy\"
+        \"4 ${datadir} ${dataset} \${idx} dummy\"
 }
 
 

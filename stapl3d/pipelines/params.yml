@@ -88,21 +88,21 @@ stitching2:
         array: no
         tasks: 24
         mem: 60G
-        wtime: 05:00:00
+        wtime: 02:00:00
 
 stitching3:
     params:
     submit:
         array: no
-        mem: 60G
-        wtime: 05:00:00
+        mem: 20G
+        wtime: 00:30:00
 
 stitching4:
     params:
     submit:
         array: channel
         mem: 60G
-        wtime: 10:00:00
+        wtime: 24:00:00
 
 stitching_apply:
     params:
@@ -179,7 +179,7 @@ ims_aggregate2:
     submit:
         array: no
         mem: 20G
-        wtime: 00:30:00
+        wtime: 00:10:00
 
 block_segmentation:
     params:
@@ -233,7 +233,7 @@ splitblocks:
     submit:
         array: block
         mem: 60G
-        wtime: 05:00:00
+        wtime: 01:00:00
 
 membrane_enhancement:
     params:
@@ -242,7 +242,7 @@ membrane_enhancement:
     submit:
         array: block
         mem: 60G
-        wtime: 05:00:00
+        wtime: 01:00:00
 
 segmentation:
     params:
@@ -298,7 +298,7 @@ segmentation:
     submit:
         array: block
         mem: 60G
-        wtime: 05:00:00
+        wtime: 01:00:00
 
 segmentation_postproc:
     params:
@@ -320,7 +320,7 @@ relabel:
     submit:
         array: block
         mem: 10G
-        wtime: 01:10:00
+        wtime: 00:10:00
 
 relabel_gather:
     params:
@@ -336,7 +336,7 @@ copyblocks:
     submit:
         array: block
         mem: 10G
-        wtime: 01:10:00
+        wtime: 00:10:00
 
 copyblocks_gather:
     params:
@@ -369,7 +369,7 @@ ziplines:
     submit:
         array: zipline
         mem: 60G
-        wtime: 05:00:00
+        wtime: 02:00:00
 
 zipquads:
     params:
@@ -377,7 +377,7 @@ zipquads:
     submit:
         array: zipquad
         mem: 60G
-        wtime: 05:00:00
+        wtime: 01:00:00
 
 zipping_postproc:
     params:
