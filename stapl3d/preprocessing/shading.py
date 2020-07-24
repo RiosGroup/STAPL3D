@@ -429,18 +429,11 @@ def unshade_zstack(
     datadir, fstem = os.path.split(filestem)
 
     iminfo = get_image_info(image_in)
-
     out = create_output(None, iminfo['zss'], iminfo['dtype'])
 
     # Get stack data (CZYX)  # TODO: timepoint  # FIXME: assumes T is squeezed
     c_axis = 0
-    if image_in.endswith('.czi'):
-        czi = czifile.CziFile(image_in)
-        czi_read_zstack(czi, zstack_idx=stack_idx, out=out)
-    elif image_in.endswith('.lif'):
-        lim = LifFile(image_in).get_image(0)
-        out = lif_read_zstack(lim, zstack_idx=stack_idx, out=out)
-    data = np.squeeze(out)
+    data = np.squeeze(read_zstack(image_in, stack_idx, out))
 
     if clipping_mask:
         clip_mask = create_clipping_mask(data, axis=c_axis)
@@ -523,33 +516,42 @@ def get_image_info(image_in):
     if image_in.endswith('.czi'):
 
         czi = czifile.CziFile(image_in)
-        zstack0 = czi.subblock_directory[0]
+
         iminfo['dtype'] = czi.dtype
-        iminfo['tilesize'] = [zstack0.shape[zstack0.axes.index('Y')],
-                              zstack0.shape[zstack0.axes.index('X')]]
-        iminfo['channels'] = list(range(czi.shape[czi.axes.index('C')]))
-        iminfo['planes'] = list(range(czi.shape[czi.axes.index('Z')]))
-        iminfo['stacks'] = list(range(czi.shape[czi.axes.index('M')]))
-        iminfo['zss'], iminfo['nstacks'] = czi_get_zstack_shape(czi)
+
         iminfo['nchannels'] = czi.shape[czi.axes.index('C')]
+        iminfo['ntimepoints'] = czi.shape[czi.axes.index('T')]
         iminfo['nplanes'] = czi.shape[czi.axes.index('Z')]
+        iminfo['ncols'] = czi.shape[czi.axes.index('Y')]
+        iminfo['nrows'] = czi.shape[czi.axes.index('X')]
+        n = iminfo['nchannels'] * iminfo['ntimepoints'] * iminfo['nplanes']
+        iminfo['nstacks'] = len(czi.filtered_subblock_directory) // n
+
+        zstack_shape = list(czi.filtered_subblock_directory[0].shape)
+        zstack_shape[czi.axes.index('C')] = nchannels
+        zstack_shape[czi.axes.index('T')] = ntimepoints
+        zstack_shape[czi.axes.index('Z')] = nslices
+        iminfo['zss'] = zstack_shape
+
         iminfo['dims_zyxc'] = [zss[8], zss[9], zss[10], zss[6]]
         iminfo['elsize_zyxc'] = czi_get_elsize(czi) + [1]
 
     elif image_in.endswith('.lif'):
 
-        lif = LifFile(image_in)
-        lim = lif.get_image(0)
+        lim = LifFile(image_in).get_image(0)  # FIXME: choice of image / series
+
         iminfo['dtype'] = lim.dtype
-        iminfo['tilesize'] = lim.dims[-2:]
-        iminfo['channels'] = list(range(lim.dims[0]))
-        iminfo['planes'] = list(range(lim.dims[1]))
-        iminfo['stacks'] = list(range(lim.dims[3]))
-        m_idx = 3
-        iminfo['zss'] = lim.dims[:m_idx] + lim.dims[m_idx+1:]
-        iminfo['nstacks'] = lim.dims[m_idx]
+
         iminfo['nchannels'] = lim.dims[0]
         iminfo['nplanes'] = lim.dims[1]
+        iminfo['ntimepoints'] = lim.dims[2]
+        iminfo['nstacks'] = lim.dims[3]
+        iminfo['ncols'] = lim.dims[4]
+        iminfo['nrows'] = lim.dims[5]
+
+        m_idx = 3
+        iminfo['zss'] = lim.dims[:m_idx] + lim.dims[m_idx+1:]
+
         zyxc_idxs = [1, 4, 5, 0]
         iminfo['dims_zyxc'] = [lim.dims[idx] for idx in zyxc_idxs]
         iminfo['elsize_zyxc'] = [lim.scale[idx] for idx in zyxc_idxs]
@@ -558,6 +560,13 @@ def get_image_info(image_in):
 
         print('Sorry, only czi and lif implemented for now...')
         return
+
+    iminfo['channels'] = list(range(iminfo['nchannels']))
+    iminfo['timepoints'] = list(range(iminfo['ntimepoints']))
+    iminfo['planes'] = list(range(iminfo['nplanes']))
+    iminfo['stacks'] = list(range(iminfo['nstacks']))
+
+    iminfo['tilesize'] = [iminfo['ncols'], iminfo['nrows']]
 
     return iminfo
 
@@ -569,6 +578,7 @@ def czi_get_elsize(czi):
     data = segment.data().data()
     md = etree.fromstring(data.encode('utf-8'))
 
+    # FIXME: use find() method on etree items
     elsize_x = float(md[0][3][0][0][0].text) * 1e6
     elsize_y = float(md[0][3][0][1][0].text) * 1e6
     elsize_z = float(md[0][3][0][2][0].text) * 1e6
@@ -576,80 +586,41 @@ def czi_get_elsize(czi):
     return [elsize_z, elsize_y, elsize_x]
 
 
-def get_offsets(czi):
-    """Get the zstack positions and shapes from the czi subblocks."""
-
-    nchannels = czi.shape[czi.axes.index('C')]
-    ntimepoints = czi.shape[czi.axes.index('T')]
-    nslices = czi.shape[czi.axes.index('Z')]
-
-    sbs = czi.filtered_subblock_directory[::nchannels * ntimepoints * nslices]
-
-    starts, shapes = [], []
-    for sb in sbs:
-        starts.append(sb.start)
-        shapes.append(sb.shape)
-
-    return starts, shapes
-
-
-def czi_get_zstack_shape(czi):
-    """Get the shape and amount of the zstacks."""
-
-    nchannels = czi.shape[czi.axes.index('C')]
-    ntimepoints = czi.shape[czi.axes.index('T')]
-    nslices = czi.shape[czi.axes.index('Z')]
-    ncols = czi.shape[czi.axes.index('Y')]
-    nrows = czi.shape[czi.axes.index('X')]
-
-    zstack_shape = list(czi.filtered_subblock_directory[0].shape)
-    zstack_shape[czi.axes.index('C')] = nchannels
-    zstack_shape[czi.axes.index('T')] = ntimepoints
-    zstack_shape[czi.axes.index('Z')] = nslices
-    #zstack_shape[czi.axes.index('Y')] = ncols
-    #zstack_shape[czi.axes.index('X')] = nrows
-
-    n = nchannels * ntimepoints * nslices
-    nzstacks = len(czi.filtered_subblock_directory) // n
-
-    return zstack_shape, nzstacks
-
-
-def lif_read_zstack(lim, zstack_idx=0, out=None):
+def read_zstack(image_in, zstack_idx, out=None):
     """Read the zstack data."""
 
     if out is None:
-        out = create_output(None, lim.dims[:5], lim.dtype)
+        iminfo = get_image_info(image_in)
+        out = create_output(None, iminfo['zss'], iminfo['dtype'])
 
-    #out = lim.get_stack_np(zstack_idx)  # CZTYX
-    for t in range(lim.dims[2]):
-        for z in range(lim.dims[1]):
-            for c in range(lim.dims[0]):
-                out[c, z, t, :, :] = lim.get_frame(z=z, t=t, c=c, m=zstack_idx, return_as_np=True)
+    if image_in.endswith('.czi'):
 
-    return out
+        czi = czifile.CziFile(image_in)
 
+        start = czi.start
+        n = czi.shape[czi.axes.index('C')] * czi.shape[czi.axes.index('Z')]
+        start_idx = n * zstack_idx
+        stop_idx = start_idx + n
+        zstack = czi.filtered_subblock_directory[start_idx:stop_idx]
 
-def czi_read_zstack(czi, zstack_idx=0, out=None):
-    """Read the zstack data."""
+        for directory_entry in zstack:
+            subblock = directory_entry.data_segment()
+            tile = subblock.data(resize=False, order=0)
+            index = [slice(i-j, i-j+k) for i, j, k in zip(directory_entry.start, start, tile.shape)]
+            index[czi.axes.index('Y')] = slice(0, tile.shape[czi.axes.index('Y')], None)
+            index[czi.axes.index('X')] = slice(0, tile.shape[czi.axes.index('X')], None)
+            out[tuple(index)] = tile
 
-    if out is None:
-        zss = get_zstack_shape(czi)
-        out = create_output(None, zss, czi.dtype)
+    elif image_in.endswith('.lif'):
 
-    start = czi.start
-    n = czi.shape[czi.axes.index('C')] * czi.shape[czi.axes.index('Z')]
-    start_idx = n * zstack_idx
-    stop_idx = start_idx + n
-    zstack = czi.filtered_subblock_directory[start_idx:stop_idx]
+        lim = LifFile(image_in).get_image(0)  # FIXME: choice of image / series
 
-    for directory_entry in zstack:
-        subblock = directory_entry.data_segment()
-        tile = subblock.data(resize=False, order=0)
-        index = [slice(i-j, i-j+k) for i, j, k in zip(directory_entry.start, start, tile.shape)]
-        index[czi.axes.index('Y')] = slice(0, tile.shape[czi.axes.index('Y')], None)
-        index[czi.axes.index('X')] = slice(0, tile.shape[czi.axes.index('X')], None)
-        out[tuple(index)] = tile
+        out = lim.get_stack_np(zstack_idx)  # CZTYX
+
+    else:
+
+        print('Sorry, only czi and lif implemented for now...')
+        return
 
     return out
 
