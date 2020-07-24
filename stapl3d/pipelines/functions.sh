@@ -71,31 +71,49 @@ function load_parameters {
     dataset_biasfield="${dataset_stitching}${biasfield__params__postfix}"
     dataset_preproc="${dataset_biasfield}"
 
-    if [ -z "${dataset__M}" ]
+    check_dims M "$M" || set_dims_tiled "${datadir}/${dataset}_dims_tiled.yml"
+    if ! [ -z "$M" ]
     then
-        fpath="${datadir}/${dataset}.${dataset__file_format}"
-        [[ -f "${fpath}" ]] && set_nstacks "${fpath}"
+        echo ""
+        echo " --- tiled dimensions are M * Z-tY-tX-C-T='${M} * ${Z} ${tY} ${tX} ${C} ${T}'"
+        echo " --- parallelization: ${M} Z-stacks"
+        echo ""
     else
-        M="${dataset__M}"
+        echo ""
+        echo " --- WARNING: could not determine tilescan dimensions"
+        echo " --- please check your configuration"
+        echo ""
     fi
-    export M
 
-    # FIXME: need stitched file dimensions
-    check_dims Z "$Z" || set_ZYXCT "${datadir}/${dataset}_dims.yml"
-    check_dims Z "$Z" -v
-    # TODO: exit on undefined ZYXCT
-    bs="${dataset__blocksize_xy}" && check_dims bs "$bs" || set_blocksize
-    bm="${dataset__blockmargin_xy}" && check_dims bm "$bm" || bm=64
-    set_channelstems "${dataset_preproc}"
-    set_blocks "${bs}" "${bm}"
+    check_dims X "$X" || set_ZYXCT "${datadir}/${dataset}_dims_stitched.yml"
+    if ! [ -z "$X" ]
+    then
+        bs="${dataset__blocksize_xy}" && check_dims bs "$bs" || set_blocksize
+        bm="${dataset__blockmargin_xy}" && check_dims bm "$bm" || bm=64
+        set_blocks "${bs}" "${bm}"
+        echo ""
+        echo " --- stitched dimensions are ZYXCT='${Z} ${Y} ${X} ${C} ${T}'"
+        echo " --- parallelization: ${#blockstems[@]} blocks (${nx} x ${ny}) of blocksize ${bs} with margin ${bm}"
+        echo ""
+    else
+        echo ""
+        echo " --- WARNING: could not determine stitched dimensions"
+        echo " --- please check your configuration"
+        echo ""
+    fi
 
-    echo ""
-    echo " --- data dimensions are ZYXCT='${Z} ${Y} ${X} ${C} ${T}'"
-    echo ""
-    echo " --- parallelization: ${M} Z-stacks"
-    echo " --- parallelization: ${#channelstems[@]} channels"
-    echo " --- parallelization: ${#blockstems[@]} blocks (${nx} x ${ny}) of blocksize ${bs} with margin ${bm}"
-    echo ""
+    if ! [ -z "$C" ]
+    then
+        set_channelstems "${dataset_preproc}"
+        echo ""
+        echo " --- parallelization: ${#channelstems[@]} channels"
+        echo ""
+    else
+        echo ""
+        echo " --- WARNING: could not determine number of channels"
+        echo " --- please check your configuration"
+        echo ""
+    fi
 
 }
 
@@ -121,9 +139,29 @@ function parse_yaml {
 }
 
 
+function set_dims_tiled {
+
+    if ! [ -z "${dataset__M}" ]
+    then
+        Z="${dataset__Z}"
+        tY="${dataset__tY}"
+        tX="${dataset__tX}"
+        C="${dataset__C}"
+        T="${dataset__T}"
+        M="${dataset__M}"
+    elif [ -f ${1} ]
+    then
+        eval $( parse_yaml "${1}" "" )
+    else
+        fpath="${datadir}/${dataset}.${dataset__file_format}"
+        [[ -f "${fpath}" ]] && get_tiled_dims "${fpath}"
+        write_tiled_to_yml "${1}"
+    fi
+
+}
 function set_ZYXCT {
 
-    if ! [ -z "${dataset__Z}" ]
+    if ! [ -z "${dataset__X}" ]
     then
         Z="${dataset__Z}"
         Y="${dataset__Y}"
@@ -133,23 +171,36 @@ function set_ZYXCT {
     elif [ -f ${1} ]
     then
         eval $( parse_yaml "${1}" "" )
-    elif ! [ -z "${datadir}/${dataset}.ims" ]
+    elif [ -f "${datadir}/${dataset}.ims" ]
     then
         set_ZYXCT_ims '-v' "${datadir}/${dataset}.ims"
-        write_ZYXCT_to_yml ${dataset} "${1}"
-    elif ! [ -z "${datadir}/${dataset_stitching}.ims" ]
+        write_ZYXCT_to_yml "${1}"
+    elif [ -f "${datadir}/${dataset_stitching}.ims" ]
     then
         set_ZYXCT_ims '-v' "${datadir}/${dataset_stitching}.ims"
-        write_ZYXCT_to_yml ${dataset} "${1}"
+        write_ZYXCT_to_yml "${1}"
     fi
 
 }
 
 
+function write_tiled_to_yml {
+
+    local parfile="${1}"
+
+    echo "M: ${M}" >> "${parfile}"
+    echo "Z: ${Z}" > "${parfile}"
+    echo "tY: ${tY}" >> "${parfile}"
+    echo "tX: ${tX}" >> "${parfile}"
+    echo "C: ${C}" >> "${parfile}"
+    echo "T: ${T}" >> "${parfile}"
+
+    echo " --- written M-Z-tY-tX-C-T='${M} ${Z} ${tY} ${tX} ${C} ${T}' to ${parfile}"
+
+}
 function write_ZYXCT_to_yml {
 
-    local dataset="${1}"
-    local parfile="${2}"
+    local parfile="${1}"
 
     echo "Z: ${Z}" > "${parfile}"
     echo "Y: ${Y}" >> "${parfile}"
@@ -157,18 +208,19 @@ function write_ZYXCT_to_yml {
     echo "C: ${C}" >> "${parfile}"
     echo "T: ${T}" >> "${parfile}"
 
-    echo " --- written ZYXCT='${Z} ${Y} ${X} ${C} ${T}' to ${parfile}"
+    echo " --- written Z-Y-X-C-T='${Z} ${Y} ${X} ${C} ${T}' to ${parfile}"
 
 }
 
 
-function set_nstacks {
+function get_tiled_dims {
 
     local filepath="${1}"
 
     source "${CONDA_SH}"
     conda activate ${submit_defaults__submit__conda_env}
-    M=`python -c "import os; import czifile; from stapl3d.preprocessing import shading; czi = czifile.CziFile('${filepath}'); _, n = shading.get_zstack_shape(czi); print(int(n));"`
+    tiled_dims=`python -c "import os; from stapl3d.preprocessing import shading; iminfo = shading.get_image_info('${filepath}'); print('M={};C={};Z={};tY={};tX={};T={};'.format(int(iminfo['nstacks']), int(iminfo['nchannels']), int(iminfo['nplanes']), int(iminfo['ncols']), int(iminfo['nrows']), int(iminfo['ntimepoints'])));"`
+    eval $tiled_dims
     conda deactivate
 
 }
