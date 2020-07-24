@@ -26,6 +26,7 @@ from stapl3d import (
     get_n_blocks,
     get_n_workers,
     get_paths,
+    get_ims_ref_path,
     prep_outputdir,
     Image,
     wmeMPI,
