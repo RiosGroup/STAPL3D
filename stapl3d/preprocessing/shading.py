@@ -531,8 +531,8 @@ def get_image_info(image_in):
         iminfo['planes'] = list(range(czi.shape[czi.axes.index('Z')]))
         iminfo['stacks'] = list(range(czi.shape[czi.axes.index('M')]))
         iminfo['zss'], iminfo['nstacks'] = czi_get_zstack_shape(czi)
-        iminfo['nchannels'] = czi.shape[czi.axes.index('C')
-        iminfo['nplanes'] = czi.shape[czi.axes.index('Z')
+        iminfo['nchannels'] = czi.shape[czi.axes.index('C')]
+        iminfo['nplanes'] = czi.shape[czi.axes.index('Z')]
         iminfo['dims_zyxc'] = [zss[8], zss[9], zss[10], zss[6]]
         iminfo['elsize_zyxc'] = czi_get_elsize(czi) + [1]
 
