@@ -2187,6 +2187,28 @@ def get_paths(image_in, resolution_level=-1, channel=0, outputstem='', step='', 
     return paths
 
 
+def get_ims_ref_path(image_in, parameter_file, ims_ref_path=''):
+    """Get split path from inputfile."""
+
+    paths = get_paths(image_in)
+
+    if not ims_ref_path:
+
+        with open(parameter_file, 'r') as ymlfile:
+            cfg = yaml.safe_load(ymlfile)
+
+        filename = '{}{}{}{}.ims'.format(
+            cfg['dataset']['name'],
+            cfg['shading']['params']['postfix'],
+            cfg['stitching']['params']['postfix'],
+            cfg['dataset']['ims_ref_postfix'],
+            )
+
+        ims_ref_path = os.path.join(paths['dir'], filename)
+
+    return ims_ref_path
+
+
 def get_imageprops(image_in):
 
     im = Image(image_in, permission='r')

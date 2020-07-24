@@ -1679,7 +1679,7 @@ function get_py_mergeblocks {
     echo "blocks.merge(
         image_in,
         parameter_file,
-        blocks=[idx],
+        idss_select=[idx],
         )"
 
 }
