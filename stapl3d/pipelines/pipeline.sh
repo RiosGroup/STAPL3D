@@ -5,8 +5,8 @@
 
 source "${HOME}/.stapl3d.ini" && load_stapl3d_config
 
-projectdir='/hpc/pmc_rios/mkleinnijenhuis/Kidney'
-dataset='200302_RL57_P30T_25x'
+projectdir='/hpc/pmc_rios/Kidney'
+dataset='200706_AP_P30T_LSR3D_25x_150um'
 
 load_dataset "${projectdir}" "${dataset}"
 [[ -f "${datadir}/${dataset}.yml" ]] || init_dataset
