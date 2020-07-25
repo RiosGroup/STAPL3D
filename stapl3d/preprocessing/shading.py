@@ -429,7 +429,7 @@ def unshade_zstack(
     datadir, fstem = os.path.split(filestem)
 
     iminfo = get_image_info(image_in)
-    out = create_output(None, iminfo['zss'], iminfo['dtype'])
+    out = create_output(None, iminfo['zstack_shape'], iminfo['dtype'])
 
     # Get stack data (CZYX)  # TODO: timepoint  # FIXME: assumes T is squeezed
     c_axis = 0
@@ -480,17 +480,20 @@ def correct_zstack(data, c_axis=0, shadingpat=''):
     if not shadingpat:
         return data
 
-    # TODO: efficiency in cpu and memory
     shadingdata = []
     for ch in range(data.shape[c_axis]):
         filepath_shading = shadingpat.format(ch)
         shading_img = img_as_float(imread(filepath_shading))
         shadingdata.append(np.tile(shading_img, (data.shape[1], 1, 1)))
-
     data = data / np.stack(shadingdata, axis=c_axis)
-
-
     return data
+
+#    TODO: efficiency tradeoff in cpu and memory (30GB per stack)
+#        dtype = data.dtype
+#        data = data.astype('float')
+#        for z in range(data.shape[1]):
+#            data[ch, z, :, :] /= shading_img
+#    return data.astype(dtype)
 
 
 def stack2tifs(data, c_axis, outputstem, props):
@@ -592,7 +595,7 @@ def read_zstack(image_in, zstack_idx, out=None):
 
     if out is None:
         iminfo = get_image_info(image_in)
-        out = create_output(None, iminfo['zss'], iminfo['dtype'])
+        out = create_output(None, iminfo['zstack_shape'], iminfo['dtype'])
 
     if image_in.endswith('.czi'):
 
@@ -660,17 +663,6 @@ def find_stack_offsets(filepath, conffile=''):
                     z_osc = sbdim.start_coordinate
             v_offsets[i, :] = [i, x_osv, y_osv, z_osv]
             c_offsets[i, :] = [i, x_osc, y_osc, z_osc]
-        # print(v_offsets, c_offsets)
-
-        if conffile:
-            # conffile = '{}_stitch.conf'.format(filestem)
-            # entry per channelxtile
-            #vo = np.repeat(v_offsets, nchannels, axis=0)
-            vo = np.tile(v_offsets, [nchannels, 1])
-            vo[:, 0] = list(range(0, vo.shape[0]))
-            np.savetxt(conffile, vo,
-                       fmt='%d;;(%10.5f, %10.5f, %10.5f)',
-                       header='dim=3', comments='')
 
     if filepath.endswith('.lif'):
 
@@ -679,22 +671,21 @@ def find_stack_offsets(filepath, conffile=''):
         nchannels = lim.dims[0]
         nstacks = lim.dims[3]
         tilepos = np.transpose(lim.tile_positions)
-        print(tilepos, tilepos.shape)
         v_offsets = np.zeros([nstacks, 4])
         c_offsets = np.zeros([nstacks, 4])
         for i in range(nstacks):
             v_offsets[i, :] = [i, tilepos[i, 0], tilepos[i, 1], 0]
 
-        if conffile:
-            # conffile = '{}_stitch.conf'.format(filestem)
-            # entry per channelxtile
-            vo = np.tile(v_offsets, [nchannels, 1])
-            vo[:, 0] = list(range(0, vo.shape[0]))
-            np.savetxt(conffile, vo,
-                       fmt='%d;;(%10.5f, %10.5f, %10.5f)',
-                       header='dim=3', comments='')
+    if not conffile:
+        filestem, _ = os.path.splitext(filepath)
+        conffile = '{}_tileoffsets_chxx.conf'.format(filestem)
 
-    return v_offsets, c_offsets
+    # entry per channel X tile
+    vo = np.tile(v_offsets, [nchannels, 1])
+    vo[:, 0] = list(range(0, vo.shape[0]))
+    np.savetxt(conffile, vo,
+               fmt='%d;;(%10.5f, %10.5f, %10.5f)',
+               header='dim=3', comments='')
 
 
 def plot_profiles(f, axdict, filestem, clip_threshold=0.75, res=10000, fac=0.05):
