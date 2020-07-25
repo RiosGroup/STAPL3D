@@ -143,18 +143,24 @@ function set_dims_tiled {
 
     if ! [ -z "${dataset__M}" ]
     then
+        # TODO: check all individually (at the end)
+        # [[ -z "${dataset__M}" ]] || M="${dataset__M}"
+        Z="${dataset__Z}"
         Z="${dataset__Z}"
         tY="${dataset__tY}"
         tX="${dataset__tX}"
         C="${dataset__C}"
         T="${dataset__T}"
         M="${dataset__M}"
+        elsize_z="${dataset__elsize_z}"
+        elsize_y="${dataset__elsize_y}"
+        elsize_x="${dataset__elsize_x}"
     elif [ -f ${1} ]
     then
         eval $( parse_yaml "${1}" "" )
     else
         fpath="${datadir}/${dataset}.${dataset__file_format}"
-        [[ -f "${fpath}" ]] && get_tiled_dims "${fpath}"
+        [[ -f "${fpath}" ]] && get_tiled_dims "${fpath}" && get_elsizes "${fpath}"
         write_tiled_to_yml "${1}"
     fi
 
@@ -163,6 +169,8 @@ function set_ZYXCT {
 
     if ! [ -z "${dataset__X}" ]
     then
+        # TODO: check all individually (at the end)
+        # [[ -z "${dataset__X}" ]] || M="${dataset__X}"
         Z="${dataset__Z}"
         Y="${dataset__Y}"
         X="${dataset__X}"
@@ -194,8 +202,12 @@ function write_tiled_to_yml {
     echo "C: ${C}" >> "${parfile}"
     echo "T: ${T}" >> "${parfile}"
     echo "M: ${M}" >> "${parfile}"
+    echo "elsize_z: ${elsize_z}" >> "${parfile}"
+    echo "elsize_y: ${elsize_y}" >> "${parfile}"
+    echo "elsize_x: ${elsize_x}" >> "${parfile}"
 
     echo " --- written M-Z-tY-tX-C-T='${M} ${Z} ${tY} ${tX} ${C} ${T}' to ${parfile}"
+    echo " --- written elsize_zyx='${elsize_z} ${elsize_y} ${telsize_x}' to ${parfile}"
 
 }
 function write_ZYXCT_to_yml {
@@ -221,6 +233,19 @@ function get_tiled_dims {
     conda activate ${submit_defaults__submit__conda_env}
     tiled_dims=`python -c "import os; from stapl3d.preprocessing import shading; iminfo = shading.get_image_info('${filepath}'); print('M={};C={};Z={};tY={};tX={};T={};'.format(int(iminfo['nstacks']), int(iminfo['nchannels']), int(iminfo['nplanes']), int(iminfo['ncols']), int(iminfo['nrows']), int(iminfo['ntimepoints'])));"`
     eval $tiled_dims
+    conda deactivate
+
+}
+
+
+function get_elsizes {
+
+    local filepath="${1}"
+
+    source "${CONDA_SH}"
+    conda activate ${submit_defaults__submit__conda_env}
+    elsize_xyz=`python -c "import os; from stapl3d.preprocessing import shading; iminfo = shading.get_image_info('${filepath}'); print('elsize_x={};elsize_y={};elsize_z={}'.format(float(iminfo['elsize_zyxc'][2]), float(iminfo['elsize_zyxc'][1]), float(iminfo['elsize_zyxc'][0])));"`
+    eval $elsize_xyz
     conda deactivate
 
 }
@@ -1107,44 +1132,56 @@ function get_cmd_shading_apply {
 }
 
 
-function get_py_stitching0 {
+function get_py_stitching_prep {
 
     echo '#!/usr/bin/env python'
     echo ''
     echo 'import sys'
     echo 'image_in = sys.argv[1]'
-    echo 'conffile = sys.argv[2]'
     echo ''
-    echo "from stapl3d.preprocessing import shading"
-    echo "shading.find_stack_offsets(image_in, conffile)"
+    echo "from stapl3d.preprocessing import stitching"
+    echo "stitching.write_stack_offsets(image_in)"
 
 }
-function get_cmd_stitching0 {
+function get_cmd_stitching_prep {
 
     pyfile="${datadir}/${jobname}.py"
     eval get_py_${stage} > "${pyfile}"
 
     echo python "${pyfile}" \
-        "\${filestem}.${shading__file_format}" \
-        "\${filestem}_tileoffsets_chxx.conf"
+        "\${filestem}.${shading__file_format}"
 
 }
-function get_cmd_stitching1 {
+function get_cmd_stitching_load {
     echo $FIJI --headless --console -macro \
         "$STAPL3D/preprocessing/stitching.ijm" \
-        \"1 ${datadir} ${dataset} \${idx} dummy\"
-}
-function get_cmd_stitching2 {
+        \"1 ${stackdir}/${dataset}${shading__params__postfix} ${stitchingdir} \
+        ${dataset} \${idx} ${stitching__params__postfix} \
+        ${elsize_z} ${elsize_y} ${elsize_x}\"
     echo $FIJI --headless --console -macro \
         "$STAPL3D/preprocessing/stitching.ijm" \
-        \"2 ${datadir} ${dataset} ${stitching__params__channel} dummy\"
+        \"2 ${stackdir}/${dataset}${shading__params__postfix} ${stitchingdir} \
+        ${dataset} \${idx} ${stitching__params__postfix} \
+        ${elsize_z} ${elsize_y} ${elsize_x}\"
 }
-function get_cmd_stitching3 {
+function get_cmd_stitching_calc {
     echo $FIJI --headless --console -macro \
         "$STAPL3D/preprocessing/stitching.ijm" \
-        \"3 ${datadir} ${dataset} ${stitching__params__channel} dummy\"
+        \"3 ${stackdir}/${dataset}${shading__params__postfix} ${stitchingdir} \
+        ${dataset} ${stitching__params__channel} ${stitching__params__postfix} \
+        ${elsize_z} ${elsize_y} ${elsize_x}\"
+    echo $FIJI --headless --console -macro \
+        "$STAPL3D/preprocessing/stitching.ijm" \
+        \"4 ${stackdir}/${dataset}${shading__params__postfix} ${stitchingdir} \
+        ${dataset} ${stitching__params__channel} ${stitching__params__postfix} \
+        ${elsize_z} ${elsize_y} ${elsize_x}\"
+    echo $FIJI --headless --console -macro \
+        "$STAPL3D/preprocessing/stitching.ijm" \
+        \"5 ${stackdir}/${dataset}${shading__params__postfix} ${stitchingdir} \
+        ${dataset} ${stitching__params__channel} ${stitching__params__postfix} \
+        ${elsize_z} ${elsize_y} ${elsize_x}\"
 }
-function get_py_stitching4 {
+function get_py_stitching_fuse {
 
     echo '#!/usr/bin/env python'
     echo ''
@@ -1157,20 +1194,22 @@ function get_py_stitching4 {
     echo "from stapl3d.preprocessing import stitching"
     echo "stitching.adapt_xml(filestem, channel, channel_ref, dapi_shift)"
 }
-function get_cmd_stitching4 {
+function get_cmd_stitching_fuse {
 
     pyfile="${datadir}/${jobname}.py"
     eval get_py_${stage} > "${pyfile}"
 
     echo python "${pyfile}" \
-        "\${filestem}" \
+        "${stitchingdir}/${dataset}" \  # "${stitchingdir}/${dataset}${shading__params__postfix}" \
         "\${idx}" \
         "${stitching__params__channel}" \
         "${dataset__dapi_shift}"
 
     echo $FIJI --headless --console -macro \
         "$STAPL3D/preprocessing/stitching.ijm" \
-        \"4 ${datadir} ${dataset} \${idx} dummy\"
+        \"6 ${stackdir}/${dataset}${shading__params__postfix} ${stitchingdir} \
+        ${dataset} \${idx} ${stitching__params__postfix} \
+        ${elsize_z} ${elsize_y} ${elsize_x}\"
 }
 
 

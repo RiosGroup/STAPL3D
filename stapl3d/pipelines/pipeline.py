@@ -11,11 +11,17 @@ dataset = '200720_Exp7_AP_HFK_25x'
 datadir = os.path.join(projectdir, dataset)
 filestem = os.path.join(datadir, dataset)
 
-img_file = '{}.czi'.format(filestem)
+projectdir = 'G:\\mkleinnijenhuis\\PMCdata\\Brain'
+dataset = 'MA11_good'
+datadir = os.path.join(projectdir, dataset)
+filestem = os.path.join(datadir, dataset)
+
 par_file = '{}.yml'.format(filestem)
 
 with open(par_file, 'r') as ymlfile:
     cfg = yaml.safe_load(ymlfile)
+
+img_file = '{}.{}'.format(filestem, cfg['dataset']['file_format'])
 
 channel_dir = os.path.join(datadir, cfg['dirtree']['datadir']['channels'])
 stitch_stem = '{}{}{}'.format(dataset, cfg['shading']['params']['postfix'], cfg['stitching']['params']['postfix'])
@@ -28,8 +34,13 @@ shading.estimate(img_file, par_file)
 shading.postprocess(img_file, par_file)
 
 ### BREAK - for shading-apply and stitching
-#shading.apply(img_file, par_file)
-#stitching.estimate(img_file, par_file)
+shading.apply(img_file, par_file)
+
+stitching.write_stack_offsets(img_file)
+stitching.estimate(img_file, par_file, stitch_steps=[1, 2])
+stitching.estimate(img_file, par_file, stitch_steps=[3, 4, 5], channels=[cfg['stitching']['params']['channel']])
+for i in range(7):  # TODO: loop from within function
+    stitching.estimate(img_file, par_file, stitch_steps=[6], channels=[i])
 
 ### BREAK - for imaris channel extraction
     """

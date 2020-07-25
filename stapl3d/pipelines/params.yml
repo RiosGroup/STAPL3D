@@ -70,19 +70,20 @@ stitching:
         postfix: _stitching
         channel: 0
 
-stitching0:
+stitching_prep:
     params:
     submit:
         array: no
+        wtime: 00:10:00
 
-stitching1:
+stitching_load:
     params:
     submit:
         array: channel
         mem: 20G
         wtime: 03:00:00
 
-stitching2:
+stitching_calc:
     params:
     submit:
         array: no
@@ -90,25 +91,13 @@ stitching2:
         mem: 60G
         wtime: 02:00:00
 
-stitching3:
+stitching_fuse:
     params:
     submit:
-        array: no
+        array: channel
+        tasks: 24
         mem: 20G
-        wtime: 00:30:00
-
-stitching4:
-    params:
-    submit:
-        array: channel
-        mem: 60G
         wtime: 24:00:00
-
-stitching_apply:
-    params:
-        postfix: _stitching
-    submit:
-        array: channel
 
 splitchannels:
     params:

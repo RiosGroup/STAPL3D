@@ -541,6 +541,8 @@ def get_image_info(image_in):
         iminfo['dims_zyxc'] = [iminfo['zstack_shape'][idx] for idx in zyxc_idxs]
         iminfo['elsize_zyxc'] = czi_get_elsize(czi) + [1]
 
+        iminfo['stack_offsets'] = czi_tile_offsets(czi, iminfo)
+
     elif image_in.endswith('.lif'):
 
         lim = LifFile(image_in).get_image(0)  # FIXME: choice of image / series
@@ -560,6 +562,16 @@ def get_image_info(image_in):
         zyxc_idxs = [1, 4, 5, 0]
         iminfo['dims_zyxc'] = [lim.dims[idx] for idx in zyxc_idxs]
         iminfo['elsize_zyxc'] = [1./lim.scale[idx] for idx in zyxc_idxs]
+
+        v_offsets = np.zeros([iminfo['nstacks'], 4])
+        for i in range(iminfo['nstacks']):
+            v_offsets[i, :] = [
+                i,
+                lim.tile_positions[0, i] / iminfo['elsize_zyxc'][2],
+                lim.tile_positions[1, i] / iminfo['elsize_zyxc'][1],
+                0]
+
+        iminfo['stack_offsets'] = v_offsets
 
     else:
 
@@ -589,6 +601,29 @@ def czi_get_elsize(czi):
     elsize_z = float(md[0][3][0][2][0].text) * 1e6
 
     return [elsize_z, elsize_y, elsize_x]
+
+
+def czi_tile_offsets(czi, iminfo):
+
+    # first dir of eacxh zstack: C[8]Z[84]M[286]
+    stack_stride = iminfo['nchannels'] * iminfo['ntimepoints'] * iminfo['nslices']
+    sbd_zstacks0 = [sbd for sbd in czi.subblock_directory[::stack_stride]]
+    v_offsets = np.zeros([iminfo['nstacks'], 4])
+    for i, directory_entry in zip(range(iminfo['nstacks']), sbd_zstacks0):
+        subblock = directory_entry.data_segment()
+        for sbdim in subblock.dimension_entries:
+            if sbdim.dimension == 'X':
+                x_osv = sbdim.start
+                x_osc = sbdim.start_coordinate
+            if sbdim.dimension == 'Y':
+                y_osv = sbdim.start
+                y_osc = sbdim.start_coordinate
+            if sbdim.dimension == 'Z':
+                z_osv = sbdim.start
+                z_osc = sbdim.start_coordinate
+        v_offsets[i, :] = [i, x_osv, y_osv, z_osv]
+
+    return v_offsets
 
 
 def read_zstack(image_in, zstack_idx, out=None):
@@ -628,65 +663,6 @@ def read_zstack(image_in, zstack_idx, out=None):
         return
 
     return out
-
-
-def find_stack_offsets(filepath, conffile=''):
-
-    if filepath.endswith('.czi'):
-
-        czi = czifile.CziFile(filepath)
-
-        ### get offsets of the zstack in XYZ
-        nchannels = czi.shape[czi.axes.index('C')]
-        ntimepoints = czi.shape[czi.axes.index('T')]
-        nslices = czi.shape[czi.axes.index('Z')]
-        ncols = czi.shape[czi.axes.index('Y')]
-        nrows = czi.shape[czi.axes.index('X')]
-
-        # first dir of eacxh zstack: C[8]Z[84]M[286]
-        stack_stride = nchannels * ntimepoints * nslices
-        sbd_zstacks0 = [sbd for sbd in czi.subblock_directory[::stack_stride]]
-        nstacks = len(sbd_zstacks0)
-        stack_idxs = list(range(0, nstacks))
-        v_offsets = np.zeros([nstacks, 4])
-        c_offsets = np.zeros([nstacks, 4])
-        for i, directory_entry in zip(stack_idxs, sbd_zstacks0):
-            subblock = directory_entry.data_segment()
-            for sbdim in subblock.dimension_entries:
-                if sbdim.dimension == 'X':
-                    x_osv = sbdim.start
-                    x_osc = sbdim.start_coordinate
-                if sbdim.dimension == 'Y':
-                    y_osv = sbdim.start
-                    y_osc = sbdim.start_coordinate
-                if sbdim.dimension == 'Z':
-                    z_osv = sbdim.start
-                    z_osc = sbdim.start_coordinate
-            v_offsets[i, :] = [i, x_osv, y_osv, z_osv]
-            c_offsets[i, :] = [i, x_osc, y_osc, z_osc]
-
-    if filepath.endswith('.lif'):
-
-        lif = LifFile(filepath)
-        lim = lif.get_image(0)  # FIXME: flexible series index
-        nchannels = lim.dims[0]
-        nstacks = lim.dims[3]
-        tilepos = np.transpose(lim.tile_positions)
-        v_offsets = np.zeros([nstacks, 4])
-        c_offsets = np.zeros([nstacks, 4])
-        for i in range(nstacks):
-            v_offsets[i, :] = [i, tilepos[i, 0], tilepos[i, 1], 0]
-
-    if not conffile:
-        filestem, _ = os.path.splitext(filepath)
-        conffile = '{}_tileoffsets_chxx.conf'.format(filestem)
-
-    # entry per channel X tile
-    vo = np.tile(v_offsets, [nchannels, 1])
-    vo[:, 0] = list(range(0, vo.shape[0]))
-    np.savetxt(conffile, vo,
-               fmt='%d;;(%10.5f, %10.5f, %10.5f)',
-               header='dim=3', comments='')
 
 
 def plot_profiles(f, axdict, filestem, clip_threshold=0.75, res=10000, fac=0.05):

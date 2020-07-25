@@ -2,30 +2,46 @@
 args = getArgument()
 args = split(args, " ");
 
-stitch_step = args[0]
-datadir = args[1]
-dataset = args[2]
-channel = args[3]
-tiles = args[4]
+stitch_step = args[0];
+inputstem = args[1];
+outputdir = args[2];
+dataset = args[3];
+channel = args[4];
+postfix = args[5];
+elsize_z = args[6];
+elsize_y = args[7];
+elsize_x = args[8];
 
-if (channel=='all') {
+downsample_in_x = 2;
+downsample_in_y = 2;
+downsample_in_z = 1;
+
+min_r = 0.7;
+max_r = 1.0;
+max_shift_in_x = 0;
+max_shift_in_y = 0;
+max_shift_in_z = 0;
+max_displacement = 0;
+
+relative = 2.500;
+absolute = 3.500;
+
+if (channel<0) {
 	filestem = dataset;
-	tif_files = dataset + "_stack*_ch*.tif";
-	cfg_file = filestem + "_tileoffsets.conf";
+    xml_file = filestem + ".xml";
+    xml_path = outputdir + File.separator + xml_file;
+	tif_path = inputstem + "_stack*_ch*.tif";
+	cfg_path = inputstem + "_tileoffsets.conf";
    } else {
-	filestem = dataset + "_" + channel;
-	tif_files = dataset + "_stack*_" + channel + ".tif";
-	cfg_file = dataset + "_tileoffsets_chxx.conf";
+	filestem = dataset + "_ch" + IJ.pad(channel, 2);
+    xml_file = filestem + ".xml";
+    xml_path = outputdir + File.separator + xml_file;
+	tif_path = inputstem + "_stack*_ch" + IJ.pad(channel, 2) + ".tif";
+	cfg_path = inputstem + "_tileoffsets_chxx.conf";
    }
 
-xml_file = filestem + ".xml";
-xml_path = datadir + File.separator + xml_file;
-conf_path = datadir + File.separator + cfg_file;
-czi_path = datadir + File.separator + dataset + ".czi";
-tif_path = datadir + File.separator + "stacks" + File.separator + tif_files;
-h5_stem = datadir + File.separator + filestem;
-h5_fused = datadir + File.separator + filestem + "-f0.xml";
-
+h5_stem = outputdir + File.separator + filestem;
+h5_fused = outputdir + File.separator + filestem + postfix + ".xml";
 
 if (stitch_step==1) {
 
@@ -37,9 +53,9 @@ if (stitch_step==1) {
         " path=" + tif_path +
         " exclude=10" +
         " pattern_0=Tiles pattern_1=Channels" +
-        " modify_voxel_size? voxel_size_x=0.33 voxel_size_y=0.33 voxel_size_z=1.2 voxel_size_unit=µm " +
+        " modify_voxel_size? voxel_size_x=" + elsize_x + " voxel_size_y=" + elsize_y + " voxel_size_z=" + elsize_z + " voxel_size_unit=µm " +
         " how_to_load_images=[Re-save as multiresolution HDF5]" +
-        " dataset_save_path=" + datadir +
+        " dataset_save_path=" + outputdir +
         " subsampling_factors=[{ {1,1,1}, {2,2,2}, {4,4,4} }]" +
         " hdf5_chunk_sizes=[{ {16,16,16}, {16,16,16}, {16,16,16} }]" +
         " timepoints_per_partition=1" +
@@ -47,77 +63,60 @@ if (stitch_step==1) {
         " use_deflate_compression" +
         " export_path=" + h5_stem );
 
+    }
+else if (stitch_step==2) {
+
     // load tile positions from file
     // creates additional affine transforms in ViewRegistrations tag of dataset.xml
     run("Load TileConfiguration from File...",
         " browse=" + xml_path +
         " select=" + xml_path +
-        " browse=" + conf_path +
-        " tileconfiguration=" + conf_path +
+        " browse=" + cfg_path +
+        " tileconfiguration=" + cfg_path +
         " use_pixel_units" +
         " keep_metadata_rotation");
 
     }
-else if (stitch_step==2) {
+else if (stitch_step==3) {
 
     // calculate pairwise shifts
     // creates PairwiseResult entries in StitchingResults tag of dataset.xml
-    if (tiles=='dummy') {
-        run("Calculate pairwise shifts ...",
-            " select=" + xml_path +
-            " process_angle=[All angles]" +
-            " process_channel=[All channels]" +
-            " process_illumination=[All illuminations]" +
-            " process_timepoint=[All Timepoints]" +
-        	" process_tile=[All Tiles]" +
-            " method=[Phase Correlation]" +
-        	" how_to_treat_timepoints=[treat individually]" +
-        	" how_to_treat_channels=[treat individually]" +
-        	" how_to_treat_illuminations=[treat individually]" +
-        	" how_to_treat_angles=[treat individually]" +
-        	" how_to_treat_tiles=compare" +
-            " channels=[use Channel 0]" +
-            " downsample_in_x=2" +
-            " downsample_in_y=2" +
-            " downsample_in_z=1" +
-            " subpixel");
-        }
-    else {
-        run("Calculate pairwise shifts ...",
-            " select=" + xml_path +
-            " process_angle=[All angles]" +
-            " process_channel=[All channels]" +
-            " process_illumination=[All illuminations]" +
-            " process_timepoint=[All Timepoints]" +
-        	" process_tile=[Range of tiles (Specify by Name)]" +
-        	" process_following_tiles=" + tiles +
-            " method=[Phase Correlation]" +
-        	" how_to_treat_timepoints=[treat individually]" +
-        	" how_to_treat_channels=[treat individually]" +
-        	" how_to_treat_illuminations=[treat individually]" +
-        	" how_to_treat_angles=[treat individually]" +
-        	" how_to_treat_tiles=compare" +
-            " channels=[use Channel 0]" +
-            " downsample_in_x=2" +
-            " downsample_in_y=2" +
-            " downsample_in_z=1" +
-            " subpixel");
-        }
+    run("Calculate pairwise shifts ...",
+        " select=" + xml_path +
+        " process_angle=[All angles]" +
+        " process_channel=[All channels]" +
+        " process_illumination=[All illuminations]" +
+        " process_timepoint=[All Timepoints]" +
+    	" process_tile=[All Tiles]" +
+        " method=[Phase Correlation]" +
+    	" how_to_treat_timepoints=[treat individually]" +
+    	" how_to_treat_channels=[treat individually]" +
+    	" how_to_treat_illuminations=[treat individually]" +
+    	" how_to_treat_angles=[treat individually]" +
+    	" how_to_treat_tiles=compare" +
+        " channels=[use Channel 0]" +
+        " downsample_in_x=" + downsample_in_x +
+        " downsample_in_y=" + downsample_in_y +
+        " downsample_in_z=" + downsample_in_z +
+        " subpixel");
 
     }
-else if (stitch_step==3) {
+else if (stitch_step==4) {
 
     // filter shifts with 0.7 corr. threshold
     // removes PairwiseResult entries from StitchingResults tag in dataset.xml
     run("Filter pairwise shifts ...",
         " select=" + xml_path +
         " filter_by_link_quality" +
-        " min_r=0.7" +
-        " max_r=1 " +
-        " max_shift_in_x=0" +
-        " max_shift_in_y=0" +
-        " max_shift_in_z=0" +
-        " max_displacement=0");
+        " min_r=" + min_r +
+        " max_r= " + max_r +
+        " max_shift_in_x=" + max_shift_in_x +
+        " max_shift_in_y=" + max_shift_in_y +
+        " max_shift_in_z=" + max_shift_in_z +
+        " max_displacement=" + max_displacement);
+
+    }
+else if (stitch_step==5) {
 
     // do global optimization
     // creates additional affine transforms in ViewRegistrations tag of dataset.xml
@@ -128,13 +127,13 @@ else if (stitch_step==3) {
         " process_illumination=[All illuminations]" +
         " process_tile=[All tiles]" +
         " process_timepoint=[All Timepoints]" +
-        " relative=2.500" +
-        " absolute=3.500" +
+        " relative=" + relative +
+        " absolute=" + absolute +
         " global_optimization_strategy=[Two-Round using Metadata to align unconnected Tiles]" +
         " fix_group_0-0,");
 
     }
-else if (stitch_step==4) {
+else if (stitch_step==6) {
 
     // fuse dataset, save as hdf5
     // creates output dataset-f0.h5 and dataset-f0.xml (new:fused_image=[Save as new XML Project (HDF5)]); OR
@@ -164,6 +163,8 @@ else if (stitch_step==4) {
         " export_path=" + h5_fused );
 
     }
+
+print("  Finished: " + xml_path);
 
 // quit after we are finished
 eval("script", "System.exit(0);");

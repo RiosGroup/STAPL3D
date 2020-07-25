@@ -20,11 +20,10 @@ submit $( generate_script shading ) $jid
 submit $( generate_script shading_postproc ) $jid
 submit $( generate_script shading_apply ) $jid
 
-submit $( generate_script stitching0 ) $jid
-submit $( generate_script stitching1 ) $jid  # MACRO1 # TODO: voxel size automation
-submit $( generate_script stitching2 ) $jid
-submit $( generate_script stitching3 ) $jid
-submit $( generate_script stitching4 ) $jid
+submit $( generate_script stitching_prep ) $jid
+submit $( generate_script stitching_load ) $jid
+submit $( generate_script stitching_calc ) $jid
+submit $( generate_script stitching_fuse ) $jid
 # load_parameters "${dataset}" -v
 
 jid=''
