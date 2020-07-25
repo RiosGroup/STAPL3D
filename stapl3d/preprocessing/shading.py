@@ -554,8 +554,8 @@ def get_image_info(image_in):
         iminfo['zstack_shape'] = lim.dims[:m_idx] + lim.dims[m_idx+1:]
 
         zyxc_idxs = [1, 4, 5, 0]
-        iminfo['dims_zyxc'] = [iminfo['zstack_shape'][idx] for idx in zyxc_idxs]
-        iminfo['elsize_zyxc'] = [lim.scale[idx] for idx in zyxc_idxs]
+        iminfo['dims_zyxc'] = [lim.dims[idx] for idx in zyxc_idxs]
+        iminfo['elsize_zyxc'] = [1./lim.scale[idx] for idx in zyxc_idxs]
 
     else:
 
