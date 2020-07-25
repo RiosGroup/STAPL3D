@@ -420,7 +420,7 @@ def unshade_zstack(
     correct=True,
     shadingpat='',
     write_to_tif=True,
-    postfix='_stack',
+    postfix='',
     outputdir='',
     ):
     """Correct zstack shading."""
@@ -439,6 +439,7 @@ def unshade_zstack(
         clip_mask = create_clipping_mask(data, axis=c_axis)
 
     if correct:
+        fstem += postfix
         data = correct_zstack(data, c_axis, shadingpat)
 
     if clipping_mask:
