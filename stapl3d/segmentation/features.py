@@ -802,22 +802,26 @@ def select_features(dfs, feat_select, min_size=0, split_features=False):
         df2[small] = dfs['full'].loc[small][feat_select['membrane']]
         df3[small] = dfs['full'].loc[small][feat_select['nuclear']]
 
+    df_comp = [df1, df2, df3]
     # create some compound features
+
     df4 = pd.DataFrame(index=df1.index)
-    if False:
+
+    if 'ch00_weighted_centroid-0' in dfs['full'].keys() and 'memb' in dfs.keys():
         comcols = ['centroid-0', 'centroid-1', 'centroid-2']
         dfa = dfs['full'][comcols]
         dfb = dfs['full'][comcols]
         dfb[dfb.index.isin(dfs['nucl'].index)] = dfs['nucl'][comcols]
         comcols = ['ch00_weighted_centroid-0', 'ch00_weighted_centroid-1', 'ch00_weighted_centroid-2']
         dfc = dfs['full'][comcols]
-        #df4['dist_c'] = np.sqrt((np.square(np.array(dfa)-np.array(dfb)).sum(axis=1)))
-        #df4['dist_w'] = np.sqrt((np.square(np.array(dfa)-np.array(dfc)).sum(axis=1)))
-        #df4['dist_cn'] = df4['dist_c'] / dfs['full']['major_axis_length']
         dist_w = np.sqrt((np.square(np.array(dfa)-np.array(dfc)).sum(axis=1)))
         df4['polarity'] = dist_w / dfs['full']['major_axis_length']
+        df_comp.append(df4)
 
-    df = pd.concat([df1, df2, df3, df4], axis=1)
+    if 'dist_to_edge' in dfs['full'].keys():
+        df_comp.append(dfs['full']['dist_to_edge'])
+
+    df = pd.concat(df_comp, axis=1)
 
     return df
 
