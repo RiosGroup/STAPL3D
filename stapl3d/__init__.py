@@ -64,7 +64,7 @@ class Image(object):
     """
 
     def __init__(self, path,
-                 elsize=None, axlab=None, dtype='float',
+                 elsize=None, axlab=None, dtype='float', reslev=0,
                  shape=None, dataslices=None, slices=None,
                  chunks=None, compression='gzip', series=0,
                  protective=False, permission='r+'):
@@ -73,6 +73,7 @@ class Image(object):
         self.elsize = elsize  # TODO: translations / affine
         self.axlab = axlab
         self.dtype = dtype
+        self.reslev = reslev
         self.dims = shape
         if slices is not None:
             self.slices = slices
@@ -108,7 +109,7 @@ class Image(object):
         else:
             path = path_in
 
-        for ext in ['.h5', '.nii', '.dm3', '.tif', '.ims']:
+        for ext in ['.h5', '.nii', '.dm3', '.tif', '.ims', '.bdv']:
             if ext in path:
                 return ext
 
@@ -279,24 +280,25 @@ class Image(object):
         comps['dir'], comps['fname'] = os.path.split(comps['base'])
         comps['file'] = comps['base'] + comps['ext']
 
-        if comps['ext'] == '.h5':
-            comps_int = self.h5_split_int(filepath.split('.h5')[1])
-            comps['int'] = filepath.split('.h5')[1]
+        #if comps['ext'] in ['.h5', '.bdv']:
+        if comps['ext'] in ['.h5']:
+            comps_int = self.h5_split_int(filepath.split(comps['ext'])[1], ext=comps['ext'])
+            comps['int'] = filepath.split(comps['ext'])[1]
             comps.update(comps_int)
         else:
             pass  # TODO: groups/dset from fname
 
         return comps
 
-    def h5_split_int(self, path_int=''):
+    def h5_split_int(self, path_int='', ext='.h5'):
         """Split components of a h5 path."""
 
-        path_int = path_int or self.path.split('.h5')[1]
+        path_int = path_int or self.path.split(ext)[1]
 
         comps = {}
 
         if '/' not in path_int:
-            raise Exception('no groups or dataset specified for .h5 path')
+            raise Exception('no groups or dataset specified for hdf5 path')
 
         int_comp = path_int.split('/')
         comps['groups'] = int_comp[1:-1]
@@ -320,8 +322,12 @@ class Image(object):
             if not h5path['int']:
                 h5path['int'] = '/DataSet/ResolutionLevel 0'
 
+        if self.format == '.bdv':
+            if not h5path['int']:
+                h5path['int'] = '/t00000'
+
         if '/' not in h5path['int']:
-            raise Exception('no groups or dataset specified for .h5 path')
+            raise Exception('no groups or dataset specified for hdf5 path')
 
         h5path_int_comp = h5path['int'].split('/')
         h5path['groups'] = h5path_int_comp[1:-1]
@@ -375,6 +381,7 @@ class Image(object):
                    '.nii': self.nii_load,
                    '.dm3': self.dm3_load,
                    '.ims': self.ims_load,
+                   '.bdv': self.bdv_load,
                    '.pbf': self.pbf_load,
                    '.tif': self.pbf_load,
                    '.tifs': self.tifs_load,
@@ -450,6 +457,29 @@ class Image(object):
         ch0 = self.ds['TimePoint 0/Channel 0/Data']
         self.dtype = ch0.dtype
         self.chunks = list(ch0.chunks) + [1, 1]
+
+    def bdv_load(self, comm=None, load_data=True):
+
+        self.h5_open(self.permission, comm)
+        h5path = self.h5_split(ext=self.format)
+        self.ds = self.file['/']
+        self.dims = self.bdv_get_dims(self.reslev)
+        ch0 = self.ds['t00000/s00/{}/cells'.format(self.reslev)]
+        self.dtype = ch0.dtype
+        self.chunks = list(ch0.chunks) + [1, 1]
+
+    def bdv_get_dims(self, reslev=0):
+
+        tps = [v for k, v in self.file.items() if k.startswith('t')]
+        n_timepoints = len(tps)
+        chs = [v for k, v in tps[0].items() if k.startswith('s')]
+        n_channels = len(chs)
+        rls = [v for k, v in chs[0].items()]
+        n_reslevs = len(rls)
+
+        dims_zyx = rls[reslev]['cells'].shape
+
+        return list(dims_zyx) + [len(chs), len(tps)]
 
     def pbf_load(self, comm=None, load_data=True):
         """Load a dataset with python bioformats."""
@@ -621,6 +651,8 @@ class Image(object):
             data = self.pbf_load_data()
         elif self.format == '.ims':
             data = self.slice_dataset_ims(self.ds, slices)
+        elif self.format == '.bdv':
+            data = self.slice_dataset_bdv(self.ds, slices)
         else:
             if ndim == 1:
                 data = self.ds[slices[0]]
@@ -704,6 +736,59 @@ class Image(object):
 
         return data
 
+    def slice_dataset_bdv(self, rs0_group, slices):
+        """
+
+        NOTE: this is a zero-padded version of the dataset.
+        """
+
+        slcs = [slices[self.axlab.index('z')],
+                slices[self.axlab.index('y')],
+                slices[self.axlab.index('x')],
+                slices[self.axlab.index('c')],
+                slices[self.axlab.index('t')]]
+
+        dims = [len(range(*slc.indices(slc.stop))) for slc in slcs]
+        data = np.empty(dims, dtype=self.dtype)
+
+        if slcs[4].start is not None:
+            t_start = int(slcs[4].start)
+        else:
+            t_start = None
+        if slcs[4].start is not None:
+            t_stop = int(slcs[4].stop)
+        else:
+            t_stop = None
+        if slcs[4].step is not None:
+            t_step = int(slcs[4].step)
+        else:
+            t_step = None
+        if slcs[3].start is not None:
+            c_start = int(slcs[3].start)
+        else:
+            c_start = None
+        if slcs[3].stop is not None:
+            c_stop = int(slcs[3].stop)
+        else:
+            c_stop = None
+        if slcs[3].step is not None:
+            c_step = int(slcs[3].step)
+        else:
+            c_step = None
+
+        tp_names = [k for k, v in rs0_group.items() if k.startswith('t')]
+        timepoints_sorted = [(tp_name, rs0_group[tp_name]) for tp_name in tp_names]
+        t_iter_slc = islice(timepoints_sorted, t_start, t_stop, t_step)
+        for tp_idx, (_, tp) in enumerate(t_iter_slc):
+            ch_names = [k for k, v in tp.items() if k.startswith('s')]
+            channels_sorted = [(ch_name, tp[ch_name]) for ch_name in ch_names]
+            c_iter_slc = islice(channels_sorted, c_start, c_stop, c_step)
+            for ch_idx, (_, ch) in enumerate(c_iter_slc):
+                data_tmp = ch['{}/cells'.format(self.reslev)][slcs[0], slcs[1], slcs[2]]
+                data[..., ch_idx, tp_idx] = data_tmp
+
+        return data
+
     def load_dataset(self):
 
         self.slice_dataset()
@@ -770,6 +855,8 @@ class Image(object):
         elif self.format == '.pbf':
             ndim = len(self.dims)
         elif self.format == '.ims':
+            ndim = len(self.dims)
+        elif self.format == '.bdv':
             ndim = len(self.dims)
         elif self.format == '.dat':
             ndim = len(self.dims)
@@ -872,6 +959,7 @@ class Image(object):
                    '.nii': self.nii_load_elsize,
                    '.dm3': self.dm3_load_elsize,
                    '.ims': self.ims_load_elsize,
+                   '.bdv': self.bdv_load_elsize,
                    '.pbf': self.pbf_load_elsize,
                    '.tif': self.tif_load_elsize,
                    '.tifs': self.tifs_load_elsize}
@@ -963,6 +1051,14 @@ class Image(object):
 
         return [dimZ, dimY, dimX, dimC, dimT]
 
+    def bdv_load_elsize(self):
+        """Get the element sizes from a dataset."""
+
+        ds = self.ds['t00000/s00'][str(self.reslev)]['cells']
+        elsize = ds.attrs['element_size_um']
+
+        return list(elsize) + [1, 1]
+
     def tif_load_elsize(self):
         """Get the element sizes from a dataset."""
 
@@ -990,6 +1086,7 @@ class Image(object):
                    '.nii': self.nii_load_axlab,
                    '.dm3': self.dm3_load_axlab,
                    '.ims': self.ims_load_axlab,
+                   '.bdv': self.bdv_load_axlab,
                    '.pbf': self.pbf_load_axlab,
                    '.tif': self.tif_load_axlab,
                    '.tifs': self.tifs_load_axlab}
@@ -1034,6 +1131,10 @@ class Image(object):
         return axlabs[0]
 
     def ims_load_axlab(self):
+
+        return 'zyxct'
+
+    def bdv_load_axlab(self):
 
         return 'zyxct'
 
@@ -1086,6 +1187,7 @@ class Image(object):
 
         formats = {'.h5': self.h5_create,
                    '.ims': self.ims_create,
+                   '.bdv': self.bdv_create,  # TODO
                    '.nii': self.nii_create,
                    '.tif': self.tif_create,
                    '.tifs': self.tifs_create,
@@ -1183,6 +1285,11 @@ class Image(object):
                 # TODO?: self.ds =
         self.dims[3] += 1
 
+    def bdv_create(self, comm=None):
+
+        # FIXME
+        pass
+
     def nii_create(self, comm=None):
         """Write a dataset to nifti format."""
 
@@ -1241,6 +1348,7 @@ class Image(object):
 
         formats = {'.h5': self.h5_write,
                    '.ims': self.ims_write,
+                   '.bdv': self.bdv_write,
                    '.nii': self.nii_write,
                    '.tif': self.tif_write,
                    '.tifs': self.tifs_write,
@@ -1252,6 +1360,33 @@ class Image(object):
         """Write data to a hdf5 dataset."""
 
         self.write_block(self.ds, data, slices)
+
+    def bdv_write(self, data, slices):
+
+        def slices2dsslices(start, step, shape):
+            ds_step = step
+            ds_start = int(start / step)
+            ds_stop = ds_start + int(shape / ds_step)  # + ds_step
+            ds_slice = slice(ds_start, ds_stop, 1)
+            return ds_slice
+
+        tp_names = ['t{:05d}'.format(tp_idx) for tp_idx in range(slices[self.axlab.index('t')].start, slices[self.axlab.index('t')].stop)]
+        ch_names = ['s{:02d}'.format(ch_idx) for ch_idx in range(slices[self.axlab.index('c')].start, slices[self.axlab.index('c')].stop)]
+
+        for tp_name in tp_names:
+            for ch_name in ch_names:
+                ch = self.file[tp_name][ch_name]
+                for k, rl in ch.items():
+                    rl_idx = int(k)
+                    dsn = rl['cells']
+                    ds_t = self.file[ch_name]['resolutions'][rl_idx, :][::-1].astype(int)
+                    target_shape = list(self.slices2shape(slices))
+                    slcs_out = [slices2dsslices(slc.start, step, shape) for slc, step, shape in zip(slices, ds_t, target_shape)]
+                    ds_shape = list(self.slices2shape(slcs_out))
+                    data_rl = data[::ds_t[0],::ds_t[1],::ds_t[2]]
+                    data_rl = data_rl[:ds_shape[0], :ds_shape[1], :ds_shape[2]]
+                    self.write_block(dsn, data_rl, slcs_out)
+
 
     def ims_write(self, data, slices):
         # data: rl0 unpadded block size (margins removed)
@@ -1425,7 +1560,7 @@ class Image(object):
             slices = self.slices
 
         ndim = self.get_ndim()
-        if self.format == '.ims':
+        if self.format in ['.ims', '.bdv']:
             ndim = 3
 
         if ndim == 1:

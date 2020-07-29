@@ -31,8 +31,10 @@ ims_ref = '{}{}.ims'.format(ims_stem, cfg['dataset']['ims_ref_postfix'])
 im_preproc ='{}{}.ims'.format(ims_stem, cfg['biasfield']['params']['postfix'])
 
 shading.estimate(img_file, par_file)
+
 shading.postprocess(img_file, par_file)
 
+"""
 ### BREAK - for shading-apply and stitching
 shading.apply(img_file, par_file)
 
@@ -41,21 +43,22 @@ stitching.estimate(img_file, par_file, stitch_steps=[1, 2])
 stitching.estimate(img_file, par_file, stitch_steps=[3, 4, 5], channels=[cfg['stitching']['params']['channel']])
 for i in range(7):  # TODO: loop from within function
     stitching.estimate(img_file, par_file, stitch_steps=[6], channels=[i])
+"""
 
 ### BREAK - for imaris channel extraction
-    """
+"""
     - open <dataset>_shading_stitching.ims in Imaris
     - Edit ==> Delete Channels ==> [delete all but first channel]
     - File ==> Save as ... ==> [save as <ims_ref>, i.e. <dataset>_shading_stitching_ref_uint16.ims]
-    """
+"""
 
 imarisfiles.ims_to_zeros(ims_ref)
 
 ### BREAK - for saving imaris reference file
-    """
+"""
     - open <ims_ref> in Imaris
     - File ==> Save as ... ==> [save as <ims_ref>, i.e. <dataset>_shading_stitching_ref_uint16.ims; just save over the old one: it will reduce the filesize]
-    """
+"""
 
 imarisfiles.split_channels(ims_file, par_file)
 

@@ -136,7 +136,7 @@ def generate_dataset_mask(
     logging.basicConfig(filename='{}.log'.format(outputstem), level=logging.INFO)
     report = {'parameters': locals()}
 
-    if '.ims' in image_in and resolution_level == -1:
+    if ('.ims' in image_in or '.bdv' in image_in) and resolution_level == -1:
         resolution_level = find_resolution_level(image_in)
     im_data = extract_resolution_level(image_in, resolution_level)
 
@@ -164,7 +164,6 @@ def generate_dataset_mask(
     if distance_to_edge:
         im_edt = calculate_distance_to_edge(im_mask, outputpat)
 
-
     # Save parameters.
     with open('{}.pickle'.format(outputstem), 'wb') as f:
         pickle.dump(report['parameters'], f, pickle.HIGHEST_PROTOCOL)
@@ -188,7 +187,7 @@ def extract_resolution_level(image_in, resolution_level):
     if resolution_level != -1:
         image_in = '{}/DataSet/ResolutionLevel {}'.format(image_in, resolution_level)
 
-    mo = Image(image_in, permission='r')
+    mo = Image(image_in, permission='r', reslev=resolution_level)
     mo.load(load_data=False)
 
     return mo
@@ -213,7 +212,7 @@ def extract_mean(im, dim='c', keep_dtype=True, output=''):
     if im.chunks is not None:
         nslcs = im.chunks[zdim]
     else:
-        nslsc = 8
+        nslcs = im.dims[zdim]
     slc_thrs = []
     for zstart in range(0, im.dims[zdim], nslcs):
         zstop = min(im.dims[zdim], zstart + nslcs)
@@ -435,6 +434,8 @@ def plot_images(f, axdict, info_dict={}, res=10000, add_profiles=True):
                 img = np.ma.masked_where(~limg, img)
                 axdict[k][ax_idx].imshow(img, cmap='gray', aspect=aspect)
             elif k == 'dist2edge':
+                if 'dist2edge' not in centreslices.keys():
+                    continue
                 img, dims = get_img(centreslices[k][dim], ax_idx, dims)
                 im = axdict[k][ax_idx].imshow(img, cmap='rainbow', aspect=aspect)
             elif k == 'smooth':
@@ -453,8 +454,11 @@ def plot_images(f, axdict, info_dict={}, res=10000, add_profiles=True):
                  'rainbow': [0, 2000],
                  'gist_rainbow': [0, 10], 'inferno': [0, 5]}
 
+    vols = ['mean', 'smooth', 'masks', 'mask']
+    if 'dist2edge' in centreslices.keys():
+        vols += ['dist2edge']
     for i in [0, 1, 2]:
-        for k in ['mean', 'smooth', 'masks', 'mask', 'dist2edge']:
+        for k in vols:
             for im in axdict[k][i].get_images():
                 cld = clim_dict[im.cmap.name]
                 im.set_clim(cld[0], cld[1])

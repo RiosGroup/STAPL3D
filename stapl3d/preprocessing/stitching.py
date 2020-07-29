@@ -242,5 +242,13 @@ def write_stack_offsets(image_in, conffile=''):
                header='dim=3', comments='')
 
 
+def bdv_load_elsize(xml_path):
+
+    tree = ET.parse(xml_path)
+    root = tree.getroot()
+    item = root.find('./SequenceDescription/ViewSetups/ViewSetup/voxelSize/size')
+    elsize = [float(e) for e in item.text.split()]
+
+
 if __name__ == "__main__":
     main(sys.argv[1:])

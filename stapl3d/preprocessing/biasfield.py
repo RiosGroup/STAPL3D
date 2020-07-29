@@ -196,7 +196,6 @@ def estimate_channel(
 
     ds_cr = divide_bias_field(ds_im, ds_bf, outputpat)
 
-
     # Save medians and parameters.
     with open('{}.pickle'.format(outputstem), 'wb') as f:
         pickle.dump(report['parameters'], f, pickle.HIGHEST_PROTOCOL)
@@ -222,10 +221,10 @@ def downsample_channel(image_in, ch, resolution_level=-1,
         return None
 
     if resolution_level != -1 and not ismask:  # we should have an Imaris pyramid
-        image_in = '{}/DataSet/ResolutionLevel {}'.format(image_in, resolution_level)
+        image_in += '/DataSet/ResolutionLevel {}'.format(resolution_level)
 
     # load data
-    im = Image(image_in, permission='r')
+    im = Image(image_in, permission='r', reslev=resolution_level)
     im.load(load_data=False)
     props = im.get_props()
     if len(im.dims) > 4:
@@ -386,6 +385,7 @@ def apply(
 
     step_id = 'biasfield_apply'
 
+    channeldir = get_outputdir(image_in, parameter_file, '', 'channels', 'channels')
     outputdir = get_outputdir(image_in, parameter_file, outputdir, 'biasfield', 'biasfield')
 
     params = get_params(locals().copy(), parameter_file, step_id)
@@ -396,28 +396,33 @@ def apply(
         n_channels = props['shape'][props['axlab'].index('c')]
         subparams['channels'] = list(range(n_channels))
 
-    channeldir = get_outputdir(image_in, parameter_file, '', 'channels', 'channels')
-
-    paths = get_paths(image_in)
-    chstem_pat = '{}{}'.format(paths['base'], '_ch{:02d}')
-
     with open(parameter_file, 'r') as ymlfile:
         cfg = yaml.safe_load(ymlfile)
 
+    paths = get_paths(image_in)
+    if '.ims' in image_in:
+        ch_pat = '{}{}{}.ims'.format(paths['fname'], '_ch{:02d}', cfg['biasfield']['params']['postfix'])
+    elif '.bdv' in image_in:
+        #ch_pat = '{}{}{}.h5/data'.format(paths['fname'], '_ch{:02d}', cfg['biasfield']['params']['postfix'])
+        ch_pat = '{}{}{}.bdv'.format(paths['fname'], '_ch{:02d}', cfg['biasfield']['params']['postfix'])
+
     if params['copy_from_ref'] and not params['image_ref']:
-        filename = '{}{}.ims'.format(filestem, cfg['dataset']['ims_ref_postfix'])
+        if '.ims' in image_in:
+            filename = '{}{}.ims'.format(paths['fname'], cfg['dataset']['ims_ref_postfix'])
+        elif '.bdv' in image_in:
+            filename = '{}{}.bdv'.format(paths['fname'], cfg['dataset']['ch_ref_postfix'])
         params['image_ref'] = os.path.join(paths['dir'], filename)
 
     arglist = []
     for ch in subparams['channels']:
-        chstem = chstem_pat.format(ch)
-        os.path.join(channeldir, chstem)
-        bias_fname = '{}{}_ch{:02d}{}.h5/bias'.format(dataset, postfix, ch, cfg['biasfield']['params']['postfix'])
+        bias_fname = '{}_ch{:02d}{}.h5/bias'.format(paths['fname'], ch, cfg['biasfield']['params']['postfix'])
+        bias_in = os.path.join(outputdir, bias_fname)
+        image_out = os.path.join(channeldir, ch_pat.format(ch))
         arglist.append(
             (
                 image_in,
-                os.path.join(outputdir, bias_fname),
-                os.path.join(channeldir, '{}{}.ims'.format(chstem, cfg['biasfield']['params']['postfix'])),
+                bias_in,
+                image_out,
                 params['image_ref'],
                 ch,
                 params['resolution_level'],
@@ -460,8 +465,18 @@ def apply_channel(
 
     if image_ref:
         shutil.copy2(image_ref, image_out)
-    mo = Image(image_out)
-    mo.load()
+        mo = Image(image_out)
+        mo.load()
+        # TODO: write to bdv pyramid
+    else:
+        # TODO: squeeze channel properly
+        props = im.get_props()
+        if len(im.dims) > 4:
+            props = im.squeeze_props(props, dim=4)
+        if len(im.dims) > 3:
+            props = im.squeeze_props(props, dim=3)
+        mo = Image(image_out, **props)
+        mo.create()
 
     if channel is not None:
         if len(im.dims) > 3:
@@ -528,16 +543,17 @@ def get_bias_field_block(bf, slices, outdims, dsfacs):
 
 def calculate_downsample_factors(image_in, resolution_level=-1):
 
-    if '.ims' in image_in:
+    rl_path = image_in
+    downsample_factors_reslev = None
+    if '.ims' in image_in or '.bdv' in image_in:
         if resolution_level == -1:
             resolution_level = find_resolution_level(image_in)
-        rl_path = '{}/DataSet/ResolutionLevel {}'.format(image_in, resolution_level)
         dsfacs = find_downsample_factors(image_in, 0, resolution_level)
         downsample_factors_reslev = list(dsfacs) + [1, 1]
-    else:
-        rl_path = image_in
+        if '.ims' in image_in:
+            rl_path += '/DataSet/ResolutionLevel {}'.format(resolution_level)
 
-    im = Image(rl_path, permission='r')
+    im = Image(rl_path, permission='r', reslev=resolution_level)
     im.load(load_data=False)
 
     target = {'z': im.elsize[im.axlab.index('z')], 'x': 20, 'y': 20}

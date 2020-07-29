@@ -14,6 +14,7 @@ import h5py
 import numpy as np
 
 import yaml
+import xml.etree.ElementTree as ET
 
 from stapl3d import (
     get_n_workers,
@@ -233,6 +234,15 @@ def make_aggregate(outputfile, ref_path,
     aggregate_file(outputfile, channels, ch_offset=0)
 
 
+def ref_to_zeros(image_in):
+    """Set BigDataViewer datasets to all-zeros."""
+
+    if '.ims' in image_in:
+        ims_to_zeros(image_in)
+    elif '.bdv' in image_in:
+        bdv_to_zeros(image_in)
+
+
 def ims_to_zeros(image_in):
     """Set imaris datasets to all-zeros."""
 
@@ -252,20 +262,43 @@ def ims_to_zeros(image_in):
     im.close()
 
 
+def bdv_to_zeros(image_in):
+    """Set BigDataViewer datasets to all-zeros."""
+
+    f = h5py.File(image_in, 'r+')
+    timepoints = [v for k, v in f.items() if k.startswith('t')]
+    for tp in timepoints:
+        channels = [v for k, v in tp.items() if k.startswith('s')]
+        for ch in channels:
+            for k, rl in ch.items():
+                ds = rl['cells']
+                ds[:] = np.zeros(ds.shape, dtype=ds.dtype)
+
+    f.close()
+
+
 def find_resolution_level(image_in):
     """Find the smallest resolution level not downsampled in Z."""
 
     mo = Image(image_in, permission='r')
     mo.load(load_data=False)
 
-    Z = int(mo.dims[0])
+    # FIXME: streamline this
+    z_dim = mo.axlab.index('z')
+    if '.ims' in image_in:
+        Z = int(mo.dims[z_dim])
+    elif '.bdv' in image_in:
+        Z = int(mo.bdv_get_dims(reslev=0)[z_dim])
     Z_rl = Z
     rl_idx = 0
     while Z == Z_rl:
         rl_idx += 1
-        rl = mo.file['/DataSet/ResolutionLevel {}'.format(rl_idx)]
-        im_info = rl['TimePoint 0/Channel 0']
-        Z_rl = int(att2str(im_info.attrs['ImageSizeZ']))
+        if '.ims' in image_in:
+            rl = mo.file['/DataSet/ResolutionLevel {}'.format(rl_idx)]
+            im_info = rl['TimePoint 0/Channel 0']
+            Z_rl = int(att2str(im_info.attrs['ImageSizeZ']))
+        elif '.bdv' in image_in:
+            Z_rl = int(mo.bdv_get_dims(reslev=rl_idx)[z_dim])
 
     mo.close()
 
@@ -288,11 +321,186 @@ def find_downsample_factors(image_in, rl0_idx, rl1_idx):
     im = Image(image_in, permission='r')
     im.load(load_data=False)
 
-    dims0 = find_dims(im, rl0_idx)
-    dims1 = find_dims(im, rl1_idx)
+    if im.format == '.ims':
+        dims0 = find_dims(im, rl0_idx)
+        dims1 = find_dims(im, rl1_idx)
+        dsfacs = np.around(np.array(dims0) / np.array(dims1)).astype('int')
+    elif im.format == '.bdv':
+        dsfacs = im.file['s00/resolutions'][rl1_idx, :][::-1]
 
     im.close()
 
-    dsfacs = np.around(np.array(dims0) / np.array(dims1)).astype('int')
-
     return dsfacs
+
+
+def aggregate_h5(outputfile, inputstem, channel_pat='_ch??', postfix='', xml_ref=''):
+    """Gather the inputfiles into an imarisfile by symbolic links."""
+
+    inputfiles = glob('{}{}{}.h5'.format(inputstem, channel_pat, postfix))
+    inputfiles.sort()
+
+    channels = [
+        {
+         'filepath': inputfile,
+         'Name': 'data',
+         'xml_ref': xml_ref,
+         } for i, inputfile in enumerate(inputfiles)]
+
+    aggregate_h5_channels(outputfile, channels, ch_offset=0)
+
+
+def aggregate_h5_channels(tgt_file, channels, ch_offset=0):
+    """Create an aggregate file with links to individual channels."""
+
+    def create_copy(f, tgt_loc, ext_file, ext_loc):
+        """Copy the imaris DatasetInfo group."""
+
+        try:
+            del f[tgt_loc]
+        except KeyError:
+            pass
+        g = h5py.File(ext_file, 'r')
+        f.copy(g[ext_loc], tgt_loc)
+        g.close()
+
+    def create_ext_link(f, tgt_loc, ext_file, ext_loc):
+        """Create an individual link."""
+
+        try:
+            del f[tgt_loc]
+        except KeyError:
+            pass
+        f[tgt_loc] = h5py.ExternalLink(ext_file, ext_loc)
+
+    f = h5py.File(tgt_file, 'w')
+    for ch_dict in channels:
+
+        linked_path = os.path.relpath(ch_dict['filepath'], os.path.dirname(tgt_file))
+        ext_file = pathlib.Path(linked_path).as_posix()
+
+        create_ext_link(f, ch_dict['Name'], ext_file, ch_dict['Name'])
+
+
+def aggregate_bigstitcher(outputfile, inputstem, channel_pat='_ch??', postfix='', ext='.h5', xml_ref=''):
+    """Gather the inputfiles into an imarisfile by symbolic links."""
+
+    inputfiles = glob('{}{}{}{}'.format(inputstem, channel_pat, postfix, ext))
+    inputfiles.sort()
+
+    channels = [
+        {
+         'filepath': inputfile,
+         'Name': 's{:02d}'.format(i),
+         'xml_ref': xml_ref,
+         } for i, inputfile in enumerate(inputfiles)]
+
+    aggregate_bigstitcher_channels(outputfile, channels, ch_offset=0, ext=ext)
+
+
+def aggregate_bigstitcher_channels(tgt_file, channels, ch_offset=0, ext='.h5'):
+    """Create an aggregate file with links to individual channels."""
+
+    def bdv_load_elsize(xml_path):
+
+        tree = ET.parse(xml_path)
+        root = tree.getroot()
+        item = root.find('./SequenceDescription/ViewSetups/ViewSetup/voxelSize/size')
+        elsize_xyz = [float(e) for e in item.text.split()]
+
+        return elsize_xyz
+
+    def create_copy(f, tgt_loc, ext_file, ext_loc):
+        """Copy the imaris DatasetInfo group."""
+
+        try:
+            del f[tgt_loc]
+        except KeyError:
+            pass
+        g = h5py.File(ext_file, 'r')
+        f.copy(g[ext_loc], tgt_loc)
+        g.close()
+
+    def create_ext_link(f, tgt_loc, ext_file, ext_loc):
+        """Create an individual link."""
+
+        try:
+            del f[tgt_loc]
+        except KeyError:
+            pass
+        f[tgt_loc] = h5py.ExternalLink(ext_file, ext_loc)
+
+    f = h5py.File(tgt_file, 'w')
+
+    linked_path = os.path.relpath(channels[0]['filepath'], os.path.dirname(tgt_file))
+    ext_file = pathlib.Path(linked_path).as_posix()
+    tgt_loc = ext_loc = '__DATA_TYPES__'
+    create_ext_link(f, tgt_loc, ext_file, ext_loc)
+
+    for ch_dict in channels:
+
+        xml_path = ch_dict['xml_ref'] or ch_dict['filepath'].replace(ext, '.xml')
+        elsize = bdv_load_elsize(xml_path)
+
+        linked_path = os.path.relpath(ch_dict['filepath'], os.path.dirname(tgt_file))
+        ext_file = pathlib.Path(linked_path).as_posix()
+
+        tgt_loc = '/{}'.format(ch_dict['Name'])
+        ext_loc = '/s00'
+        #create_copy(f, ch_dict['Name'], ch_dict['filepath'], 's00')
+        create_ext_link(f, ch_dict['Name'], ext_file, 's00')
+
+        tgt_loc = '/t00000/{}'.format(ch_dict['Name'])
+        ext_loc = '/t00000/s00'
+        create_ext_link(f, tgt_loc, ext_file, ext_loc)
+
+        """
+        for k, rl in f[tgt_loc].items():
+            ds = rl['cells'.format(tgt_loc)]
+            res = f[ch_dict['Name']]['resolutions'][int(k), :]
+            elsize_xyz_rl = np.array(elsize) * res
+            ds.attrs['element_size_um'] = elsize_xyz_rl[::-1]
+            for i, label in enumerate('zyx'):
+                ds.dims[i].label = label
+        """
+
+def bdv_to_virtual(outputfile, inputfile, reslev=0):
+
+    f = h5py.File(inputfile, 'r')
+    shape = f['/t00000/s00/{}/cells'.format(reslev)].shape + (len(f['t00000']),)
+    dtype = f['/t00000/s00/{}/cells'.format(reslev)].dtype
+    layout = h5py.VirtualLayout(shape=shape, dtype=dtype)
+
+    for ch in range(shape[3]):
+        image_in = "{}/t00000/s{:02d}/{}".format(inputfile, ch, reslev)
+        vsource = h5py.VirtualSource(image_in, name='cells', shape=shape[:3])
+        layout[:, :, :, ch] = vsource
+
+    # Add virtual dataset to output file
+    if not outputfile:
+        filestem, ext = os.path.splitext(inputfile)
+        outputfile = '{}{}{}'.format(filestem, '_virt', ext)
+    with h5py.File(outputfile, 'w', libver='latest') as f:
+        f.create_virtual_dataset('data', layout, fillvalue=0)
+
+
+def h5chs_to_virtual(outputfile, inputstem, channel_pat='_ch??', postfix=''):
+
+    inputfiles = glob('{}{}{}.h5'.format(inputstem, channel_pat, postfix))
+    inputfiles.sort()
+
+    f = h5py.File(inputfiles[0], 'r')
+    shape = f['data'].shape + (len(inputfiles),)
+    dtype = f['data'].dtype
+    layout = h5py.VirtualLayout(shape=shape, dtype=dtype)
+
+    for ch, inputfile in enumerate(inputfiles):
+        image_in = "{}".format(inputfile)
+        vsource = h5py.VirtualSource(image_in, name='data', shape=shape[:3])
+        layout[:, :, :, ch] = vsource
+
+    # Add virtual dataset to output file
+    if not outputfile:
+        filestem, ext = os.path.splitext(inputfiles[0])
+        outputfile = '{}{}{}'.format(filestem, '_virt', ext)
+    with h5py.File(outputfile, 'w', libver='latest') as f:
+        f.create_virtual_dataset('data', layout, fillvalue=0)
