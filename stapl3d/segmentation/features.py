@@ -892,7 +892,7 @@ def postproc(
     csv_dir='',
     csv_stem='',
     feat_pf='_features',
-    segm_pfs=['full', 'memb', 'nucl'],
+    segm_pfs=[],
     ext='csv',
     min_size_nucl=50,
     save_border_labels=True,
@@ -915,6 +915,7 @@ def postproc(
         cfg = yaml.safe_load(ymlfile)
     idss = [cfg['subsegment']['params']['ods_{}'.format(seg_name)]
             for seg_name in cfg['features']['params']['seg_names']]
+    params['segm_pfs'] = cfg['features']['params']['seg_names']
     if not params['seg_paths']:
         datadir = get_outputdir(image_in, parameter_file, '', '', '')
         dataset = os.path.splitext(get_paths(image_in)['fname'])[0]
