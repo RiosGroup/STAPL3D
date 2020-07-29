@@ -536,6 +536,7 @@ def get_image_info(image_in):
         zstack_shape[czi.axes.index('T')] = iminfo['ntimepoints']
         zstack_shape[czi.axes.index('Z')] = iminfo['nplanes']
         iminfo['zstack_shape'] = zstack_shape
+        iminfo['tilesize'] = zstack_shape[-3:-1]
 
         zyxc_idxs = [8, 9, 10, 6]
         iminfo['dims_zyxc'] = [iminfo['zstack_shape'][idx] for idx in zyxc_idxs]
@@ -553,11 +554,12 @@ def get_image_info(image_in):
         iminfo['nplanes'] = lim.dims[1]
         iminfo['ntimepoints'] = lim.dims[2]
         iminfo['nstacks'] = lim.dims[3]
-        iminfo['ncols'] = lim.dims[4]
+        iminfo['ncols'] = lim.dims[4]  # FIXME: this merged shape for czi, tilesize for lif
         iminfo['nrows'] = lim.dims[5]
 
         m_idx = 3
         iminfo['zstack_shape'] = lim.dims[:m_idx] + lim.dims[m_idx+1:]
+        iminfo['tilesize'] = [iminfo['ncols'], iminfo['nrows']]
 
         zyxc_idxs = [1, 4, 5, 0]
         iminfo['dims_zyxc'] = [lim.dims[idx] for idx in zyxc_idxs]
@@ -582,8 +584,6 @@ def get_image_info(image_in):
     iminfo['timepoints'] = list(range(iminfo['ntimepoints']))
     iminfo['planes'] = list(range(iminfo['nplanes']))
     iminfo['stacks'] = list(range(iminfo['nstacks']))
-
-    iminfo['tilesize'] = [iminfo['ncols'], iminfo['nrows']]
 
     return iminfo
 
