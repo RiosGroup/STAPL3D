@@ -436,6 +436,16 @@ features:
         min_labelsize: 50
         fset_morph: minimal
         fset_intens: minimal
+        memb_idxs:
+            - 3
+            - 5
+            - 6
+            - 7
+        nucl_idxs:
+            - 0
+            - 1
+            - 2
+            - 4
         blocksize_xy: 1280
     submit:
         array: block

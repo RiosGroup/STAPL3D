@@ -866,10 +866,6 @@ def get_feature_names(fset_morph='', fset_intens='', metrics=['mean']):
         feat_names['morphs'] = fset_morph
 
     # TODO: generalize with arguments (get from yaml file)
-    d = {'markers': list(range(8)),
-         'membrane': [3, 5, 6, 7],
-         'nuclear': [0, 1, 2, 4],
-         }
     # metrics = ['mean', 'median', 'variance', 'min', 'max']
     marker_ids = ['ch{:02d}'.format(i) for i in d['markers']]
     # marker_ids[1] = 'ch01p'
@@ -904,6 +900,9 @@ def postproc(
     split_features=False,
     fset_morph='minimal',
     fset_intens='minimal',
+    memb_idxs=[],
+    nucl_idxs=[],
+    csol_idxs=[],
     ):
     """Generate a mask that covers the tissue."""
 
@@ -947,6 +946,9 @@ def postproc(
         params['split_features'],
         params['fset_morph'],
         params['fset_intens'],
+        params['memb_idxs'],
+        params['nucl_idxs'],
+        params['csol_idxs'],
         outputdir,
         )
 
@@ -966,6 +968,9 @@ def postprocess_features(
     split_features=False,
     fset_morph='minimal',
     fset_intens='minimal',
+    memb_idxs=[],
+    nucl_idxs=[],
+    csol_idxs=[],
     outputdir='',
     ):
 
@@ -1001,7 +1006,13 @@ def postprocess_features(
         # select features
         # metrics=['mean', 'median', 'variance', 'min', 'max']
         metrics = ['median']  # TODO
-        feat_names = get_feature_names(fset_morph, fset_intens, metrics)
+        markers = {
+            'markers': memb_idxs + nucl_idxs + csol_idxs,
+            'membrane': memb_idxs,
+            'nuclear': nucl_idxs,
+            'cytosol': csol_idxs,
+            }
+        feat_names = get_feature_names(fset_morph, fset_intens, metrics, markers)
         df = select_features(dfs, feat_names, min_size_nucl, split_features)
         #df = rename_columns(df, metrics=metrics)
         # TODO: channel names from yaml
