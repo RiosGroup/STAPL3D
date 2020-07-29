@@ -606,7 +606,7 @@ def czi_get_elsize(czi):
 def czi_tile_offsets(czi, iminfo):
 
     # first dir of eacxh zstack: C[8]Z[84]M[286]
-    stack_stride = iminfo['nchannels'] * iminfo['ntimepoints'] * iminfo['nslices']
+    stack_stride = iminfo['nchannels'] * iminfo['ntimepoints'] * iminfo['nplanes']
     sbd_zstacks0 = [sbd for sbd in czi.subblock_directory[::stack_stride]]
     v_offsets = np.zeros([iminfo['nstacks'], 4])
     for i, directory_entry in zip(range(iminfo['nstacks']), sbd_zstacks0):
