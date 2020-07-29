@@ -111,7 +111,8 @@ def estimate(
 
     with open(parameter_file, 'r') as ymlfile:
         cfg = yaml.safe_load(ymlfile)
-    idss = [cfg['subsegment']['params']['ods_{}'.format(seg_name)] for seg_name in seg_names]
+    # FIXME: cannot refer to subsegment here if there is only nucl
+    idss = [cfg['subsegment']['params']['ods_{}'.format(seg_name)] for seg_name in params['seg_names']]
     if not params['seg_paths']:
         datadir = get_outputdir(image_in, parameter_file, '', '', '')
         dataset = os.path.splitext(get_paths(image_in)['fname'])[0]
@@ -995,10 +996,11 @@ def postprocess_features(
 
         # select features
         # metrics=['mean', 'median', 'variance', 'min', 'max']
-        metrics=['median'] # TODO
+        metrics = ['median']  # TODO
         feat_names = get_feature_names(fset_morph, fset_intens, metrics)
         df = select_features(dfs, feat_names, min_size_nucl, split_features)
         #df = rename_columns(df, metrics=metrics)
+        # TODO: channel names from yaml
 
         # label filtering: only select full segments
         filestem = '{}_{}'.format(csv_stem, block['id'])
