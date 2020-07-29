@@ -24,6 +24,7 @@ import time
 
 from scipy import ndimage as ndi
 from scipy.ndimage import distance_transform_edt
+from scipy.ndimage.morphology import binary_fill_holes
 
 from skimage.color import label2rgb
 from skimage.transform import resize
@@ -211,6 +212,8 @@ def cell_segmentation(
     outputdir='',
     ):
 
+    fill_nuclei = True
+
     # Prepare the output.
     outputstem = os.path.splitext(filepath)[0]
     save_steps = True
@@ -272,6 +275,7 @@ def cell_segmentation(
             sauvola_window_size,
             sauvola_k,
             dapi_absmin,
+            fill_nuclei,
             dapi_erodisk,
             outstem,
             save_steps,
@@ -493,6 +497,7 @@ def create_nuclear_mask(
     window_size=[19, 75, 75],
     k=0.2,
     absolute_min_intensity=2000.0,
+    fill_nuclei=True,
     disksize_erosion=3,
     outstem='',
     save_steps=False,
@@ -520,6 +525,9 @@ def create_nuclear_mask(
         mask_threshold = binary_closing(mask_threshold)
         if save_steps: write(mask_threshold, outstem, '_mask_thr', im_nucl)
         mask |= mask_threshold
+
+    if fill_nuclei:
+        binary_fill_holes(mask, output=mask)
 
     im_mask = write(mask, outstem, '_mask', im_nucl)
 
