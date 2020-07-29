@@ -2069,7 +2069,7 @@ def get_blocksize(image_in, bs=640):
 
     im = Image(image_in, permission='r')
     im.load(load_data=False)
-    blocksize = im.dims
+    blocksize = list(im.dims)
     blocksize[im.axlab.index('x')] = bs
     blocksize[im.axlab.index('y')] = bs
 
