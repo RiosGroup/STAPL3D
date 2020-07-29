@@ -111,7 +111,8 @@ def estimate(
 
     with open(parameter_file, 'r') as ymlfile:
         cfg = yaml.safe_load(ymlfile)
-    idss = [cfg['subsegment']['params']['ods_{}'.format(seg_name)] for seg_name in seg_names]
+    # FIXME: cannot refer to subsegment here if there is only nucl
+    idss = [cfg['subsegment']['params']['ods_{}'.format(seg_name)] for seg_name in params['seg_names']]
     if not params['seg_paths']:
         datadir = get_outputdir(image_in, parameter_file, '', '', '')
         dataset = os.path.splitext(get_paths(image_in)['fname'])[0]
@@ -129,9 +130,7 @@ def estimate(
     # NOTE: copied from biasfield  # TODO: generalize
     if isinstance(params['aux_data_path'], bool):
         if params['aux_data_path']:
-            filestem = os.path.splitext(get_paths(image_in)['fname'])[0]
-            mpars = get_params(dict(), parameter_file, 'mask')
-            maskfile = '{}{}.h5/mask'.format(filestem, mpars['postfix'])
+            maskfile = '{}{}{}{}.h5/dist2edge'.format(cfg['dataset']['name'], cfg['shading']['params']['postfix'], , cfg['stitching']['params']['postfix'], cfg['mask']['params']['postfix'])
             maskdir = get_outputdir(image_in, parameter_file, '', 'mask')
             params['aux_data_path'] = os.path.join(maskdir, maskfile)
 
@@ -629,7 +628,7 @@ def get_feature_set(fset_morph='minimal', fset_intens='minimal', aux_data_path='
             'min_intensity',
             'mean_intensity',
             'median_intensity',
-            'variance_intensity',
+            # 'variance_intensity',  # FIXME: error on variance in scikit-image-stapl3d
             'max_intensity',
             'weighted_centroid',
             # FIXME: OverflowError: Python int too large to convert to C long
@@ -894,7 +893,7 @@ def postproc(
     csv_dir='',
     csv_stem='',
     feat_pf='_features',
-    segm_pfs=['full', 'memb', 'nucl'],
+    segm_pfs=[],
     ext='csv',
     min_size_nucl=50,
     save_border_labels=True,
@@ -917,6 +916,7 @@ def postproc(
         cfg = yaml.safe_load(ymlfile)
     idss = [cfg['subsegment']['params']['ods_{}'.format(seg_name)]
             for seg_name in cfg['features']['params']['seg_names']]
+    params['segm_pfs'] = cfg['features']['params']['seg_names']
     if not params['seg_paths']:
         datadir = get_outputdir(image_in, parameter_file, '', '', '')
         dataset = os.path.splitext(get_paths(image_in)['fname'])[0]
@@ -996,10 +996,11 @@ def postprocess_features(
 
         # select features
         # metrics=['mean', 'median', 'variance', 'min', 'max']
-        metrics=['mean'] # TODO
+        metrics = ['median']  # TODO
         feat_names = get_feature_names(fset_morph, fset_intens, metrics)
         df = select_features(dfs, feat_names, min_size_nucl, split_features)
         #df = rename_columns(df, metrics=metrics)
+        # TODO: channel names from yaml
 
         # label filtering: only select full segments
         filestem = '{}_{}'.format(csv_stem, block['id'])

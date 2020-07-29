@@ -536,6 +536,7 @@ def get_image_info(image_in):
         zstack_shape[czi.axes.index('T')] = iminfo['ntimepoints']
         zstack_shape[czi.axes.index('Z')] = iminfo['nplanes']
         iminfo['zstack_shape'] = zstack_shape
+        iminfo['tilesize'] = zstack_shape[-3:-1]
 
         zyxc_idxs = [8, 9, 10, 6]
         iminfo['dims_zyxc'] = [iminfo['zstack_shape'][idx] for idx in zyxc_idxs]
@@ -553,11 +554,12 @@ def get_image_info(image_in):
         iminfo['nplanes'] = lim.dims[1]
         iminfo['ntimepoints'] = lim.dims[2]
         iminfo['nstacks'] = lim.dims[3]
-        iminfo['ncols'] = lim.dims[4]
+        iminfo['ncols'] = lim.dims[4]  # FIXME: this merged shape for czi, tilesize for lif
         iminfo['nrows'] = lim.dims[5]
 
         m_idx = 3
         iminfo['zstack_shape'] = lim.dims[:m_idx] + lim.dims[m_idx+1:]
+        iminfo['tilesize'] = [iminfo['ncols'], iminfo['nrows']]
 
         zyxc_idxs = [1, 4, 5, 0]
         iminfo['dims_zyxc'] = [lim.dims[idx] for idx in zyxc_idxs]
@@ -583,8 +585,6 @@ def get_image_info(image_in):
     iminfo['planes'] = list(range(iminfo['nplanes']))
     iminfo['stacks'] = list(range(iminfo['nstacks']))
 
-    iminfo['tilesize'] = [iminfo['ncols'], iminfo['nrows']]
-
     return iminfo
 
 
@@ -606,7 +606,7 @@ def czi_get_elsize(czi):
 def czi_tile_offsets(czi, iminfo):
 
     # first dir of eacxh zstack: C[8]Z[84]M[286]
-    stack_stride = iminfo['nchannels'] * iminfo['ntimepoints'] * iminfo['nslices']
+    stack_stride = iminfo['nchannels'] * iminfo['ntimepoints'] * iminfo['nplanes']
     sbd_zstacks0 = [sbd for sbd in czi.subblock_directory[::stack_stride]]
     v_offsets = np.zeros([iminfo['nstacks'], 4])
     for i, directory_entry in zip(range(iminfo['nstacks']), sbd_zstacks0):
