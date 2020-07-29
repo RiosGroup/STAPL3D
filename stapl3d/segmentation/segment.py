@@ -226,12 +226,20 @@ def cell_segmentation(
     im_dapi.load()
     nucl_props = im_dapi.get_props()
 
-    im_memb = Image('{}/{}'.format(filepath, ids_memb_chan))
-    im_memb.load()
-    memb_props = im_memb.get_props()
+    if ids_memb_chan:
+        im_memb = Image('{}/{}'.format(filepath, ids_memb_chan))
+        im_memb.load()
+        memb_props = im_memb.get_props()
+    else:
+        im_memb, memb_props = None, None
 
-    im_plan = MaskImage('{}/{}'.format(filepath, ids_memb_mask))
-    im_plan.load()
+    if ids_memb_mask:
+        im_plan = Image('{}/{}'.format(filepath, ids_memb_mask))
+        im_plan.load()
+    else:
+        im_plan = Image('{}/{}'.format(filepath, 'memb/planarity'), **nucl_props)
+        im_plan.create()
+        im_plan.write(np.zeros(im_plan.dims))
 
     # im_dset_mask = Image(dset_mask_path, permission='r')
     # im_dset_mask.load(load_data=False)
@@ -283,11 +291,35 @@ def cell_segmentation(
     elapsed = time.time() - t
     print('{} ({}) took {:1f} s'.format(stage, op, elapsed))
 
+    # preprocess membrane mean channel
+    # .h5/memb/preprocess<_smooth>
+    stage = 'membrane channel'
+    t = time.time()
+    outstem = '{}.h5{}'.format(outputstem, '/memb/mean')
+    if not ids_memb_chan:
+        im_memb_pp = None
+    elif 5 not in steps:
+        op = 'reading'
+        im_memb_pp = get_image('{}{}'.format(outstem, '_smooth'))
+    else:
+        op = 'processing'
+        im_memb_pp = preprocess_memb(
+            im_memb,
+            memb_filter,
+            memb_sigma,
+            outstem,
+            save_steps,
+            )
+    elapsed = time.time() - t
+    print('{} ({}) took {:1f} s'.format(stage, op, elapsed))
+
     # create a membrane mask from the membrane mean
     # .h5/memb/planarity<_mask>
     stage = 'membrane mask'
     t = time.time()
     outstem = '{}.h5{}'.format(outputstem, '/memb/planarity')
+    if ids_memb_chan == ids_memb_mask:
+        im_plan = im_memb_pp
     if 2 not in steps:
         op = 'reading'
         im_memb_mask = get_image('{}{}'.format(outstem, '_mask'))
@@ -342,26 +374,6 @@ def cell_segmentation(
             dist_max,
             peaks_size, peaks_thr,
             peaks_dil_footprint,
-            outstem,
-            save_steps,
-            )
-    elapsed = time.time() - t
-    print('{} ({}) took {:1f} s'.format(stage, op, elapsed))
-
-    # preprocess membrane mean channel
-    # .h5/memb/preprocess<_smooth>
-    stage = 'membrane channel'
-    t = time.time()
-    outstem = '{}.h5{}'.format(outputstem, '/memb/mean')
-    if 5 not in steps:
-        op = 'reading'
-        im_memb_pp = get_image('{}{}'.format(outstem, '_smooth'))
-    else:
-        op = 'processing'
-        im_memb_pp = preprocess_memb(
-            im_memb,
-            memb_filter,
-            memb_sigma,
             outstem,
             save_steps,
             )
@@ -537,6 +549,8 @@ def create_nuclear_mask(
         for i, slc in enumerate(mask):  # FIXME: assuming zyx here
             mask_ero[i, :, :] = binary_erosion(slc, disk_erosion)
         im_mask = write(mask_ero, outstem, '_mask_ero', im_nucl)
+    else:
+        im_mask = write(mask, outstem, '_mask_ero', im_nucl)
 
     return im_mask
 
@@ -595,7 +609,6 @@ def combine_nucl_and_memb_masks(
     - bitwise AND
     - opening of the result
     """
-
 
     comb_mask = np.logical_and(im_nucl_mask.ds[:].astype('bool'),
                                ~im_memb_mask.ds[:].astype('bool'))
@@ -701,18 +714,24 @@ def perform_watershed(
 
     if im_dt is not None:
         seeds = watershed(-im_dt.ds[:], seeds, mask=im_dt.ds[:]>peaks_thr)
-        if save_steps: write(seeds, outstem, '_edt', im_memb, imtype='Label')
+        if save_steps:
+            if im_memb is not None:
+                im_ws = write(seeds, outstem, '_edt', im_peaks, imtype='Label')
+            else:
+                im_ws = write(seeds, outstem, '_edt', im_peaks, imtype='Label')
+                im_ws = write(seeds, outstem, '_memb', im_peaks, imtype='Label')
 
-    # TODO: try masked watershed, e.g.:
-    # 1) simple dataset mask from channel-mean,
-    # 2) dilated dapi mask for contraining cells
-    try:
-        ws = watershed(im_memb.ds[:], seeds, compactness=compactness, spacing=im_memb.elsize)
-    except TypeError:
-        print('WARNING: possibly not using correct spacing for compact watershed')
-        ws = watershed(im_memb.ds[:], seeds, compactness=compactness)
+    if im_memb is not None:
+        # TODO: try masked watershed, e.g.:
+        # 1) simple dataset mask from channel-mean,
+        # 2) dilated dapi mask for contraining cells
+        try:
+            ws = watershed(im_memb.ds[:], seeds, compactness=compactness, spacing=im_memb.elsize)
+        except TypeError:
+            print('WARNING: possibly not using correct spacing for compact watershed')
+            ws = watershed(im_memb.ds[:], seeds, compactness=compactness)
 
-    im_ws = write(ws, outstem, '_memb', im_memb, imtype='Label')
+        im_ws = write(ws, outstem, '_memb', im_memb, imtype='Label')
 
     return im_ws
 
@@ -1099,6 +1118,7 @@ def plot_images(axs, info_dict={}):
                 return slc
             except (TypeError, KeyError):
                 print('{} not found: falling back to empty'.format(fallback))
+                # TODO: empty image of correct dim
                 return None
 
     centreslices = info_dict['centreslices']
@@ -1111,6 +1131,9 @@ def plot_images(axs, info_dict={}):
 
         data_nucl = get_data('nucl/dapi_preprocess', 'chan/ch00', dimfac=3)
         data_memb = get_data('memb/mean_smooth', 'memb/mean', dimfac=5)
+        if data_memb is None:
+            data_memb = np.zeros(data_nucl.shape)
+
         if dim == 'x':
             data_nucl = data_nucl.transpose()
             data_memb = data_memb.transpose()
