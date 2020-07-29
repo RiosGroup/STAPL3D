@@ -627,7 +627,7 @@ def get_feature_set(fset_morph='minimal', fset_intens='minimal', aux_data_path='
             'min_intensity',
             'mean_intensity',
             'median_intensity',
-            'variance_intensity',
+            # 'variance_intensity',  # FIXME: error on variance in scikit-image-stapl3d
             'max_intensity',
             'weighted_centroid',
             # FIXME: OverflowError: Python int too large to convert to C long
