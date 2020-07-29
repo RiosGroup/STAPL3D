@@ -994,7 +994,7 @@ def postprocess_features(
 
         # select features
         # metrics=['mean', 'median', 'variance', 'min', 'max']
-        metrics=['mean'] # TODO
+        metrics=['median'] # TODO
         feat_names = get_feature_names(fset_morph, fset_intens, metrics)
         df = select_features(dfs, feat_names, min_size_nucl, split_features)
         #df = rename_columns(df, metrics=metrics)
