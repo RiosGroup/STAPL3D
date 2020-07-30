@@ -130,7 +130,7 @@ def estimate(
     # NOTE: copied from biasfield  # TODO: generalize
     if isinstance(params['aux_data_path'], bool):
         if params['aux_data_path']:
-            maskfile = '{}{}{}{}.h5/dist2edge'.format(cfg['dataset']['name'], cfg['shading']['params']['postfix'], , cfg['stitching']['params']['postfix'], cfg['mask']['params']['postfix'])
+            maskfile = '{}{}{}{}.h5/dist2edge'.format(cfg['dataset']['name'], cfg['shading']['params']['postfix'], cfg['stitching']['params']['postfix'], cfg['mask']['params']['postfix'])
             maskdir = get_outputdir(image_in, parameter_file, '', 'mask')
             params['aux_data_path'] = os.path.join(maskdir, maskfile)
 
