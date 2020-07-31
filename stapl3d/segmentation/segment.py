@@ -713,13 +713,33 @@ def perform_watershed(
     seeds = ndi.label(im_peaks.ds[:])[0]
 
     if im_dt is not None:
-        seeds = watershed(-im_dt.ds[:], seeds, mask=im_dt.ds[:]>peaks_thr)
+        seeds = watershed(-im_dt.ds[:], seeds, mask=im_dt.ds[:] > peaks_thr)
         if save_steps:
             if im_memb is not None:
                 im_ws = write(seeds, outstem, '_edt', im_peaks, imtype='Label')
             else:
                 im_ws = write(seeds, outstem, '_edt', im_peaks, imtype='Label')
                 im_ws = write(seeds, outstem, '_memb', im_peaks, imtype='Label')
+        seeds = im_ws.ds[:]
+
+    if False:
+        mstem = outstem.replace('/segm/labels', '/memb/planarity')
+        im_memb_mask_final = get_image('{}{}'.format(mstem, '_mask'), imtype='Mask')
+        memb_mask = im_memb_mask_final.ds[:].astype('bool')
+        im_memb_mask_final.close()
+
+        nstem = outstem.replace('/segm/labels', '/nucl/dapi')
+        im_nucl_mask_final = get_image('{}{}'.format(nstem, '_mask'), imtype='Mask')
+        nucl_mask = im_nucl_mask_final.ds[:].astype('bool')
+        im_nucl_mask_final.close()
+
+        memb_mask[nucl_mask] = False
+        mask = binary_erosion(memb_mask)
+        im_mask = write(mask, outstem, '_csol_mask', im_peaks, imtype='Mask')
+
+        cells = watershed(im_memb.ds[:], seeds, mask=~mask)
+        im_cells = write(cells, outstem, '_csol', im_peaks, imtype='Label')
+        seeds = im_cells.ds[:]
 
     if im_memb is not None:
         # TODO: try masked watershed, e.g.:
