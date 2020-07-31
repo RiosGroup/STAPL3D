@@ -90,6 +90,12 @@ def estimate(
     grp='segm',
     ids='labels_memb_del_relabeled_fix',
     postfix='',
+    ids_memb_chan='memb/mean_smooth',
+    find_peaks=False,
+    peaks_thr=1.0,
+    peaks_size=[11, 19, 19],
+    peaks_dil_footprint=[3, 7, 7],
+    compactness=0.80,
     ):
     """Correct z-stack shading."""
 
@@ -99,6 +105,7 @@ def estimate(
 
     params = get_params(locals().copy(), parameter_file, step_id)
     subparams = get_params(locals().copy(), parameter_file, step_id, 'submit')
+    segparams = get_params(locals().copy(), parameter_file, 'segmentation')
 
     filepaths, blocks = get_blockfiles(image_in, outputdir, params['blocks'])
 
@@ -123,7 +130,11 @@ def estimate(
     outputstem = os.path.join(outputdir, dataset)
     save_steps = False
     args = [images_in, blocksize, blockmargin, axis, seamnumbers, mask_dataset,
-            relabel, maxlabel, in_place, outputstem, save_steps]
+            relabel, maxlabel, in_place,
+            segparams['ids_memb_chan'],
+            segparams['find_peaks'], segparams['peaks_thr'], segparams['peaks_size'],
+            segparams['peaks_dil_footprint'], segparams['compactness'],
+            outputstem, save_steps]
 
     n_seams_yx, seamgrid = get_zip_layout(image_in, blocksize)
 
@@ -211,6 +222,12 @@ def resegment_block_boundaries(
     relabel=False,
     maxlabel='',
     in_place=False,
+    ids_memb_chan='memb/mean_smooth',
+    find_peaks=False,
+    peaks_thr=1.16,
+    peaks_size=[11, 19, 19],
+    peaks_dil_footprint=[3, 7, 7],
+    compactness=0.80,
     outputstem='',
     save_steps=False,
     ):
@@ -264,7 +281,21 @@ def resegment_block_boundaries(
 
         report['axis'] = axis
         report['margin'] = margin
-        maxlabel, report = process_pair(info_ims, ids, margin, axis, maxlabel, n, n_max, report)
+        maxlabel, report = process_pair(
+            info_ims,
+            ids,
+            margin,
+            axis,
+            maxlabel,
+            n,
+            n_max,
+            ids_memb_chan,
+            find_peaks,
+            peaks_thr,
+            peaks_size,
+            peaks_dil_footprint,
+            compactness,
+            report)
         report['j'] += 1
 
         print('maxlabel = {:08d}\n'.format(maxlabel))
@@ -589,8 +620,22 @@ def get_resegmentation_mask(info_ims, ids, axis=2, margin=64, n=2):
     return is_empty, segs, segs_ds, masks, masks_ds, masks_reseg
 
 
-def process_pair(info_ims, ids='segm/labels_memb_fix', margin=64, axis=2,
-                 maxlabel=1, n=2, n_max=4, report=None):
+def process_pair(
+    info_ims,
+    ids='segm/labels_memb_fix',
+    margin=64,
+    axis=2,
+    maxlabel=1,
+    n=2,
+    n_max=4,
+    ids_memb_chan='memb/mean_smooth',
+    find_peaks=False,
+    peaks_thr=1.16,
+    peaks_size=[11, 19, 19],
+    peaks_dil_footprint=[3, 7, 7],
+    compactness=0.80,
+    report=None,
+    ):
     """Resegment the boundaries between pairs/quads of blocks."""
 
     while True:
@@ -618,19 +663,21 @@ def process_pair(info_ims, ids='segm/labels_memb_fix', margin=64, axis=2,
     edts, edts_ds = read_images(info_ims, 'segm/seeds_edt', 'Image',
                                 axis, margin, n, include_margin=False,
                                 concat=True)
-    membs, membs_ds = read_images(info_ims, 'memb/mean_smooth', 'Image',
-                                  axis, margin, n, include_margin=False,
-                                  concat=True)
+    if ids_memb_chan:
+        membs, membs_ds = read_images(info_ims, ids_memb_chan, 'Image',
+                                      axis, margin, n, include_margin=False,
+                                      concat=True)
     peaks, peaks_ds = read_images(info_ims, 'segm/seeds_peaks', 'Mask',
                                   axis, margin, n, include_margin=False,
                                   concat=True)
 
+    if False:  # FIXME
+        csol, csol_ds = read_images(info_ims, 'segm/labels_csol_mask', 'Mask',
+                                    axis, margin, n, include_margin=False,
+                                    concat=True)
 
-    peaks_thr = 1.16
     # FIXME: need to handle double peaks here?
-    find_peaks = False
     if find_peaks:
-        peaks_size=[11, 19, 19]
         from stapl3d.segmentation.segment import find_local_maxima
         new_peaks = find_local_maxima(edts_ds, peaks_size, peaks_thr)
         peaks_ds[mask] = new_peaks[mask]
@@ -640,7 +687,6 @@ def process_pair(info_ims, ids='segm/labels_memb_fix', margin=64, axis=2,
             peaks_dil, peaks_dil_ds = read_images(info_ims, 'segm/seeds_peaks_dil', 'Mask',
                                                   axis, margin, n, include_margin=False,
                                                   concat=True)
-            peaks_dil_footprint=[3, 7, 7]
             from stapl3d.segmentation.segment import create_footprint
             footprint = create_footprint(peaks_dil_footprint)
             from skimage.morphology import binary_dilation
@@ -652,11 +698,19 @@ def process_pair(info_ims, ids='segm/labels_memb_fix', margin=64, axis=2,
     peaks_labeled, n_labels = ndi.label(peaks_ds)
     print('{:10d} new peaks are used'.format(n_labels))
 
-    wsmask = np.logical_and(mask, edts_ds > peaks_thr)
-    ws = watershed(-edts_ds, peaks_labeled, mask=wsmask)
-    compactness = 0.80
-    ws = watershed(membs_ds, ws, mask=mask, compactness=compactness)
-
+    # FIXME: write the segment function with mask option and call it from here
+    if False:
+        wsmask = np.logical_and(mask, edts_ds > peaks_thr)
+        ws = watershed(-edts_ds, peaks_labeled, mask=wsmask)
+        wsmask = np.logical_and(mask, ~csol_ds)
+        cells = watershed(memb_ds, ws, mask=wsmask)
+        if ids_memb_chan:
+            ws = watershed(membs_ds, ws, mask=mask, compactness=compactness)
+    else:
+        wsmask = np.logical_and(mask, edts_ds > peaks_thr)
+        ws = watershed(-edts_ds, peaks_labeled, mask=wsmask)
+        if ids_memb_chan:
+            ws = watershed(membs_ds, ws, mask=mask, compactness=compactness)
 
     ws_ulabels = np.unique(ws)
     ws_max = max(ws_ulabels)
@@ -684,8 +738,12 @@ def process_pair(info_ims, ids='segm/labels_memb_fix', margin=64, axis=2,
     # export_regionprops(seg_path, data_path, bias_path='', csv_path='')
     # write_margin(blocks, blocks_ds, axis, margin, n)  # block boundaries
 
-    c_slcs = {dim: get_cslc(membs_ds, ax) for ax, dim in enumerate('zyx')}
-    report['centreslices']['data'] = c_slcs
+    if ids_memb_chan:
+        c_slcs = {dim: get_cslc(membs_ds, ax) for ax, dim in enumerate('zyx')}
+        report['centreslices']['data'] = c_slcs
+    else:
+        c_slcs = {dim: get_cslc(edts_ds, ax) for ax, dim in enumerate('zyx')}
+        report['centreslices']['data'] = c_slcs
     c_slcs = {dim: get_cslc(ws, ax) for ax, dim in enumerate('zyx')}
     report['centreslices']['reseg'] = c_slcs
     c_slcs = {dim: get_cslc(segs_ds, ax) for ax, dim in enumerate('zyx')}
