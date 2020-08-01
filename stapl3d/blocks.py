@@ -392,7 +392,7 @@ def merge(
     ims_ref_path = get_ims_ref_path(image_in, parameter_file, params['ims_ref_path'])
 
     idss_dicts = [v for k, v in sorted(params.items()) if k.startswith('ids0')]  # TODO: better regex matching
-    idss_select = idss_select or list(range(len(idss_dicts)))
+    idss_select = params['idss_select'] or list(range(len(idss_dicts)))
     idss_dicts = [ids for i, ids in enumerate(idss_dicts) if i in idss_select]
 
     idss, outputnames = [], []
