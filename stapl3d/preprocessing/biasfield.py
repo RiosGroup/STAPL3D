@@ -273,16 +273,21 @@ def calculate_bias_field(im, mask=None,
 
     # run the N4 correction
     corrector = sitk.N4BiasFieldCorrectionImageFilter();
-    corrector.SetDebug(False)
-    #corrector.SetNumberOfThreads(n_threads)  # FIXME: seems to have no effect
+    corrector.SetDebug(True)
+    corrector.SetNumberOfThreads(n_threads)  # FIXME: seems to have no effect
     corrector.SetMaximumNumberOfIterations([n_iter] * n_fitlev)
     corrector.SetNumberOfControlPoints(n_cps)
+    corrector.SetWienerFilterNoise(0.01)
+    corrector.SetConvergenceThreshold(0.001)
+    corrector.SetBiasFieldFullWidthAtHalfMaximum(0.15)
+    corrector.SetNumberOfHistogramBins(200)
+    print(corrector)
     if mask is None:
         dsOut = corrector.Execute(dsImage)
     else:
         dsOut = corrector.Execute(dsImage, dsMask)
 
-    # get the bias field at lowres (3D)
+    # get the bias field at lowres (3D)  # TODO: itkBSplineControlPointImageFilter
     data = np.stack(sitk.GetArrayFromImage(dsImage))
     data /= np.stack(sitk.GetArrayFromImage(dsOut))
     data = np.nan_to_num(data, copy=False).astype('float32')
