@@ -845,7 +845,7 @@ def rename_columns(df, pairs={}, metrics=['mean']):
     return df
 
 
-def get_feature_names(fset_morph='', fset_intens='', metrics=['mean']):
+def get_feature_names(fset_morph='', fset_intens='', metrics=['mean'], d={}):
 
     feat_names = {}
     if fset_morph == 'minimal':
