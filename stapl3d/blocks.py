@@ -372,6 +372,7 @@ def merge(
     blocks=[],
     fullsize=[],
     ims_ref_path='',
+    datatype='',
     ):
     """Average membrane and nuclear channels and write as blocks."""
 
@@ -414,7 +415,7 @@ def merge(
             [0, 0, 0],
             props['shape'][:3],
             ims_ref_path,
-            '',
+            params['datatype'],
             os.path.join(outputdir, outputname),
         )
         for ids, outputname in zip(idss, outputnames)]
