@@ -9,6 +9,8 @@ submit_defaults:
         nodes: 1
         tasks: 1
         conda_env: stapl3d
+        partition: cpu
+        gpus_per_node: RTX6000:1
 
 dirtree:
     datadir:
@@ -458,3 +460,55 @@ features_postproc:
         array: no
         mem: 60G
         wtime: 01:00:00
+
+stardist_train:
+    params:
+        stardir: /hpc/pmc_rios/mkleinnijenhuis/stardist_kidney
+        model_name: stardist
+    submit:
+        array: no
+        mem: 10G
+        wtime: 96:00:00
+        partition: gpu
+        gpus_per_node: RTX6000:1
+        conda_env: tf-gpu
+
+stardist_nblocks:
+    params:
+    submit:
+        array: no
+        mem: 10G
+        wtime: 00:10:00
+        conda_env: tf
+
+stardist_predict:
+    params:
+        stardir: /hpc/pmc_rios/mkleinnijenhuis/stardist_kidney
+        model_name: stardist
+        dapi_postfix: _nucl-dapi_shifted
+        nomi: 0
+        noma: 24645
+    submit:
+        array: stardistblock
+        mem: 110G
+        wtime: 04:00:00
+        tasks: 24
+        conda_env: tf
+
+stardist_gather:
+    params:
+        postfix:
+    submit:
+        array: no
+        mem: 1G
+        wtime: 00:10:00
+        conda_env: tf
+
+stardist_mergeblocks:
+    params:
+    submit:
+        array: no
+        mem: 100G
+        wtime: 24:00:00
+        conda_env: tf
+

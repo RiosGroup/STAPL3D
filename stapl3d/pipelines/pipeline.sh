@@ -86,3 +86,16 @@ submit $( generate_script mergeblocks ) $jid
 ### features
 submit $( generate_script features ) $jid
 submit $( generate_script features_postproc ) $jid
+
+
+###==========================================================================###
+### stardist
+submit $( generate_script stardist_train ) $jid
+# stardist_normalization_range  # NB on bigbig-mem # TODO get histogram from blocks
+submit $( generate_script stardist_nblocks ) $jid
+# wait for it  # FIXME:
+nblocks=$(<$datadir/blocks_stardist/nblocks.txt)
+submit $( generate_script stardist_predict ) $jid
+submit $( generate_script stardist_gather ) $jid
+submit $( generate_script stardist_mergeblocks ) $jid
+

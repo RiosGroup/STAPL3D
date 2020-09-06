@@ -413,6 +413,16 @@ function set_blockstems {
 }
 
 
+function set_blockstems_stardist {
+    unset blockstems
+    blockstems=()
+    for block_id in `seq -f "%05g" 0 ${nblocks}`; do
+        blockstems+=( ${dataset}_block$block_id )
+    done
+    datastems=( "${blockstems[@]}" )
+}
+
+
 function get_coords_upper {
     # Get upper coordinate of the block.
     # Adds the blocksize and margin to lower coordinate,
@@ -541,6 +551,35 @@ function set_images_in {
 
 }
 
+# TODO: make the regex an argument
+function set_images_in_stardist {
+    local filestem="${1}"
+    local ids="${2}"
+    local verbose="${3}"
+    images_in=()
+    for fname in `ls ${filestem}_block?????.h5`; do
+        images_in+=( ${fname}/$ids )
+    done
+    if [ "${verbose}" == '-v' ]
+    then
+        for image_in in "${images_in[@]}"; do
+            echo ${image_in}
+        done
+    fi
+}
+function find_missing_datastems {
+    local datadir=$1
+    local postfix=$2
+    local ext=$3
+    unset missing
+    declare -a missing
+    for datastem in "${datastems[@]}"; do
+        [ -f "$datadir$datastem.$ext" ] ||
+            { missing+=( "$datastem" ); echo $datastem ; }
+    done
+    datastems=( "${missing[@]}" )
+}
+
 
 function set_channels_in {
 
@@ -649,6 +688,20 @@ function mergeblocks_outputpath {
 }
 
 
+function get_blockstem_index {
+    # Locate a block identifier in an array and return it's index.
+
+    local blockstem=$1
+
+    for i in "${!blockstems[@]}"; do
+       if [[ "${blockstems[$i]}" = "${blockstem}" ]]; then
+           echo "${i}";
+       fi
+    done
+
+}
+
+
 ###==========================================================================###
 ### functions for job submission
 ###==========================================================================###
@@ -704,6 +757,9 @@ function sbatch_directives {
     expand_submit_pars "$@"
 
     echo "#SBATCH --job-name=$jobname"
+    echo "#SBATCH --partition=$partition"
+    [[ "$partition" == 'gpu' ]] &&
+        echo "#SBATCH --gpus-per-node=$gpus_per_node"
     echo "#SBATCH --mem=$mem"
     echo "#SBATCH --time=$wtime"
     echo "#SBATCH --nodes=$nodes"
@@ -865,6 +921,17 @@ function idss_parallelization {
 }
 
 
+function stardistblock_parallelization {
+    # Generate directives for parallel blocks.
+    echo ''
+    echo blockd_id=\`printf %05d \$idx\`
+    echo blockdir_stardist="${blockdir}_stardist"
+    echo dataset_preproc="\${dataset}"
+    echo blockstem_stardist="\${blockdir_stardist}/\${dataset_preproc}_\${block_id}"
+    echo ''
+}
+
+
 function _parallelization {
 
     echo ''
@@ -926,6 +993,9 @@ function set_submit_pars {
         'block')
             array_stop="${#blockstems[@]}"
             ;;
+        'stardistblock')
+            array_stop="${nblocks}"
+            ;;
         'zipline')
             array_start="$((start + 1))"
             array_stop="${stop}"
@@ -948,6 +1018,9 @@ function set_submit_pars {
     build_array_range $stage 'simul' '0' '%'
 
     submit_pars+=( $array_range )
+
+    add_submit_par $stage 'partition' 'cpu'
+    add_submit_par $stage 'gpus_per_node' '1'
 
 }
 
@@ -992,6 +1065,8 @@ function expand_submit_pars {
     export mem=$4
     export wtime=$5
     export range=$6
+    export partition=$7
+    export gpus_per_node=$8
 
 }
 
@@ -1835,3 +1910,158 @@ function get_cmd_features_postproc {
         "\${filestem}.yml"
 
 }
+
+
+function get_py_stardist_train {
+
+    echo '#!/usr/bin/env python'
+    echo ''
+    echo 'import sys'
+    echo 'basedir = sys.argv[1]'
+    echo 'run_name = sys.argv[2]'
+    echo ''
+    echo 'from stapl3d.segmentation import stardist_nuclei'
+    echo "stardist_nuclei.stardist_train(basedir, run_name)"
+
+}
+function get_cmd_stardist_train {
+
+    pyfile="${datadir}/${jobname}.py"
+    eval get_py_${stage} > "$pyfile"
+
+    echo python "${pyfile}" \
+        "${stardist_train__params__stardir}" \
+        "${stardist_train__params__model_name}"
+
+}
+
+function get_py_stardist_predict {
+
+    echo '#!/usr/bin/env python'
+    echo ''
+    echo 'import sys'
+    echo 'modeldir = sys.argv[1]'
+    echo 'modelname = sys.argv[2]'
+    echo 'image_in = sys.argv[3]'
+    echo 'idx = int(sys.argv[4])'
+    echo 'nomi = float(sys.argv[5])'
+    echo 'noma = float(sys.argv[6])'
+    echo 'print_nblocks = bool(sys.argv[7])'
+    echo ''
+    echo 'from stapl3d.segmentation import stardist_nuclei'
+    echo "stardist_nuclei.stardist_predict(
+        modeldir,
+        modelname,
+        image_in,
+        idx,
+        normalization=[nomi, noma],
+        print_nblocks=False,
+        )"
+
+}
+function get_cmd_stardist_predict {
+
+    pyfile="${datadir}/${jobname}.py"
+    eval get_py_${stage} > "$pyfile"
+
+    echo python "${pyfile}" \
+        "${stardist_predict__params__stardir}" \
+        "${stardist_predict__params__model_name}" \
+        "\${filestem}${stardist_predict__params__dapi_postfix}.ims" \
+        "\${idx}" \
+        "${stardist_predict__params__nomi}" "${stardist_predict__params__noma}" \
+        "False"
+
+    # echo python "${pyfile}" \
+    #     "${stardist_predict__params__stardir}" \
+    #     "${stardist_predict__params__model_name}" \
+    #     "\${biasfield_stem}${stardist_predict__params__dapi_postfix}.ims" \
+    #     "\${idx}" \
+    #     "${stardist_predict__params__nomi}" "${stardist_predict__params__noma}"
+
+}
+function get_py_stardist_nblocks {
+
+    echo '#!/usr/bin/env python'
+    echo ''
+    echo 'import sys'
+    echo 'modeldir = sys.argv[1]'
+    echo 'modelname = sys.argv[2]'
+    echo 'image_in = sys.argv[3]'
+    echo 'idx = int(sys.argv[4])'
+    echo 'nomi = float(sys.argv[5])'
+    echo 'noma = float(sys.argv[6])'
+    echo 'print_nblocks = bool(sys.argv[7])'
+    echo ''
+    echo 'from stapl3d.segmentation import stardist_nuclei'
+    echo "stardist_nuclei.stardist_predict(
+        modeldir,
+        modelname,
+        image_in,
+        idx,
+        normalization=[nomi, noma],
+        print_nblocks=True,
+        )"
+
+}
+function get_cmd_stardist_nblocks {
+
+    pyfile="${datadir}/${jobname}.py"
+    eval get_py_${stage} > "$pyfile"
+
+    echo python "${pyfile}" \
+        "${stardist_predict__params__stardir}" \
+        "${stardist_predict__params__model_name}" \
+        "\${filestem}${stardist_predict__params__dapi_postfix}.ims" \
+        "\${idx}" \
+        "${stardist_predict__params__nomi}" "${stardist_predict__params__noma}" \
+        "True"
+
+}
+
+
+function get_cmd_stardist_gather {
+
+    local stage="${1}"
+
+    stardistblock_parallelization
+
+    eval postfix="\${${stage}__params__postfix}"
+    echo set_images_in_stardist \
+        "\${blockdir_stardist}/\${dataset_preproc}${stardist_predict__params__dapi_postfix}" \
+        "${stardist__params__segments_ods}${postfix}"
+    echo maxlabelfile="\${blockdir_stardist}/\${dataset_preproc}${stardist_predict__params__dapi_postfix}_maxlabels${postfix}.txt"
+    echo gather_maxlabels "\${maxlabelfile}"
+
+}
+
+
+function get_py_stardist_mergeblocks {
+
+    echo '#!/usr/bin/env python'
+    echo ''
+    echo 'import sys'
+    echo 'blockdir = sys.argv[1]'
+    echo 'image_in_ref = sys.argv[2]'
+    echo ''
+    echo 'from stapl3d.segmentation import stardist_nuclei'
+    echo "stardist_nuclei.stardist_mergeblocks(
+        blockdir,
+        image_in_ref,
+        )"
+
+}
+function get_cmd_stardist_mergeblocks {
+
+    pyfile="${datadir}/${jobname}.py"
+    eval get_py_${stage} > "$pyfile"
+
+    stardistblock_parallelization
+
+    echo python "${pyfile}" \
+        "\${blockdir_stardist}" \
+        "\${filestem}${stardist_predict__params__dapi_postfix}.ims"
+
+}
+
+
