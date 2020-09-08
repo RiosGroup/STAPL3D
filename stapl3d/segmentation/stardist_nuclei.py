@@ -58,14 +58,19 @@ def stardist_train(basedir, modelname='stardist'):
 
     run = runs[modelname]
 
-    X_trn, Y_trn, X_val, Y_val = [], [], [], []
+    td = {}
     for trainset_name in run['trainsets']:
         ts = trainsets[trainset_name]
-        X_t, Y_t, X_v, Y_v, ind_train, ind_val = get_training_data(datadir, **ts, **run)
+        td[trainset_name] = get_training_data(datadir, **ts, **run)
+
+    X_trn, Y_trn, X_val, Y_val, i_trn, i_val = [], [], [], [], [], []
+    for tsname, (X_t, X_v, Y_t, Y_v, i_t, i_v) in td.items():
         X_trn += X_t
-        Y_trn += Y_t
         X_val += X_v
+        Y_trn += Y_t
         Y_val += Y_v
+        i_trn += list(i_t)
+        i_val += list(i_v)
 
     n_channels = 1 if X_trn[0].ndim == 3 else X_trn[0].shape[-1]
 
@@ -167,7 +172,7 @@ def get_training_data(datadir, filestem_train, h5_path_pat, z_range, trainblock_
 
     X_trn, Y_trn, X_val, Y_val, ind_train, ind_val = split_training_data(X, Y, ind_val)
 
-    return X_trn, Y_trn, X_val, Y_val, ind_train, ind_val
+    return X_trn, X_val, Y_trn, Y_val, ind_train, ind_val
 
 
 def split_training_data(X, Y, ind_val=[]):
