@@ -365,6 +365,7 @@ def merge(
     parameter_file='',
     outputdir='',
     n_workers=0,
+    step_id='mergeblocks',
     idss_select=[],
     blocksize=[],
     blockmargin=[],
@@ -373,10 +374,10 @@ def merge(
     fullsize=[],
     ims_ref_path='',
     datatype='',
+    inlayout='',
+    squeeze='',
     ):
     """Average membrane and nuclear channels and write as blocks."""
-
-    step_id = 'mergeblocks'
 
     blockdir = get_outputdir(image_in, parameter_file, '', 'blocks', 'blocks')
     outputdir = get_outputdir(image_in, parameter_file, outputdir, step_id, '')
@@ -384,7 +385,10 @@ def merge(
     params = get_params(locals().copy(), parameter_file, step_id)
     subparams = get_params(locals().copy(), parameter_file, step_id, 'submit')
 
-    blockfiles, blocks = get_blockfiles(image_in, blockdir, params['blocks'])
+    block_postfix = '.h5'
+    if params['ipf']:
+        block_postfix = '{}{}'.format(params['ipf'], block_postfix)
+    blockfiles, blocks = get_blockfiles(image_in, blockdir, params['blocks'], block_postfix)
     blocksize, blockmargin, _ = get_blockinfo(image_in, parameter_file, params)
 
     paths = get_paths(image_in)
@@ -400,7 +404,7 @@ def merge(
     for d in idss_dicts:
         outname = '{}_{}'.format(dataset, d['ids'].replace('/', '-'))
         if d['format'] == 'h5':
-            outname = '{}.h5/{}'.format(outname, d['ids'])
+            outname = '{}{}/{}'.format(outname, block_postfix, d['ids'])
         elif d['format'] == 'ims':
             outname = '{}.ims'.format(outname)
         idss.append(d['ids'])
@@ -412,10 +416,11 @@ def merge(
             blocksize[:3],
             blockmargin[:3],
             [],
-            [0, 0, 0],
             props['shape'][:3],
             ims_ref_path,
             params['datatype'],
+            params['inlayout'],
+            params['squeeze'],
             os.path.join(outputdir, outputname),
         )
         for ids, outputname in zip(idss, outputnames)]
@@ -430,10 +435,11 @@ def mergeblocks(
         blocksize=[],
         blockmargin=[],
         blockrange=[],
-        blockoffset=[0, 0, 0],
         fullsize=[],
         ims_ref_path='',
         datatype='',
+        inlayout='',
+        squeeze='',
         outputpath='',
         ):
     """Merge blocks of data into a single hdf5 file."""
@@ -445,24 +451,31 @@ def mergeblocks(
 
     im = Image(images_in[0], permission='r')
     im.load(mpi.comm, load_data=False)
-    props = im.get_props(squeeze=True)
+    props = im.get_props()
     ndim = im.get_ndim()
+
+    props['axlab'] = inlayout or props['axlab']
+
+    props['shape'] = fullsize  # zyx
+    if ndim == 4:
+        c_idx = props['axlab'].index('c')
+        props['shape'] = list(props['shape']).insert(c_idx, im.ds.shape[c_idx])
+
+    for ax in squeeze:
+        i = props['axlab'].index(ax)
+        del props['chunks'][i]
+        del props['slices'][i]
+        del props['shape'][i]
+        del props['axlab'][i]
 
     props['dtype'] = datatype or props['dtype']
     props['chunks'] = props['chunks'] or None
-
-    # get the size of the outputfile
-    outsize = np.subtract(fullsize, blockoffset)
-
-    if ndim == 4:
-        outsize = list(outsize) + [im.ds.shape[3]]  # TODO: flexible insert
 
     if outputpath.endswith('.ims'):
         shutil.copy2(ims_ref_path, outputpath)
         mo = Image(outputpath)
         mo.load()
     else:
-        props['shape'] = outsize
         mo = LabelImage(outputpath, **props)
         mo.create(comm=mpi.comm)
 
@@ -487,19 +500,19 @@ def mergeblocks(
     mo.close()
 
 
-def set_slices_in_and_out(im, mo, blocksize, margin, fullsize, blockoffset=[0, 0, 0]):
+def set_slices_in_and_out(im, mo, blocksize, margin, fullsize, axlab='zyx'):
 
     comps = im.split_path()
-    _, x, X, y, Y, z, Z = split_filename(comps['file'], blockoffset[:3][::-1])
+    _, x, X, y, Y, z, Z = split_filename(comps['file'])
     (oz, oZ), (iz, iZ) = margins(z, Z, blocksize[0], margin[0], fullsize[0])
     (oy, oY), (iy, iY) = margins(y, Y, blocksize[1], margin[1], fullsize[1])
     (ox, oX), (ix, iX) = margins(x, X, blocksize[2], margin[2], fullsize[2])
-    im.slices[0] = slice(iz, iZ, 1)
-    im.slices[1] = slice(iy, iY, 1)
-    im.slices[2] = slice(ix, iX, 1)
-    mo.slices[0] = slice(oz, oZ, 1)
-    mo.slices[1] = slice(oy, oY, 1)
-    mo.slices[2] = slice(ox, oX, 1)
+    im.slices[im.axlab.index('z')] = slice(iz, iZ)
+    im.slices[im.axlab.index('y')] = slice(iy, iY)
+    im.slices[im.axlab.index('x')] = slice(ix, iX)
+    mo.slices[mo.axlab.index('z')] = slice(oz, oZ)
+    mo.slices[mo.axlab.index('y')] = slice(oy, oY)
+    mo.slices[mo.axlab.index('x')] = slice(ox, oX)
 
 
 def margins(fc, fC, blocksize, margin, fullsize):
@@ -513,10 +526,6 @@ def margins(fc, fC, blocksize, margin, fullsize):
 
     if fC == fullsize:
         bC = bc + blocksize + (fullsize % blocksize)
-#         bC = bc + blocksize + 8 ==>>
-#         failed block 001: /Users/mkleinnijenhuis/PMCdata/Kidney/190909_RL57_FUnGI_16Bit_25x_zstack1-Masked_T001_Z001_C01/blocks_0500/190909_RL57_FUnGI_16Bit_25x_zstack1-Masked_T001_Z001_C01_00000-00564_00436-01024_00000-00150.h5/memb/sum
-#         Can't broadcast (150, 508, 500) -> (150, 524, 500)
-#         WHY 24??? ==>> fullsize is 1024; blocksize is 500; 3x3=9 blocks are created; blocks that fail are 1 3 4 5 7, block sthat succeeed are 0 2 6 8;
 
     else:
         bC = bc + blocksize
