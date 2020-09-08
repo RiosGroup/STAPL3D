@@ -462,10 +462,11 @@ def mergeblocks(
     props['axlab'] = inlayout
     props['elsize'] = elsize or props['elsize']
 
-     if ndim == 4:
-         c_idx = props['axlab'].index('c')
-        fullsize.insert(c_idx, im.ds.shape[c_idx])
-    props['shape'] = fullsize
+    dims = fullsize.copy()
+    if ndim == 4:
+        c_idx = props['axlab'].index('c')
+        dims.insert(c_idx, im.ds.shape[c_idx])
+    props['shape'] = dims
 
     for ax in squeeze:
         props = im.squeeze_props(props, dim=props['axlab'].index(ax))
