@@ -42,7 +42,6 @@ submit $( generate_script ims_aggregate2 ) $jid
 submit $( generate_script splitblocks ) $jid
 submit $( generate_script membrane_enhancement ) $jid
 submit $( generate_script segmentation ) $jid
-
 submit $( generate_script segmentation_postproc ) $jid
 submit $( generate_script segmentation_gather ) $jid
 
@@ -98,4 +97,13 @@ nblocks=$(<$datadir/blocks_stardist/nblocks.txt)
 submit $( generate_script stardist_predict ) $jid
 submit $( generate_script stardist_gather ) $jid
 submit $( generate_script stardist_mergeblocks ) $jid
+
+
+###==========================================================================###
+### plantseg
+submit $( generate_script unet_train ) $jid
+# submit $( generate_script unet_predict ) $jid
+# copy model to ~/.plantseg_models/
+submit $( generate_script plantseg_predict ) $jid
+submit $( generate_script mergeblocks ) $jid
 

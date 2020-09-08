@@ -1,0 +1,30 @@
+model_path: "UNETDIR/models/MODELNAME/best_checkpoint.pytorch"
+model:
+  name: UNet3D
+  in_channels: 1
+  out_channels: 1
+  layer_order: gcr
+  f_maps: 32
+  num_groups: 8
+  final_sigmoid: true
+  is_segmentation: true
+predictor:
+  name: 'StandardPredictor'
+loaders:
+  batch_size: 1
+  mirror_padding: [16, 32, 32]
+  raw_internal_path: IDS_MEMBRANE
+  num_workers: 8
+  output_dir: "PATH_TO_THE_TEST_SET/predictions"
+  test:
+    file_paths:
+      - "PATH_TO_THE_TEST_SET"
+    slice_builder:
+      name: SliceBuilder
+      patch_shape: [64, 128, 128]
+      stride_shape: [32, 100, 100]
+    transformer:
+        raw:
+          - name: Standardize
+          - name: ToTensor
+            expand_dims: true

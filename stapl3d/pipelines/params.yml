@@ -423,10 +423,20 @@ mergeblocks:
             ids: memb/mean
             format: ims
             postfix:
+        ids06:
+            ids: memb/3dunet
+            format: h5
+            postfix:
+            elsize:
+                - 1.2048
+                - 0.3321
+                - 0.3321
+            inlayout: czyx
+            squeeze: c
     submit:
         array: idss
-        mem: 20G
-        wtime: 01:00:00
+        mem: 60G
+        wtime: 05:00:00
 
 features:
     params:
@@ -511,4 +521,41 @@ stardist_mergeblocks:
         mem: 100G
         wtime: 24:00:00
         conda_env: tf
+
+unet_train:
+    params:
+        unetdir: /hpc/pmc_rios/mkleinnijenhuis/plant-seg_kidney
+        modelname: kidney_confocal_3d_unet
+    submit:
+        conda_env: 3dunet
+        partition: gpu
+        tasks: 8
+        gpus_per_node: RTX6000:4
+        wtime: 96:00:00
+
+unet_predict:
+    params:
+        unetdir: /hpc/pmc_rios/mkleinnijenhuis/plant-seg_kidney
+        modelname: kidney_confocal_3d_unet
+        ids_membrane: memb/mean
+    submit:
+        conda_env: 3dunet
+        partition: gpu
+        tasks: 8
+        gpus_per_node: RTX6000:4
+        wtime: 96:00:00
+
+plantseg_predict:
+    params:
+        unetdir: /hpc/pmc_rios/mkleinnijenhuis/plant-seg_kidney
+        modelname: kidney_confocal_3d_unet
+        ps_blockdir: blocks_ps
+    submit:
+        array: block
+        tasks: 1
+        conda_env: plant-seg
+        partition: gpu
+        gpus_per_node: RTX6000:1
+        mem: 20G
+        wtime: 02:00:00
 

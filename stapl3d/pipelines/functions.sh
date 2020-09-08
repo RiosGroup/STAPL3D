@@ -1839,6 +1839,7 @@ function get_py_mergeblocks {
         image_in,
         parameter_file,
         idss_select=[idx],
+        step_id='${stage}',
         )"
 
 }
@@ -2061,6 +2062,88 @@ function get_cmd_stardist_mergeblocks {
     echo python "${pyfile}" \
         "\${blockdir_stardist}" \
         "\${filestem}${stardist_predict__params__dapi_postfix}.ims"
+
+}
+
+
+function get_cmd_unet_train {
+
+    # copy config file with replacements
+    sed "s?UNETDIR?$unet_train__params__unetdir?;\
+         s?MODELNAME?$unet_train__params__modelname?g" \
+         "${STAPL3D}/pipelines/unet_train.yml" \
+         > "${datadir}/${dataset}_unet_train.yml"
+
+    echo train3dunet --config "${datadir}/${dataset}_unet_train.yml"
+
+}
+
+
+function get_cmd_unet_predict {
+    # FIXME: kidney model gives error on load via predict3dunet => needs DataParallel wrapping
+
+    # copy config file with replacements
+    sed "s?UNETDIR?$unet_predict__params__unetdir?;\
+         s?MODELNAME?$unet_predict__params__modelname?;\
+         s?IDS_MEMBRANE?$unet_predict__params__ids_membrane?;\
+         s?PATH_TO_THE_TEST_SET?${blockdir}?g" \
+         "${STAPL3D}/pipelines/unet_predict.yml" \
+         > "${datadir}/${dataset}_unet_predict.yml"
+
+    echo predict3dunet --config "${datadir}/${dataset}_unet_predict.yml"
+
+}
+
+function get_py_plantseg_predict {
+    ### stapl3d-blocks to plantseg-input
+
+    echo '#!/usr/bin/env python'
+    echo ''
+    echo 'import sys'
+    echo 'filepath_in = sys.argv[1]'
+    echo 'filepath_out = sys.argv[2]'
+    echo 'dset_in = sys.argv[3]'
+    echo 'dset_out = sys.argv[4]'
+    echo ''
+    echo 'import os'
+    echo 'import h5py'
+    echo "f = h5py.File(filepath_out, 'r+')"
+    echo "if filepath_in == filepath_out:"
+    echo "    f[dset_out] = f[dset_in]"
+    echo "else:"
+    echo "    try:"
+    echo "        del f[dset_out]"
+    echo "    except KeyError:"
+    echo "        pass"
+    echo "    f[dset_out] = h5py.ExternalLink(filepath_in, dset_in)"
+    echo "f.close()"
+
+}
+function prep_plantseg_predict {
+
+    local blocks_ps="$1"
+
+    mkdir -p "${datadir}/${blocks_ps}"
+    for filepath in `ls "${blockdir}/*.h5"`; do
+        filename=`basename "${filepath}"`
+        mkdir -p "${datadir}/${blocks_ps}/${filename%.h5}"
+        ln -s "${blockdir}/${filename}" "${datadir}/${blocks_ps}/${filename%.h5}/${filename}"
+    done
+
+}
+function get_cmd_plantseg_predict {
+
+    echo blockstem=\${blockdir}/\${dataset}_\${block_id}  # for HFK16w
+    pyfile="${datadir}/${jobname}.py"
+    eval get_py_${stage} > "$pyfile"
+    echo python "${pyfile}" "\${blockstem}.h5" "\${blockstem}.h5" 'raw' 'memb/mean'
+    echo prep_plantseg_predict "${plantseg_predict__params__ps_blockdir}"
+    echo ""
+    echo ps_path="\${datadir}/${plantseg_predict__params__ps_blockdir}/\${dataset}_\${block_id}"
+    echo sed "s?BLOCKS_PLANTSEG?\${ps_path}?;s?MODELNAME?$plantseg_predict__params__modelname?;s?DIM_Z?106?g" "\${STAPL3D}/pipelines/plantseg_config.yml" \> "\${ps_path}/\${dataset}_\${block_id}_plantseg.yml"
+    echo plantseg --config "\${ps_path}/\${dataset}_\${block_id}_plantseg.yml"
+    echo ""
+    echo python "${pyfile}" "\${ps_path}/${plantseg_predict__params__modelname}/\${dataset}_\${block_id}_predictions.h5" "\${blockstem}.h5" 'predictions' 'memb/3dunet'
 
 }
 

@@ -1,0 +1,47 @@
+path: BLOCKS_PLANTSEG
+
+preprocessing:
+  state: False
+  save_directory: "PreProcessing"
+  factor: [1.0, 1.0, 1.0]
+  order: 2
+  filter:
+    state: True
+    type: median
+    param: 1.0
+
+cnn_prediction:
+  state: True
+  model_name: MODELNAME
+  device: "cuda"
+  mirror_padding: [16, 32, 32]
+  num_workers: 2
+  patch: [DIM_Z, 256, 256]
+  stride: [32, 220, 220]
+  version: best
+  model_update: False
+
+cnn_postprocessing:
+  state: False
+  tiff: False
+  factor: [1, 1, 1]
+  order: 2
+
+segmentation:
+  state: False
+  name: "MultiCut"
+  beta: 0.5
+  save_directory: "MultiCut"
+  run_ws: True
+  ws_2D: False
+  ws_threshold: 0.5
+  ws_minsize: 50
+  ws_sigma: 2.0
+  ws_w_sigma: 0
+  post_minsize: 50
+
+segmentation_postprocessing:
+  state: False
+  tiff: False
+  factor: [1, 1, 1]
+  order: 0

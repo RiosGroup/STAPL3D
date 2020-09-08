@@ -374,6 +374,8 @@ def merge(
     fullsize=[],
     ims_ref_path='',
     datatype='',
+    ipf='',
+    elsize=[],
     inlayout='',
     squeeze='',
     ):
@@ -419,6 +421,7 @@ def merge(
             props['shape'][:3],
             ims_ref_path,
             params['datatype'],
+            params['elsize'],
             params['inlayout'],
             params['squeeze'],
             os.path.join(outputdir, outputname),
@@ -438,6 +441,7 @@ def mergeblocks(
         fullsize=[],
         ims_ref_path='',
         datatype='',
+        elsize=[],
         inlayout='',
         squeeze='',
         outputpath='',
@@ -454,19 +458,17 @@ def mergeblocks(
     props = im.get_props()
     ndim = im.get_ndim()
 
-    props['axlab'] = inlayout or props['axlab']
+    inlayout = inlayout or props['axlab']
+    props['axlab'] = inlayout
+    props['elsize'] = elsize or props['elsize']
 
-    props['shape'] = fullsize  # zyx
-    if ndim == 4:
-        c_idx = props['axlab'].index('c')
-        props['shape'] = list(props['shape']).insert(c_idx, im.ds.shape[c_idx])
+     if ndim == 4:
+         c_idx = props['axlab'].index('c')
+        fullsize.insert(c_idx, im.ds.shape[c_idx])
+    props['shape'] = fullsize
 
     for ax in squeeze:
-        i = props['axlab'].index(ax)
-        del props['chunks'][i]
-        del props['slices'][i]
-        del props['shape'][i]
-        del props['axlab'][i]
+        props = im.squeeze_props(props, dim=props['axlab'].index(ax))
 
     props['dtype'] = datatype or props['dtype']
     props['chunks'] = props['chunks'] or None
@@ -489,7 +491,7 @@ def mergeblocks(
 
         im = Image(block['path'], permission='r')
         im.load(mpi.comm, load_data=False)
-        set_slices_in_and_out(im, mo, blocksize, blockmargin, fullsize)
+        set_slices_in_and_out(im, mo, blocksize, blockmargin, fullsize, inlayout)
         data = im.slice_dataset()
         mo.write(data)
         im.close()
@@ -507,9 +509,9 @@ def set_slices_in_and_out(im, mo, blocksize, margin, fullsize, axlab='zyx'):
     (oz, oZ), (iz, iZ) = margins(z, Z, blocksize[0], margin[0], fullsize[0])
     (oy, oY), (iy, iY) = margins(y, Y, blocksize[1], margin[1], fullsize[1])
     (ox, oX), (ix, iX) = margins(x, X, blocksize[2], margin[2], fullsize[2])
-    im.slices[im.axlab.index('z')] = slice(iz, iZ)
-    im.slices[im.axlab.index('y')] = slice(iy, iY)
-    im.slices[im.axlab.index('x')] = slice(ix, iX)
+    im.slices[axlab.index('z')] = slice(iz, iZ)
+    im.slices[axlab.index('y')] = slice(iy, iY)
+    im.slices[axlab.index('x')] = slice(ix, iX)
     mo.slices[mo.axlab.index('z')] = slice(oz, oZ)
     mo.slices[mo.axlab.index('y')] = slice(oy, oY)
     mo.slices[mo.axlab.index('x')] = slice(ox, oX)
