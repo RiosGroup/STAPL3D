@@ -2141,7 +2141,7 @@ function get_cmd_plantseg_predict {
     echo prep_plantseg_predict "${plantseg_predict__params__ps_blockdir}"
     echo ""
     echo ps_path="\${datadir}/${plantseg_predict__params__ps_blockdir}/\${dataset}_\${block_id}"
-    echo sed "'s?BLOCKS_PLANTSEG?\${ps_path}?;s?MODELNAME?$plantseg_predict__params__modelname?;s?DIM_Z?106?g'" "\${STAPL3D}/pipelines/plantseg_config.yml" \> "\${ps_path}/\${dataset}_\${block_id}_plantseg.yml"
+    echo sed "\"s?BLOCKS_PLANTSEG?\${ps_path}?;s?MODELNAME?$plantseg_predict__params__modelname?;s?DIM_Z?106?g\"" "\${STAPL3D}/pipelines/plantseg_config.yml" \> "\${ps_path}/\${dataset}_\${block_id}_plantseg.yml"
     echo plantseg --config "\${ps_path}/\${dataset}_\${block_id}_plantseg.yml"
     echo ""
     echo python "${pyfile}" "\${ps_path}/${plantseg_predict__params__modelname}/\${dataset}_\${block_id}_predictions.h5" "\${blockstem}.h5" 'predictions' 'memb/3dunet'
