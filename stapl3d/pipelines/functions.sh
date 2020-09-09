@@ -2108,23 +2108,24 @@ function get_py_plantseg_predict {
     echo 'import os'
     echo 'import h5py'
     echo "f = h5py.File(filepath_out, 'r+')"
+    echo "try:"
+    echo "    del f[dset_out]"
+    echo "except KeyError:"
+    echo "    pass"
     echo "if filepath_in == filepath_out:"
     echo "    f[dset_out] = f[dset_in]"
     echo "else:"
-    echo "    try:"
-    echo "        del f[dset_out]"
-    echo "    except KeyError:"
-    echo "        pass"
     echo "    f[dset_out] = h5py.ExternalLink(filepath_in, dset_in)"
     echo "f.close()"
 
 }
 function prep_plantseg_predict {
+    # link plantseg dirtree to blockstems
 
     local blocks_ps="$1"
 
     mkdir -p "${datadir}/${blocks_ps}"
-    for filepath in `ls "${blockdir}/*.h5"`; do
+    for filepath in `ls ${blockdir}/*.h5`; do
         filename=`basename "${filepath}"`
         mkdir -p "${datadir}/${blocks_ps}/${filename%.h5}"
         ln -s "${blockdir}/${filename}" "${datadir}/${blocks_ps}/${filename%.h5}/${filename}"
