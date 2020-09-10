@@ -271,8 +271,12 @@ def stardist_predict(basedir, modelname, image_in, idx, normalization=[],
                      ids_label='labels', outputstem='', print_nblocks=False):
 
     # Load model
-    modeldir = os.path.join(basedir, 'models')
-    model = StarDist3D(None, name=modelname, basedir=modeldir)
+    if modelname in ['3D_demo']:
+        model = StarDist3D.from_pretrained(modelname)
+        #model.optimize_thresholds(X_val, Y_val)
+    else:
+        modeldir = os.path.join(basedir, 'models')
+        model = StarDist3D(None, name=modelname, basedir=modeldir)
 
     # Load data
     im = Image(image_in, permission='r')
