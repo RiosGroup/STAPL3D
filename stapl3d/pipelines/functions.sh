@@ -1662,7 +1662,7 @@ function get_cmd_relabel {
     echo python "${pyfile}" \
         "\${blockstem}.h5/segm/${segmentation__params__segments_ods}" \
         "\${idx}" \
-        "${blockdir}/${dataset_preproc}_maxlabels.txt" \
+        "${blockdir}/${dataset_preproc}_maxlabels_${segmentation__params__segments_ods}.txt" \
         "${relabel__params__postfix}"
 
 }
@@ -1707,8 +1707,10 @@ function get_py_zipping {
     echo 'axis = int(sys.argv[7])'
     echo 'seamnumbers = [int(sys.argv[8]), int(sys.argv[9]), int(sys.argv[10])]'
     echo 'maxlabelfile = sys.argv[11]'
-    echo 'outputstem = sys.argv[12]'
-    echo 'images_in = sys.argv[13:]'
+    echo 'ids_nucl = sys.argv[12]'
+    echo 'ids_memb_chan = sys.argv[13]'
+    echo 'outputstem = sys.argv[14]'
+    echo 'images_in = sys.argv[15:]'
     echo ''
     echo 'from stapl3d.segmentation.zipping import resegment_block_boundaries'
     echo "resegment_block_boundaries(
@@ -1721,6 +1723,8 @@ function get_py_zipping {
         relabel=False,
         maxlabel=maxlabelfile,
         in_place=True,
+        ids_nucl=ids_nucl,
+        ids_memb_chan=ids_memb_chan,
         outputstem=outputstem,
         save_steps=False,
         )"
@@ -1743,7 +1747,9 @@ function get_cmd_zipping {
         "0" "${bm}" "${bm}" \
         "${axis}" \
         "\${seamnumbers}" \
-        "${blockdir}/${dataset_preproc}_maxlabels${zipping__params__postfix}.txt" \
+        "${blockdir}/${dataset_preproc}_maxlabels_${segmentation__params__segments_ods}${zipping__params__postfix}.txt" \
+        "${zipping__params__ids_nucl}" \
+        "${zipping__params__ids_memb_chan}" \
         "${blockdir}/${dataset_preproc}" \
         "\${images_in[@]}"
 
@@ -1789,7 +1795,7 @@ function get_cmd_gather {
     echo set_images_in \
         "${blockdir}/${dataset_preproc}" \
         "segm/${segmentation__params__segments_ods}${postfix}"
-    echo maxlabelfile="${blockdir}/${dataset_preproc}_maxlabels${postfix}.txt"
+    echo maxlabelfile="${blockdir}/${dataset_preproc}_maxlabels_${segmentation__params__segments_ods}${postfix}.txt"
     echo gather_maxlabels "\${maxlabelfile}"
 
 }

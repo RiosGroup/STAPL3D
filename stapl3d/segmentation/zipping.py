@@ -222,6 +222,7 @@ def resegment_block_boundaries(
     relabel=False,
     maxlabel='',
     in_place=False,
+    ids_nucl='',
     ids_memb_chan='memb/mean_smooth',
     find_peaks=False,
     peaks_thr=1.16,
@@ -289,6 +290,7 @@ def resegment_block_boundaries(
             maxlabel,
             n,
             n_max,
+            ids_nucl,
             ids_memb_chan,
             find_peaks,
             peaks_thr,
@@ -628,6 +630,7 @@ def process_pair(
     maxlabel=1,
     n=2,
     n_max=4,
+    ids_nucl='',
     ids_memb_chan='memb/mean_smooth',
     find_peaks=False,
     peaks_thr=1.16,
@@ -660,16 +663,21 @@ def process_pair(
     c_slcs = {dim: get_cslc(segs_ds, ax) for ax, dim in enumerate('zyx')}
     report['centreslices']['orig'] = c_slcs
 
-    edts, edts_ds = read_images(info_ims, 'segm/seeds_edt', 'Image',
-                                axis, margin, n, include_margin=False,
-                                concat=True)
+    if ids_nucl:
+        seeds, seeds_ds = read_images(info_ims, ids_nucl, 'Image',
+                                      axis, margin, n, include_margin=False,
+                                      concat=True)
+    else:
+        edts, edts_ds = read_images(info_ims, 'segm/seeds_edt', 'Image',
+                                    axis, margin, n, include_margin=False,
+                                    concat=True)
+        peaks, peaks_ds = read_images(info_ims, 'segm/seeds_peaks', 'Mask',
+                                      axis, margin, n, include_margin=False,
+                                      concat=True)
     if ids_memb_chan:
         membs, membs_ds = read_images(info_ims, ids_memb_chan, 'Image',
                                       axis, margin, n, include_margin=False,
                                       concat=True)
-    peaks, peaks_ds = read_images(info_ims, 'segm/seeds_peaks', 'Mask',
-                                  axis, margin, n, include_margin=False,
-                                  concat=True)
 
     if False:  # FIXME
         csol, csol_ds = read_images(info_ims, 'segm/labels_csol_mask', 'Mask',
@@ -694,9 +702,13 @@ def process_pair(
             peaks_dil_ds[mask] = new_peaks_dil[mask]
             write_margin(peaks_dil, peaks_dil_ds, axis, margin, n)
 
-    peaks_ds[~mask] = 0
-    peaks_labeled, n_labels = ndi.label(peaks_ds)
-    print('{:10d} new peaks are used'.format(n_labels))
+    if ids_nucl:
+        seeds_ds[~mask] = 0
+        print('{:10d} new peaks are used'.format(np.unique(seeds_ds)))
+    else:
+        peaks_ds[~mask] = 0
+        seeds_ds, n_labels = ndi.label(peaks_ds)
+        print('{:10d} new peaks are used'.format(n_labels))
 
     # FIXME: write the segment function with mask option and call it from here
     if False:
@@ -707,8 +719,11 @@ def process_pair(
         if ids_memb_chan:
             ws = watershed(membs_ds, ws, mask=mask, compactness=compactness)
     else:
-        wsmask = np.logical_and(mask, edts_ds > peaks_thr)
-        ws = watershed(-edts_ds, peaks_labeled, mask=wsmask)
+        if ids_nucl:
+            ws = seeds_ds
+        else:
+            wsmask = np.logical_and(mask, edts_ds > peaks_thr)
+            ws = watershed(-edts_ds, peaks_labeled, mask=wsmask)
         if ids_memb_chan:
             ws = watershed(membs_ds, ws, mask=mask, compactness=compactness)
 
