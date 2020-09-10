@@ -335,7 +335,7 @@ def stardist_predict(basedir, modelname, image_in, idx, normalization=[],
     im.close()
 
 
-def stardist_mergeblocks(blockdir, image_in_ref, ids_label='labels', postfix='_stardist'):
+def stardist_mergeblocks(blockdir, image_in_ref, ids_label='labels', postfix='_stardist', dtype='int32'):
 
     blockpaths = glob(os.path.join(blockdir, '*.pickle'))
     blockpaths.sort()
@@ -352,7 +352,7 @@ def stardist_mergeblocks(blockdir, image_in_ref, ids_label='labels', postfix='_s
     im = Image(image_in_ref, permission='r')
     im.load(load_data=False)
     props = im.squeeze_props(im.squeeze_props(dim=4), dim=3)
-    props['dtype'] = 'uint32'
+    props['dtype'] = dtype
     im.close()
 
     outputstem = os.path.join(datadir, '{}{}'.format(filestem, postfix))
@@ -372,7 +372,7 @@ def stardist_mergeblocks(blockdir, image_in_ref, ids_label='labels', postfix='_s
         blockpath = os.path.join(datadir, '{}.h5/{}'.format(blockstem, ids_label))
         im = Image(blockpath, permission='r')
         im.load()
-        labels = im.slice_dataset()
+        labels = im.slice_dataset().astype(dtype)
         im.close()
         # relabel labels
         maxlabel = np.sum(maxlabels[:block.id])
