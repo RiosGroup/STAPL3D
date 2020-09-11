@@ -1902,7 +1902,7 @@ class LabelImage(Image):
         return fw
 
     def forward_map(self, fw=[], labelsets={}, delete_labelsets=False,
-                    from_empty=False):
+                    from_empty=False, ds=[]):
         """Map all labels in value to key."""
 
         fw = fw or self.get_fwmap(empty=from_empty)
@@ -1916,7 +1916,10 @@ class LabelImage(Image):
                     fw[l] = lsk
 
         fw[0] = 0
-        fwmapped = np.array(fw)[self.ds]
+        if isinstance(ds, np.ndarray):
+            fwmapped = np.array(fw)[ds]
+        else:
+            fwmapped = np.array(fw)[self.ds]
 
         return fwmapped
 

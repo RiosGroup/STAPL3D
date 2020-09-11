@@ -10,10 +10,12 @@ import argparse
 import os
 import numpy as np
 import pandas as pd
+from random import shuffle
+
 from stapl3d import (
     Image,
     LabelImage,
-    get_image,
+    wmeMPI,
     )
 from stapl3d.segmentation.segment import gen_outpath, write_output
 
@@ -75,6 +77,13 @@ def main(argv):
         help='imaris channel to write the key to [-1 appends a new channel]',
         )
     parser.add_argument(
+        '--blocksize',
+        nargs=3,
+        type=int,
+        default=[],
+        help='imaris channel to write the key to [-1 appends a new channel]',
+        )
+    parser.add_argument(
         '--outpath',
         help='path to output file',
         )
@@ -92,6 +101,7 @@ def main(argv):
         args.scale_uint16,
         args.replace_nan,
         args.channel,
+        args.blocksize,
         args.outpath,
         )
 
@@ -107,6 +117,7 @@ def csv_to_im(
     scale_uint16=False,
     replace_nan=False,
     channel=-1,
+    blocksize=[],
     outpath='',
     ):
     """Write segment backprojection."""
@@ -116,6 +127,10 @@ def csv_to_im(
     else:
         labels = LabelImage(image_in)
         labels.load(load_data=False)
+
+    mpi = wmeMPI(usempi=False)
+    mpi.set_blocks(labels, blocksize or labels.dims)
+    mpi.scatter_series()
 
     if not maxlabel:
         labels.set_maxlabel()
@@ -155,9 +170,6 @@ def csv_to_im(
     elif scale_uint16:  # for e.g. pseudotime / FA / etc / any [0, 1] vars
         fw *= 65535
 
-
-    out = labels.forward_map(list(fw))
-
     if outpath.endswith('.ims'):
         mo = Image(outpath, permission='r+')
         mo.load(load_data=False)
@@ -167,22 +179,84 @@ def csv_to_im(
             mo.create()
             ch = mo.dims[3] - 1
         mo.slices[3] = slice(ch, ch + 1, 1)
-        mo.write(out.astype(mo.dtype))  # FIXME: >65535 wraps around
         cpath = 'DataSetInfo/Channel {}'.format(ch)
         name = name or key
         mo.file[cpath].attrs['Name'] = np.array([c for c in name], dtype='|S1')
-        mo.close()
-    elif outpath.endswith('.nii.gz'):
-        props = labels.get_props()
-        if not labels.path.endswith('.nii.gz'):
-            props = transpose_props(props, outlayout='xyz')
-            out = out.transpose()
-        mo = write_output(outpath, out, props)
-    else:
-        outpath = outpath or gen_outpath(labels, key)
-        mo = write_output(outpath, out, labels.get_props())
+
+    fw = list(fw)
+    for i in mpi.series:
+        print('processing block {:03d} with id: {}'.format(i, mpi.blocks[i]['id']))
+        block = mpi.blocks[i]
+        labels.slices = block['slices']
+        data = labels.slice_dataset()
+        out = labels.forward_map(fw, ds=data)
+
+        if outpath.endswith('.ims'):
+            mo.slices[:3] = block['slices']
+            mo.write(out.astype(mo.dtype))
+        elif outpath.endswith('.nii.gz'):
+            props = labels.get_props()
+            if not labels.path.endswith('.nii.gz'):
+                props = transpose_props(props, outlayout='xyz')
+                out = out.transpose()
+            mo = write_output(outpath, out, props)
+        else:
+            outpath = outpath or gen_outpath(labels, key)
+            mo = write_output(outpath, out, labels.get_props())
+
+    mo.close()
 
     return mo
+
+
+def ulabelset(
+    image_in,
+    blocksize=[],
+    filepath='',
+    ):
+    """Find the set of unique labels."""
+
+    if isinstance(image_in, Image):
+        labels = image_in
+    else:
+        labels = LabelImage(image_in)
+        labels.load(load_data=False)
+
+    mpi = wmeMPI(usempi=False)
+    mpi.set_blocks(labels, blocksize or labels.dims)
+    mpi.scatter_series()
+
+    ulabels = set([])
+    for i in mpi.series:
+        print('processing block {:03d} with id: {}'.format(i, mpi.blocks[i]['id']))
+        block = mpi.blocks[i]
+        labels.slices = block['slices']
+        data = labels.slice_dataset()
+        ulabels |= set(np.unique(data))
+
+    if filepath:
+        np.save(filepath, ulabels)
+
+    return ulabels
+
+
+def shuffle_labels(ulabels, wrap=65535, filepath=''):
+    """Shuffle a labelset."""
+
+    relabeled_seq = np.array([l for l in range(1, len(ulabels) + 1)])
+
+    relabeled_shuffled = np.copy(relabeled_seq)
+    shuffle(relabeled_shuffled)
+
+    relabeled_wrapped = relabeled_shuffled % wrap
+
+    if filepath:
+        keys = ['label', 'relabel_seq', 'relabel_shuffled', 'relabel_wrapped']
+        vols = [ulabels, relabeled_seq, relabeled_shuffled, relabeled_wrapped]
+        df = pd.DataFrame(np.array(vols).transpose(), columns=keys)
+        df.to_csv(filepath)
+
+    return relabeled_seq, relabeled_shuffled, relabeled_wrapped
 
 
 def transpose_props(props, outlayout=''):
