@@ -1140,7 +1140,7 @@ function get_cmd_shading {
 
     echo python "${pyfile}" \
         "\${filestem}.${shading__file_format}" \
-        "\${filestem}.yml" \
+        "${parfile}" \
         "\${ch_idx}" "\${pl_idx}"
 
 }
@@ -1170,7 +1170,7 @@ function get_cmd_shading_postproc {
 
     echo python "${pyfile}" \
         "\${filestem}.${shading__file_format}" \
-        "\${filestem}.yml" \
+        "${parfile}" \
         "\${idx}"
 
 }
@@ -1201,7 +1201,7 @@ function get_cmd_shading_apply {
 
     echo python "${pyfile}" \
         "\${filestem}.${shading__file_format}" \
-        "\${filestem}.yml" \
+        "${parfile}" \
         "\${idx}"
 
 }
@@ -1310,7 +1310,7 @@ function get_cmd_mask {
 
     echo python "${pyfile}" \
         "\${stitching_stem}.ims" \
-        "\${filestem}.yml"
+        "${parfile}"
 
 }
 
@@ -1339,7 +1339,7 @@ function get_cmd_splitchannels {
 
     echo python "${pyfile}" \
         "\${stitching_stem}.ims" \
-        "\${filestem}.yml" \
+        "${parfile}" \
         "\${idx}"
 
 }
@@ -1397,7 +1397,7 @@ function get_cmd_biasfield {
 
     echo python "${pyfile}" \
         "\${stitching_stem}.ims" \
-        "\${filestem}.yml" \
+        "${parfile}" \
         "\${idx}"
 
 }
@@ -1471,7 +1471,7 @@ function get_cmd_biasfield_apply {
 
     echo python "${pyfile}" \
         "\${stitching_stem}.ims" \
-        "\${filestem}.yml" \
+        "${parfile}" \
         "\${idx}"
 
 }
@@ -1540,7 +1540,7 @@ function get_cmd_splitblocks {
 
     echo python "${pyfile}" \
         "\${biasfield_stem}.ims" \
-        "\${filestem}.yml" \
+        "${parfile}" \
         "\${idx}"
 
 }
@@ -1569,7 +1569,7 @@ function get_cmd_membrane_enhancement {
 
     echo python "${pyfile}" \
         "\${biasfield_stem}.ims" \
-        "\${filestem}.yml" \
+        "${parfile}" \
         "\${idx}"
 
     echo ''
@@ -1602,7 +1602,7 @@ function get_cmd_segmentation {
 
     echo python "${pyfile}" \
         "\${biasfield_stem}.ims" \
-        "\${filestem}.yml" \
+        "${parfile}" \
         "\${idx}"
 
 }
@@ -1825,7 +1825,7 @@ function get_cmd_subsegment {
 
     echo python "${pyfile}" \
         "\${biasfield_stem}.ims" \
-        "\${filestem}.yml" \
+        "${parfile}" \
         "\${idx}"
 
 }
@@ -1844,8 +1844,8 @@ function get_py_mergeblocks {
     echo "blocks.merge(
         image_in,
         parameter_file,
-        idss_select=[idx],
         step_id='${stage}',
+        idss_select=[idx],
         )"
 
 }
@@ -1856,7 +1856,7 @@ function get_cmd_mergeblocks {
 
     echo python "${pyfile}" \
         "\${biasfield_stem}.ims" \
-        "\${filestem}.yml" \
+        "${parfile}" \
         "\${idx}"
 
 }
@@ -1886,7 +1886,7 @@ function get_cmd_features {
 
     echo python "${pyfile}" \
         "\${biasfield_stem}.ims" \
-        "\${filestem}.yml" \
+        "${parfile}" \
         "\${idx}"
 
 }
@@ -1914,7 +1914,7 @@ function get_cmd_features_postproc {
 
     echo python "${pyfile}" \
         "\${biasfield_stem}.ims" \
-        "\${filestem}.yml"
+        "${parfile}"
 
 }
 
