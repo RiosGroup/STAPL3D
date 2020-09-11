@@ -13,9 +13,9 @@ function load_dataset {
     set_datadir "${projectdir}" "${dataset}"
 
     echo ""
-    echo " --- project directory is '${projectdir}'"
-    echo " --- processing dataset '${dataset}'"
-    echo " --- data directory is '${datadir}'"
+    echo " ### project directory is '${projectdir}'"
+    echo " ### processing dataset '${dataset}'"
+    echo " ### data directory is '${datadir}'"
     echo ""
 
 }
@@ -39,7 +39,7 @@ function init_dataset {
     cp "${STAPL3D}/pipelines/params.yml" "${datadir}/${dataset}.yml"
 
     echo ""
-    echo " --- copied default parameter file to ${datadir}/${dataset}.yml"
+    echo " ### copied default parameter file to ${datadir}/${dataset}.yml"
     echo ""
 
     # set_ZYXCT_ims -v "${datadir}/${dataset}.ims"
@@ -59,7 +59,7 @@ function load_parameters {
 
     [[ "${verbose}" == '-v' ]] && {
         echo ""
-        echo " --- parameters imported from parameter file:"
+        echo " ### parameters imported from parameter file:"
         echo ""
         parse_yaml "${parfile}"
         echo "" ; }
@@ -75,13 +75,13 @@ function load_parameters {
     if ! [ -z "$M" ]
     then
         echo ""
-        echo " --- tiled dimensions are M * Z-tY-tX-C-T='${M} * ${Z} ${tY} ${tX} ${C} ${T}'"
-        echo " --- parallelization: ${M} Z-stacks"
+        echo " ### tiled dimensions are M * Z-tY-tX-C-T='${M} * ${Z} ${tY} ${tX} ${C} ${T}'"
+        echo " ### parallelization: ${M} Z-stacks"
         echo ""
     else
         echo ""
-        echo " --- WARNING: could not determine tilescan dimensions"
-        echo " --- please check your configuration"
+        echo " ### WARNING: could not determine tilescan dimensions"
+        echo " ### please check your configuration"
         echo ""
     fi
 
@@ -92,13 +92,13 @@ function load_parameters {
         bm="${dataset__blockmargin_xy}" && check_dims bm "$bm" || bm=64
         set_blocks "${bs}" "${bm}"
         echo ""
-        echo " --- stitched dimensions are ZYXCT='${Z} ${Y} ${X} ${C} ${T}'"
-        echo " --- parallelization: ${#blockstems[@]} blocks (${nx} x ${ny}) of blocksize ${bs} with margin ${bm}"
+        echo " ### stitched dimensions are ZYXCT='${Z} ${Y} ${X} ${C} ${T}'"
+        echo " ### parallelization: ${#blockstems[@]} blocks (${nx} x ${ny}) of blocksize ${bs} with margin ${bm}"
         echo ""
     else
         echo ""
-        echo " --- WARNING: could not determine stitched dimensions"
-        echo " --- please check your configuration"
+        echo " ### WARNING: could not determine stitched dimensions"
+        echo " ### please check your configuration"
         echo ""
     fi
 
@@ -106,12 +106,12 @@ function load_parameters {
     then
         set_channelstems "${dataset_preproc}"
         echo ""
-        echo " --- parallelization: ${#channelstems[@]} channels"
+        echo " ### parallelization: ${#channelstems[@]} channels"
         echo ""
     else
         echo ""
-        echo " --- WARNING: could not determine number of channels"
-        echo " --- please check your configuration"
+        echo " ### WARNING: could not determine number of channels"
+        echo " ### please check your configuration"
         echo ""
     fi
 
@@ -206,8 +206,8 @@ function write_tiled_to_yml {
     echo "elsize_y: ${elsize_y}" >> "${parfile}"
     echo "elsize_x: ${elsize_x}" >> "${parfile}"
 
-    echo " --- written M-Z-tY-tX-C-T='${M} ${Z} ${tY} ${tX} ${C} ${T}' to ${parfile}"
-    echo " --- written elsize_zyx='${elsize_z} ${elsize_y} ${telsize_x}' to ${parfile}"
+    echo " ### written M-Z-tY-tX-C-T='${M} ${Z} ${tY} ${tX} ${C} ${T}' to ${parfile}"
+    echo " ### written elsize_zyx='${elsize_z} ${elsize_y} ${telsize_x}' to ${parfile}"
 
 }
 function write_ZYXCT_to_yml {
@@ -220,7 +220,7 @@ function write_ZYXCT_to_yml {
     echo "C: ${C}" >> "${parfile}"
     echo "T: ${T}" >> "${parfile}"
 
-    echo " --- written Z-Y-X-C-T='${Z} ${Y} ${X} ${C} ${T}' to ${parfile}"
+    echo " ### written Z-Y-X-C-T='${Z} ${Y} ${X} ${C} ${T}' to ${parfile}"
 
 }
 
