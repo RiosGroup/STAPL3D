@@ -1005,7 +1005,7 @@ def postprocess_features(
 
         # select features
         # metrics=['mean', 'median', 'variance', 'min', 'max']
-        metrics = ['median']  # TODO
+        metrics = ['mean']  # TODO
         markers = {
             'markers': memb_idxs + nucl_idxs + csol_idxs,
             'membrane': memb_idxs,
