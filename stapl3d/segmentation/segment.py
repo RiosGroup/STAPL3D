@@ -1055,9 +1055,9 @@ def subsegment(
     n_workers=0,
     blocks=[],
     ids='segm/labels_memb_del_relabeled_fix',
-    ods_full='segm/labels_memb_del_relabeled_fix_full',
-    ods_memb='segm/labels_memb_del_relabeled_fix_memb',
-    ods_nucl='segm/labels_memb_del_relabeled_fix_nucl',
+    ods_full='',
+    ods_memb='',
+    ods_nucl='',
     ):
     """Perform N4 bias field correction."""
 
@@ -1089,9 +1089,9 @@ def subsegment(
 def split_segments(
     inputfile,
     ids='segm/labels_memb_del_relabeled_fix',
-    ods_full='segm/labels_memb_del_relabeled_fix_full',
-    ods_memb='segm/labels_memb_del_relabeled_fix_memb',
-    ods_nucl='segm/labels_memb_del_relabeled_fix_nucl',
+    ods_full='',
+    ods_memb='',
+    ods_nucl='',
     outputdir='',
     ):
 
@@ -1104,22 +1104,28 @@ def split_segments(
     labels.file[ods_full] = labels.file[ids]
     labels_ds = labels.slice_dataset()
 
-    # nuclei
-    nuclstem = '{}/{}'.format(inputfile, 'nucl/dapi')  # TODO: flexible naming
-    maskpath_sauvola = '{}_mask_sauvola'.format(nuclstem)
-    maskpath_absmin = '{}_mask_absmin'.format(nuclstem)
-    mask_nucl = nucl_mask(maskpath_sauvola, maskpath_absmin)
-    write(mask_nucl, nuclstem, '_mask_nuclei', labels, imtype='Mask')
+    if ods_nucl:
+        # nuclei
+        nuclstem = '{}/{}'.format(inputfile, 'nucl/dapi')  # TODO: flexible naming
+        maskpath_sauvola = '{}_mask_sauvola'.format(nuclstem)
+        maskpath_absmin = '{}_mask_absmin'.format(nuclstem)
+        mask_nucl = nucl_mask(maskpath_sauvola, maskpath_absmin)
+        write(mask_nucl, nuclstem, '_mask_nuclei', labels, imtype='Mask')
 
-    # membranes  # TODO: may combine with planarity_mask to make it more data-informed
-    membstem = '{}/{}'.format(inputfile, 'memb/boundary')
-    mask_memb = memb_mask(labels_ds)
-    write(mask_memb, membstem, '_mask', labels, imtype='Mask')
-
-    for mask, ods in zip([mask_memb, mask_nucl], [ods_memb, ods_nucl]):
-        outstem = '{}/{}'.format(inputfile, ods)
+        outstem = '{}/{}'.format(inputfile, ods_nucl)
         labs = np.copy(labels_ds)
-        labs[~mask] = 0
+        labs[~mask_nucl] = 0
+        write(labs, outstem, '', labels, imtype='Label')
+
+    if ods_memb:
+        # membranes  # TODO: may combine with planarity_mask to make it more data-informed
+        membstem = '{}/{}'.format(inputfile, 'memb/boundary')
+        mask_memb = memb_mask(labels_ds)
+        write(mask_memb, membstem, '_mask', labels, imtype='Mask')
+
+        outstem = '{}/{}'.format(inputfile, ods_memb)
+        labs = np.copy(labels_ds)
+        labs[~mask_memb] = 0
         write(labs, outstem, '', labels, imtype='Label')
 
 
