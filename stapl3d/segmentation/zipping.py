@@ -704,7 +704,7 @@ def process_pair(
 
     if ids_nucl:
         seeds_ds[~mask] = 0
-        print('{:10d} new peaks are used'.format(np.unique(seeds_ds)))
+        print('{:10d} new peaks are used'.format(len(np.unique(seeds_ds))))
     else:
         peaks_ds[~mask] = 0
         seeds_ds, n_labels = ndi.label(peaks_ds)
