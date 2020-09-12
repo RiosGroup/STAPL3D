@@ -403,14 +403,17 @@ mergeblocks:
             ids: segm/labels_memb_del_relabeled_fix_full
             format: h5
             postfix: segm-labels_memb_del_relabeled_fix_full
+            is_labelimage: true
         ids01:
             ids: segm/labels_memb_del_relabeled_fix_memb
             format: h5
             postfix: segm-labels_memb_del_relabeled_fix_memb
+            is_labelimage: true
         ids02:
             ids: segm/labels_memb_del_relabeled_fix_nucl
             format: h5
             postfix: segm-labels_memb_del_relabeled_fix_nucl
+            is_labelimage: true
         ids03:
             ids: nucl/dapi_mask_nuclei
             format: ims

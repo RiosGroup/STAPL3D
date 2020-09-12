@@ -378,6 +378,7 @@ def merge(
     elsize=[],
     inlayout='',
     squeeze='',
+    is_labelimage=False,
     ):
     """Average membrane and nuclear channels and write as blocks."""
 
@@ -405,6 +406,9 @@ def merge(
     idss, outputnames = [], []
     for d in idss_dicts:
         outname = '{}_{}'.format(dataset, d['ids'].replace('/', '-'))
+        if 'is_labelimage' in d.keys():
+            if d['is_labelimage']:
+                ulabelpath = '{}{}/{}'.format(outname, '_ulabels.npy')
         if d['format'] == 'h5':
             outname = '{}{}/{}'.format(outname, block_postfix, d['ids'])
         elif d['format'] == 'ims':
@@ -424,6 +428,7 @@ def merge(
             params['elsize'],
             params['inlayout'],
             params['squeeze'],
+            ulabelpath,
             os.path.join(outputdir, outputname),
         )
         for ids, outputname in zip(idss, outputnames)]
@@ -444,6 +449,7 @@ def mergeblocks(
         elsize=[],
         inlayout='',
         squeeze='',
+        ulabelpath='',
         outputpath='',
         ):
     """Merge blocks of data into a single hdf5 file."""
@@ -487,6 +493,7 @@ def mergeblocks(
     mpi.scatter_series()
 
     # merge the datasets
+    ulabels = set([])  # TODO: handle for parallel MPI
     for i in mpi.series:
         block = mpi.blocks[i]
 
@@ -494,10 +501,15 @@ def mergeblocks(
         im.load(mpi.comm, load_data=False)
         set_slices_in_and_out(im, mo, blocksize, blockmargin, fullsize, inlayout)
         data = im.slice_dataset()
+        if ulabelpath:
+            ulabels |= set(np.unique(data))
         mo.write(data)
         im.close()
 
         print('processed block {:03d}: {}'.format(i, block['path']))
+
+    if ulabelpath:
+        np.save(ulabelpath, ulabels)
 
     im.close()
     mo.close()
