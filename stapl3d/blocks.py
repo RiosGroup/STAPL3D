@@ -403,18 +403,20 @@ def merge(
     idss_select = params['idss_select'] or list(range(len(idss_dicts)))
     idss_dicts = [ids for i, ids in enumerate(idss_dicts) if i in idss_select]
 
-    idss, outputnames = [], []
+    idss, outputnames, ulabelpaths = [], [], []
     for d in idss_dicts:
         outname = '{}_{}'.format(dataset, d['ids'].replace('/', '-'))
+        ulabelpath = ''
         if 'is_labelimage' in d.keys():
             if d['is_labelimage']:
-                ulabelpath = '{}{}/{}'.format(outname, '_ulabels.npy')
+                ulabelpath = '{}_ulabels.npy'.format(outname)
         if d['format'] == 'h5':
             outname = '{}{}/{}'.format(outname, block_postfix, d['ids'])
         elif d['format'] == 'ims':
             outname = '{}.ims'.format(outname)
         idss.append(d['ids'])
         outputnames.append(outname)
+        ulabelpaths.append(ulabelpath)
 
     arglist = [
         (
@@ -431,7 +433,7 @@ def merge(
             ulabelpath,
             os.path.join(outputdir, outputname),
         )
-        for ids, outputname in zip(idss, outputnames)]
+        for ids, outputname, ulabelpaths in zip(idss, outputnames, ulabelpaths)]
 
     n_workers = get_n_workers(len(idss), subparams)
     with multiprocessing.Pool(processes=n_workers) as pool:
@@ -509,7 +511,7 @@ def mergeblocks(
         print('processed block {:03d}: {}'.format(i, block['path']))
 
     if ulabelpath:
-        np.save(ulabelpath, ulabels)
+        np.save(ulabelpath, np.array(ulabels))
 
     im.close()
     mo.close()

@@ -235,7 +235,7 @@ def ulabelset(
         ulabels |= set(np.unique(data))
 
     if filepath:
-        np.save(filepath, ulabels)
+        np.save(filepath, np.array(ulabels))
 
     return ulabels
 
