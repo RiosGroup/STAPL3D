@@ -2180,6 +2180,76 @@ function get_cmd_plantseg_predict {
 
 
 
+
+function get_py_splitblocks_ki67 {
+
+    echo '#!/usr/bin/env python'
+    echo ''
+    echo 'import sys'
+    echo 'image_in = sys.argv[1]'
+    echo 'parameter_file = sys.argv[2]'
+    echo 'idx = int(sys.argv[3])'
+    echo 'outputstem = sys.argv[4]'
+    echo ''
+    echo 'from stapl3d import Image, wmeMPI'
+    echo "im = Image(image_in, permission='r')"
+    echo "im.load(load_data=False)"
+    echo "mpi = wmeMPI(usempi=False)"
+    echo "mpi.set_blocks(im, [$Z, $bs, $bs, $C, 1], [0, $bm, $bm, 0, 0], [])"
+    echo "mpi.scatter_series()"
+    echo "props = im.squeeze_props(im.get_props(), dim=4)"
+    echo "block = mpi.blocks[idx]"
+    echo "im.slices = block['slices']"
+    echo "data = im.slice_dataset()"
+    echo "props['shape'] = data.shape"
+    echo "props['slices'] = None"
+    echo "h5path = '{}_{}_ki67.h5/data'.format(outputstem, block['id'])"
+    echo "mo = Image(h5path, **props)"
+    echo "mo.create()"
+    echo "mo.write(data)"
+    echo "mo.close()"
+
+}
+function get_cmd_splitblocks_ki67 {
+
+    pyfile="${datadir}/${jobname}.py"
+    eval get_py_${stage} > "$pyfile"
+
+    echo python "${pyfile}" \
+        "\${biasfield_stem}.ims" \
+        "${parfile}" \
+        "\${idx}" \
+        "\${blockdir}/${dataset_preproc}"
+
+}
+
+# function get_py_apply_ilastik { get_py_splitblocks_ki67 ; }
+function get_cmd_apply_ilastik {
+
+    # NOTE: NO, first generate all spliblocks because datastems and python blocks are soreted differently
+    # pyfile="${datadir}/${jobname}.py"
+    # eval get_py_${stage} > "$pyfile"
+    #
+    # echo python "${pyfile}" \
+    #     "\${biasfield_stem}.ims" \
+    #     "${parfile}" \
+    #     "\${idx}" \
+    #     "\${blockdir}/${dataset_preproc}"
+
+    echo "export LAZYFLOW_THREADS=${apply_ilastik__submit__tasks};"
+    echo "export LAZYFLOW_TOTAL_RAM_MB=100000;"
+    echo "${ILASTIK} --headless --readonly 1 \\"
+    echo "--preconvert_stacks \\"
+    echo "--project=${datadir}/${apply_ilastik__params__pixprob_trainingset}.ilp \\"
+    echo "--output_axis_order=zyxc \\"
+    echo "--output_format='compressed hdf5' \\"
+    echo "--output_filename_format=\${blockstem}${apply_ilastik__params__opf}.h5 \\"
+    echo "--output_internal_path=${apply_ilastik__params__ods} \\"
+    echo "\${blockstem}_ki67.h5/data"
+
 }
 
 
+function get_py_mergeblocks_ilastik { get_py_mergeblocks ; }
+function get_cmd_mergeblocks_ilastik { get_cmd_mergeblocks ; }
+# TODO: integrate step_id in arguments for all???

@@ -110,8 +110,15 @@ submit $( generate_script mergeblocks ) $jid
 
 ###==========================================================================###
 ### unet for nuclei mask
-# submit $( generate_script unet3d_nucl_train ) $jid
+submit $( generate_script unet3d_nucl_train ) $jid
 # FIXME: submit $( generate_script unet3d_nucl_predict ) $jid  # model version error
 # copy unet-model to ~/.plantseg_models/
 
 
+###==========================================================================###
+### ki67cleanup
+jid=
+# cp /hpc/pmc_rios/Kidney/190910_rl57_fungi_16bit_25x_125um_corr-stitching/190910_rl57_fungi_16bit_25x_125um_corr-stitching_02496-03904_12736-14144_00000-00106_ki67_fullBG_11feats.ilp ${datadir}/
+submit $( generate_script splitblocks_ki67 ) $jid
+submit $( generate_script apply_ilastik ) $jid
+submit $( generate_script mergeblocks_ilastik ) $jid
