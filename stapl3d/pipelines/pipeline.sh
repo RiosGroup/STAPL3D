@@ -102,8 +102,16 @@ submit $( generate_script stardist_mergeblocks ) $jid
 ###==========================================================================###
 ### plantseg
 submit $( generate_script unet_train ) $jid
-# submit $( generate_script unet_predict ) $jid
-# copy model to ~/.plantseg_models/
+# FIXME: submit $( generate_script unet_predict ) $jid  # model version error
+# copy unet-model to ~/.plantseg_models/
 submit $( generate_script plantseg_predict ) $jid
 submit $( generate_script mergeblocks ) $jid
+
+
+###==========================================================================###
+### unet for nuclei mask
+# submit $( generate_script unet3d_nucl_train ) $jid
+# FIXME: submit $( generate_script unet3d_nucl_predict ) $jid  # model version error
+# copy unet-model to ~/.plantseg_models/
+
 

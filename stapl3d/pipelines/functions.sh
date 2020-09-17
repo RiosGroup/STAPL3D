@@ -2072,33 +2072,63 @@ function get_cmd_stardist_mergeblocks {
 }
 
 
-function get_cmd_unet_train {
+function get_cmd_unet3d_memb_train {
 
     # copy config file with replacements
-    sed "s?UNETDIR?$unet_train__params__unetdir?;\
-         s?MODELNAME?$unet_train__params__modelname?g" \
-         "${STAPL3D}/pipelines/unet_train.yml" \
-         > "${datadir}/${dataset}_unet_train.yml"
+    sed "s?UNETDIR?$unet3d_memb_train__params__unetdir?;\
+         s?MODELNAME?$unet3d_memb_train__params__modelname?g" \
+         "${STAPL3D}/pipelines/unet3d_memb_train.yml" \
+         > "${datadir}/${dataset}_unet3d_memb_train.yml"
 
-    echo train3dunet --config "${datadir}/${dataset}_unet_train.yml"
+    echo train3dunet --config "${datadir}/${dataset}_unet3d_memb_train.yml"
 
 }
 
 
-function get_cmd_unet_predict {
+function get_cmd_unet3d_memb_predict {
     # FIXME: kidney model gives error on load via predict3dunet => needs DataParallel wrapping
 
     # copy config file with replacements
-    sed "s?UNETDIR?$unet_predict__params__unetdir?;\
-         s?MODELNAME?$unet_predict__params__modelname?;\
-         s?IDS_MEMBRANE?$unet_predict__params__ids_membrane?;\
+    sed "s?UNETDIR?$unet3d_memb_predict__params__unetdir?;\
+         s?MODELNAME?$unet3d_memb_predict__params__modelname?;\
+         s?IDS_MEMBRANE?$unet3d_memb_predict__params__ids_membrane?;\
          s?PATH_TO_THE_TEST_SET?${blockdir}?g" \
-         "${STAPL3D}/pipelines/unet_predict.yml" \
-         > "${datadir}/${dataset}_unet_predict.yml"
+         "${STAPL3D}/pipelines/unet3d_memb_predict.yml" \
+         > "${datadir}/${dataset}_unet3d_memb_predict.yml"
 
-    echo predict3dunet --config "${datadir}/${dataset}_unet_predict.yml"
+    echo predict3dunet --config "${datadir}/${dataset}_unet3d_memb_predict.yml"
 
 }
+
+
+function get_cmd_unet3d_nucl_train {
+
+    # copy config file with replacements
+    sed "s?UNETDIR?$unet3d_nucl_train__params__unetdir?;\
+         s?MODELNAME?$unet3d_nucl_train__params__modelname?g" \
+         "${STAPL3D}/pipelines/unet3d_nucl_train.yml" \
+         > "${datadir}/${dataset}_unet3d_nucl_train.yml"
+
+    echo train3dunet --config "${datadir}/${dataset}_unet3d_nucl_train.yml"
+
+}
+
+
+function get_cmd_unet3d_nucl_predict {
+    # FIXME: kidney model gives error on load via predict3dunet => needs DataParallel wrapping
+
+    # copy config file with replacements
+    sed "s?UNETDIR?$unet3d_nucl_predict__params__unetdir?;\
+         s?MODELNAME?$unet3d_nucl_predict__params__modelname?;\
+         s?IDS_NUCLEUS?$unet3d_nucl_predict__params__ids_nucleus?;\
+         s?PATH_TO_THE_TEST_SET?${blockdir}?g" \
+         "${STAPL3D}/pipelines/unet3d_nucl_predict.yml" \
+         > "${datadir}/${dataset}_unet3d_nucl_predict.yml"
+
+    echo predict3dunet --config "${datadir}/${dataset}_unet3d_nucl_predict.yml"
+
+}
+
 
 function get_py_plantseg_predict {
     ### stapl3d-blocks to plantseg-input
