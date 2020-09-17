@@ -2140,19 +2140,12 @@ function get_py_plantseg_predict {
     echo 'filepath_out = sys.argv[2]'
     echo 'dset_in = sys.argv[3]'
     echo 'dset_out = sys.argv[4]'
+    echo 'delete = sys.argv[5]'
+    echo 'links = sys.argv[6]'
+    echo 'is_unet = sys.argv[7]'
     echo ''
-    echo 'import os'
-    echo 'import h5py'
-    echo "f = h5py.File(filepath_out, 'r+')"
-    echo "try:"
-    echo "    del f[dset_out]"
-    echo "except KeyError:"
-    echo "    pass"
-    echo "if filepath_in == filepath_out:"
-    echo "    f[dset_out] = f[dset_in]"
-    echo "else:"
-    echo "    f[dset_out] = h5py.ExternalLink(filepath_in, dset_in)"
-    echo "f.close()"
+    echo 'from stapl3d import blocks'
+    echo "blocks.link_blocks(filepath_in, filepath_out, dset_in, dset_out, delete, links, is_unet)"
 
 }
 function prep_plantseg_predict {
@@ -2173,14 +2166,19 @@ function get_cmd_plantseg_predict {
     echo blockstem=\${blockdir}/\${dataset}_\${block_id}  # for HFK16w
     pyfile="${datadir}/${jobname}.py"
     eval get_py_${stage} > "$pyfile"
-    echo python "${pyfile}" "\${blockstem}.h5" "\${blockstem}.h5" 'raw' 'memb/mean'
+    echo python "${pyfile}" "\${blockstem}.h5" "\${blockstem}.h5" 'raw' 'memb/mean' 'True' 'True' 'False'
     echo prep_plantseg_predict "${plantseg_predict__params__ps_blockdir}"
     echo ""
     echo ps_path="\${datadir}/${plantseg_predict__params__ps_blockdir}/\${dataset}_\${block_id}"
     echo sed "\"s?BLOCKS_PLANTSEG?\${ps_path}?;s?MODELNAME?$plantseg_predict__params__modelname?;s?DIM_Z?106?g\"" "\${STAPL3D}/pipelines/plantseg_config.yml" \> "\${ps_path}/\${dataset}_\${block_id}_plantseg.yml"
     echo plantseg --config "\${ps_path}/\${dataset}_\${block_id}_plantseg.yml"
     echo ""
-    echo python "${pyfile}" "\${ps_path}/${plantseg_predict__params__modelname}/\${dataset}_\${block_id}_predictions.h5" "\${blockstem}.h5" 'predictions' 'memb/3dunet'
+    echo python "${pyfile}" "\${ps_path}/${plantseg_predict__params__modelname}/\${dataset}_\${block_id}_predictions.h5" "\${blockstem}.h5" 'predictions' 'memb/3dunet' 'True' 'False' 'True'
+
+}
+
+
+
 
 }
 

@@ -551,5 +551,52 @@ def margins(fc, fC, blocksize, margin, fullsize):
     return (fc, fC), (bc, bC)
 
 
+def link_blocks(filepath_in, filepath_out, dset_in, dset_out, delete=True, links=True, is_unet=False):
+
+    def delete_dataset(filepath, dset):
+        try:
+            im = Image('{}/{}'.format(filepath, dset), permission='r+')
+            im.load()
+            del im.file[dset_out]
+        except OSError:
+            pass
+        except KeyError:
+            pass
+        im.close()
+
+    if delete:
+
+        delete_dataset(filepath_out, dset_out)
+
+    if links:
+        import h5py
+        f = h5py.File(filepath_out, 'a')
+        if filepath_in == filepath_out:
+            f[dset_out] = f[dset_in]
+        else:
+            f[dset_out] = h5py.ExternalLink(filepath_in, dset_in)
+
+    else:
+
+        im = Image('{}/{}'.format(filepath_in, dset_in), permission='r')
+        im.load(load_data=False)
+
+        props = im.get_props()
+        if is_unet:
+            props['axlab'] = 'zyx'
+            props['shape'] = props['shape'][1:]
+            props['slices'] = props['slices'][1:]
+            props['chunks'] = props['chunks'][1:]
+
+        data = im.slice_dataset(squeeze=True)
+
+        im.close()
+
+        mo = Image('{}/{}'.format(filepath_out, dset_out), **props)
+        mo.create()
+        mo.write(data)
+        mo.close()
+
+
 if __name__ == "__main__":
     main(sys.argv[1:])
