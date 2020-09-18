@@ -1768,7 +1768,7 @@ function get_py_zipping_postproc {
     echo ''
     echo "from glob import glob"
     echo "from stapl3d.reporting import merge_reports"
-    echo "pdfs = glob('${blockdir}/${dataset_preproc}_reseg_axis?-seam??-j???.pdf')"
+    echo "pdfs = glob('${blockdir}/${dataset_preproc}_reseg_axis?-seam???-j???.pdf')"
     echo "pdfs.sort()"
     echo "merge_reports(
         pdfs,
@@ -1783,7 +1783,7 @@ function get_cmd_zipping_postproc {
 
     echo python "${pyfile}"
 
-    echo "rm ${blockdir}/${dataset_preproc}_reseg_axis?-seam??-j???.pdf"
+    echo "rm ${blockdir}/${dataset_preproc}_reseg_axis?-seam???-j???.pdf"
 
 }
 

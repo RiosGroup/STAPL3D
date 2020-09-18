@@ -1116,7 +1116,7 @@ def generate_report(image_in, info_dict={}, ioff=True):
     plot_images(axs, info_dict)
 
     # Add annotations and save as pdf.
-    reseg_id = 'axis{:01d}-seam{:02d}-j{:03d}'.format(info_dict['axis'], info_dict['seam'], info_dict['j'])
+    reseg_id = 'axis{:01d}-seam{:03d}-j{:03d}'.format(info_dict['axis'], info_dict['seam'], info_dict['j'])
     header = 'mLSR-3D Quality Control'
     figtitle = '{}: {} \n {}'.format(
         header,
