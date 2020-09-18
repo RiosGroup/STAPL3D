@@ -2145,9 +2145,9 @@ function get_py_plantseg_predict {
     echo 'filepath_out = sys.argv[2]'
     echo 'dset_in = sys.argv[3]'
     echo 'dset_out = sys.argv[4]'
-    echo 'delete = sys.argv[5]'
-    echo 'links = sys.argv[6]'
-    echo 'is_unet = sys.argv[7]'
+    echo 'delete = sys.argv[5] == "True"'
+    echo 'links = sys.argv[6] == "True"'
+    echo 'is_unet = sys.argv[7] == "True"'
     echo ''
     echo 'from stapl3d import blocks'
     echo "blocks.link_blocks(filepath_in, filepath_out, dset_in, dset_out, delete, links, is_unet)"
