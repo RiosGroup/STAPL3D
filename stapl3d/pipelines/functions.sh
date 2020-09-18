@@ -1711,8 +1711,9 @@ function get_py_zipping {
     echo 'maxlabelfile = sys.argv[11]'
     echo 'ids_nucl = sys.argv[12]'
     echo 'ids_memb_chan = sys.argv[13]'
-    echo 'outputstem = sys.argv[14]'
-    echo 'images_in = sys.argv[15:]'
+    echo 'peaks_thr = float(sys.argv[14])'
+    echo 'outputstem = sys.argv[15]'
+    echo 'images_in = sys.argv[16:]'
     echo ''
     echo 'from stapl3d.segmentation.zipping import resegment_block_boundaries'
     echo "resegment_block_boundaries(
@@ -1727,6 +1728,7 @@ function get_py_zipping {
         in_place=True,
         ids_nucl=ids_nucl,
         ids_memb_chan=ids_memb_chan,
+        peaks_thr=peaks_thr,
         outputstem=outputstem,
         save_steps=False,
         )"
@@ -1752,6 +1754,7 @@ function get_cmd_zipping {
         "${blockdir}/${dataset_preproc}_maxlabels_${segmentation__params__segments_ods}${zipping__params__postfix}.txt" \
         "${zipping__params__ids_nucl}" \
         "${zipping__params__ids_memb_chan}" \
+        "${zipping__params__peaks_thr}" \
         "${blockdir}/${dataset_preproc}" \
         "\${images_in[@]}"
 
