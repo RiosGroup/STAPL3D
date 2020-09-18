@@ -585,3 +585,32 @@ plantseg_predict:
         mem: 20G
         wtime: 02:00:00
 
+splitblocks_ki67:
+    params:
+    submit:
+        array: block
+        mem: 20G
+        wtime: 00:20:00
+
+apply_ilastik:
+    params:
+        pixprob_trainingset: 190910_rl57_fungi_16bit_25x_125um_corr-stitching_02496-03904_12736-14144_00000-00106_ki67_fullBG_11feats
+        opf: _ki67_iactBG_11feats_Probabilities
+        ods: probs
+    submit:
+        array: block
+        tasks: 12
+        mem: 60G
+        wtime: 05:00:00
+
+mergeblocks_ilastik:
+    params:
+        ipf: _ki67_iactBG_11feats_Probabilities
+        ids00:
+            ids: probs
+            format: h5
+            postfix:
+    submit:
+        array: idss
+        mem: 20G
+        wtime: 01:00:00
