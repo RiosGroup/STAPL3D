@@ -822,9 +822,13 @@ function base_cmds {
     echo idx="\$((TASK_ID - 1))"
     echo ''
 
+    # FIXME: these are overwritten by load_parameters "${dataset}": handle or remove
+    echo ''
+    echo source "${STAPL3D}/pipelines/functions.sh"
+    echo load_dataset "${projectdir}" "${dataset}"
+    echo load_parameters "${dataset}"
     echo ''
     echo dataset="${dataset}"
-    echo ''
     echo projectdir="${projectdir}"
     echo datadir="${datadir}"
     echo stackdir="${stackdir}"
@@ -833,10 +837,6 @@ function base_cmds {
     echo profdir="${profdir}"
     echo featdir="${featdir}"
     echo jobdir="${jobdir}"
-    echo ''
-    echo source "${STAPL3D}/pipelines/functions.sh"
-    echo load_dataset "${projectdir}" "${dataset}"
-    echo load_parameters "${dataset}"
     echo ''
 
     if [ "$array" == 'channel_plane' ]
@@ -1572,6 +1572,7 @@ function get_cmd_membrane_enhancement {
         "${parfile}" \
         "\${idx}"
 
+    # TODO: pull into python function
     echo ''
     echo "rm \${blockdir}/${dataset_preproc}_\${block_id}_memb-eigen.mha"
     echo "rm \${blockdir}/${dataset_preproc}_\${block_id}_memb-*.nii.gz"
@@ -1619,7 +1620,7 @@ function get_py_segmentation_postproc {
     echo "pdfs.sort()"
     echo "merge_reports(
         pdfs,
-        '${datadir}/${dataset_preproc}_seg.pdf',
+        '${blockdir}/${dataset_preproc}_seg.pdf',
         )"
 
 }
@@ -1630,6 +1631,7 @@ function get_cmd_segmentation_postproc {
 
     echo python "${pyfile}"
 
+    # TODO: pull into python function
     echo "rm ${blockdir}/${dataset_preproc}_?????-?????_?????-?????_?????-?????_seg.pdf"
 
 }
