@@ -115,8 +115,6 @@ def assess_segmentation(truth, segmentation, seg_slices=[], seg_transpose=[],
         single_seg_truth = (truth_cropped==truth_label).astype(int)
         lab, count = np.unique(segmentation_cropped[single_seg_truth==1], return_counts=True)
         overlapping_labels = dict(zip(lab, count))
-        print(overlapping_labels)
-        print(main_truth_per_seg)
         full_seg_overlap = lab[np.unravel_index(np.argmax(count, axis=None), count.shape)]
         full_single_seg_seg = (segmentation_cropped==full_seg_overlap).astype(int)
 
