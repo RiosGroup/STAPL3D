@@ -723,7 +723,7 @@ def process_pair(
             ws = seeds_ds
         else:
             wsmask = np.logical_and(mask, edts_ds > peaks_thr)
-            ws = watershed(-edts_ds, peaks_labeled, mask=wsmask)
+            ws = watershed(-edts_ds, seeds_ds, mask=wsmask)
         if ids_memb_chan:
             ws = watershed(membs_ds, ws, mask=mask, compactness=compactness)
 
