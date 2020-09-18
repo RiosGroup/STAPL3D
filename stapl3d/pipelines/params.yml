@@ -436,6 +436,10 @@ mergeblocks:
                 - 0.3321
             inlayout: czyx
             squeeze: c
+        ids07:
+            ids: probs
+            format: h5
+            postfix:
     submit:
         array: idss
         mem: 60G
