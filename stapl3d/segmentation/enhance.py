@@ -130,7 +130,7 @@ def membrane_enhancement(
         os.path.join(ACMEdir, "cellPreprocess"),
         "{}_memb-mean.nii.gz".format(blockstem),
         "{}_memb-preprocess.nii.gz".format(blockstem),
-        "0.5",
+        "{}".format(median_filter_par),
     ])
 
     subprocess.call([
@@ -138,7 +138,7 @@ def membrane_enhancement(
         "{}_memb-preprocess.nii.gz".format(blockstem),
         "{}_memb-planarity.nii.gz".format(blockstem),
         "{}_memb-eigen.mha".format(blockstem),
-        "1.1",
+        "{}".format(membrane_filter_par),
     ])
 
     """
