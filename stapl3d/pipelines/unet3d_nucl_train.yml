@@ -35,12 +35,12 @@ loaders:
   dataset: StandardHDF5Dataset
   batch_size: 1
   num_workers: 8
-  raw_internal_path: raw
-  label_internal_path: label
+  raw_internal_path: IDS_IMAGE
+  label_internal_path: IDS_LABEL
   weight_internal_path: null
   train:
     file_paths:
-      - "UNETDIR/data/train"
+      - "UNETDIR/data/MODELNAME/train"
     slice_builder:
       name: FilterSliceBuilder
       patch_shape:
@@ -82,7 +82,7 @@ loaders:
           expand_dims: false
   val:
     file_paths:
-    - "UNETDIR/data/val"
+    - "UNETDIR/data/MODELNAME/val"
     slice_builder:
       name: FilterSliceBuilder
       patch_shape:

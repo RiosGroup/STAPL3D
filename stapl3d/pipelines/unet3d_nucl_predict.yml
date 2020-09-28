@@ -13,7 +13,7 @@ predictor:
 loaders:
   batch_size: 1
   mirror_padding: [16, 32, 32]
-  raw_internal_path: IDS_NUCLEUS
+  raw_internal_path: IDS_IMAGE
   num_workers: 8
   test:
     file_paths:

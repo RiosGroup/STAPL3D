@@ -81,18 +81,23 @@ submit $( generate_script subsegment ) $jid
 submit $( generate_script mergeblocks ) $jid
 # TODO: merge the idss?
 
+
 ###==========================================================================###
 ### features
 submit $( generate_script features ) $jid
 submit $( generate_script features_postproc ) $jid
 
 
+
+
 ###==========================================================================###
 ### stardist
 submit $( generate_script stardist_train ) $jid
-# stardist_normalization_range  # NB on bigbig-mem # TODO get histogram from blocks
+# stardist_normalization_range  # NB on bigbig-mem
+# TODO get histogram from blocks
 submit $( generate_script stardist_nblocks ) $jid
-# wait for it  # FIXME:
+# FIXME: wait for it
+# TODO: make blocklayout equal between stardist and stapl3d
 nblocks=$(<$datadir/blocks_stardist/nblocks.txt)
 submit $( generate_script stardist_predict ) $jid
 submit $( generate_script stardist_gather ) $jid
@@ -101,7 +106,7 @@ submit $( generate_script stardist_mergeblocks ) $jid
 
 ###==========================================================================###
 ### plantseg
-submit $( generate_script unet_train ) $jid
+submit $( generate_script unet3d_memb_train ) $jid
 # FIXME: submit $( generate_script unet_predict ) $jid  # model version error
 # copy unet-model to ~/.plantseg_models/
 submit $( generate_script plantseg_predict ) $jid
@@ -111,8 +116,8 @@ submit $( generate_script mergeblocks ) $jid
 ###==========================================================================###
 ### unet for nuclei mask
 submit $( generate_script unet3d_nucl_train ) $jid
-# FIXME: submit $( generate_script unet3d_nucl_predict ) $jid  # model version error
-# copy unet-model to ~/.plantseg_models/
+submit $( generate_script unet3d_nucl_predict ) $jid
+submit $( generate_script mergeblocks ) $jid
 
 
 ###==========================================================================###

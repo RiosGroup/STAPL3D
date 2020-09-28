@@ -2081,11 +2081,13 @@ function get_cmd_unet3d_memb_train {
 
     # copy config file with replacements
     sed "s?UNETDIR?$unet3d_memb_train__params__unetdir?;\
-         s?MODELNAME?$unet3d_memb_train__params__modelname?g" \
+         s?MODELNAME?$unet3d_memb_train__params__modelname?;\
+         s?IDS_IMAGE?$unet3d_memb_predict__params__ids_image?;\
+         s?IDS_LABEL?$unet3d_memb_predict__params__ids_label?g" \
          "${STAPL3D}/pipelines/unet3d_memb_train.yml" \
-         > "${datadir}/${dataset}_unet3d_memb_train.yml"
+         > "${datadir}/${dataset}_unet3d_memb_train_$unet3d_memb_train__params__modelname.yml"
 
-    echo train3dunet --config "${datadir}/${dataset}_unet3d_memb_train.yml"
+    echo train3dunet --config "${datadir}/${dataset}_unet3d_memb_train_$unet3d_memb_train__params__modelname.yml"
 
 }
 
@@ -2096,12 +2098,12 @@ function get_cmd_unet3d_memb_predict {
     # copy config file with replacements
     sed "s?UNETDIR?$unet3d_memb_predict__params__unetdir?;\
          s?MODELNAME?$unet3d_memb_predict__params__modelname?;\
-         s?IDS_MEMBRANE?$unet3d_memb_predict__params__ids_membrane?;\
+         s?IDS_IMAGE?$unet3d_memb_predict__params__ids_image?;\
          s?PATH_TO_THE_TEST_SET?${blockdir}?g" \
          "${STAPL3D}/pipelines/unet3d_memb_predict.yml" \
-         > "${datadir}/${dataset}_unet3d_memb_predict.yml"
+         > "${datadir}/${dataset}_unet3d_memb_predict_$unet3d_memb_train__params__modelname.yml"
 
-    echo predict3dunet --config "${datadir}/${dataset}_unet3d_memb_predict.yml"
+    echo predict3dunet --config "${datadir}/${dataset}_unet3d_memb_predict_$unet3d_memb_train__params__modelname.yml"
 
 }
 
@@ -2110,31 +2112,90 @@ function get_cmd_unet3d_nucl_train {
 
     # copy config file with replacements
     sed "s?UNETDIR?$unet3d_nucl_train__params__unetdir?;\
-         s?MODELNAME?$unet3d_nucl_train__params__modelname?g" \
+         s?MODELNAME?$unet3d_nucl_train__params__modelname?;\
+         s?IDS_IMAGE?$unet3d_nucl_predict__params__ids_image?;\
+         s?IDS_LABEL?$unet3d_nucl_predict__params__ids_label?g" \
          "${STAPL3D}/pipelines/unet3d_nucl_train.yml" \
-         > "${datadir}/${dataset}_unet3d_nucl_train.yml"
+         > "${datadir}/${dataset}_unet3d_nucl_train_$unet3d_nucl_train__params__modelname.yml"
 
-    echo train3dunet --config "${datadir}/${dataset}_unet3d_nucl_train.yml"
+    echo train3dunet --config "${datadir}/${dataset}_unet3d_nucl_train_$unet3d_nucl_train__params__modelname.yml"
 
 }
 
 
+# function get_cmd_unet3d_nucl_predict {
+#     # FIXME: kidney model gives error on load via predict3dunet => needs DataParallel wrapping
+#
+#     # copy config file with replacements
+#     sed "s?UNETDIR?$unet3d_nucl_predict__params__unetdir?;\
+#          s?MODELNAME?$unet3d_nucl_predict__params__modelname?;\
+#          s?IDS_NUCLEUS?$unet3d_nucl_predict__params__ids_nucleus?;\
+#          s?PATH_TO_THE_TEST_SET?${blockdir}?g" \
+#          "${STAPL3D}/pipelines/unet3d_nucl_predict.yml" \
+#          > "${datadir}/${dataset}_unet3d_nucl_predict.yml"
+#
+#     echo predict3dunet --config "${datadir}/${dataset}_unet3d_nucl_predict.yml"
+#
+# }
+function get_py_unet3d_nucl_predict { get_py_plantseg_predict ; }
 function get_cmd_unet3d_nucl_predict {
-    # FIXME: kidney model gives error on load via predict3dunet => needs DataParallel wrapping
 
-    # copy config file with replacements
-    sed "s?UNETDIR?$unet3d_nucl_predict__params__unetdir?;\
-         s?MODELNAME?$unet3d_nucl_predict__params__modelname?;\
-         s?IDS_NUCLEUS?$unet3d_nucl_predict__params__ids_nucleus?;\
-         s?PATH_TO_THE_TEST_SET?${blockdir}?g" \
-         "${STAPL3D}/pipelines/unet3d_nucl_predict.yml" \
-         > "${datadir}/${dataset}_unet3d_nucl_predict.yml"
+    pyfile="${datadir}/${jobname}.py"
+    eval get_py_${stage} > "$pyfile"
+    # TODO: make similar system as plantseg_predict: this will be messy => prefered: spec ids in plantseg yaml
+    # echo python "${pyfile}" "\${blockstem}.h5" "\${blockstem}.h5" 'raw' 'nucl/mean' 'True' 'True' 'False'  # NOTE set in yaml directly
 
-    echo predict3dunet --config "${datadir}/${dataset}_unet3d_nucl_predict.yml"
+    echo prep_plantseg_predict "${plantseg_predict__params__ps_blockdir}"
+
+    echo ""
+    echo ps_path="\${datadir}/${plantseg_predict__params__ps_blockdir}/\${dataset}_\${block_id}"
+
+    echo sed "\"s?UNETDIR?$unet3d_nucl_predict__params__unetdir?;s?MODELNAME?$unet3d_nucl_predict__params__modelname?;s?IDS_NUCLEUS?$unet3d_nucl_predict__params__ids_nucleus?;s?PATH_TO_THE_TEST_SET?\${ps_path}?g\"" "\${STAPL3D}/pipelines/unet3d_nucl_predict.yml" \> "\${ps_path}/\${dataset}_\${block_id}_unet3d_nucl_predict.yml"
+    echo predict3dunet --config "\${ps_path}/\${dataset}_\${block_id}_unet3d_nucl_predict.yml"
+
+    echo ""
+    # TODO: make similar path as plantseg_predict: this will be messy
+    # echo python "${pyfile}" "\${ps_path}/${plantseg_predict__params__modelname}/\${dataset}_\${block_id}_predictions.h5" "\${blockstem}.h5" 'predictions' 'nucl/3dunet' 'True' 'False' 'True'
+    echo python "${pyfile}" "\${ps_path}/\${dataset}_\${block_id}_predictions.h5" "\${blockstem}.h5" 'predictions' 'nucl/3dunet' 'True' 'False' 'True'
 
 }
+# mkdir $datadir/blocks_unet3d_nucl_stapl3d
+# for block_id in "${block_ids[@]}"; do
+#     cp $datadir/blocks_ps/${dataset}_${block_id}/${dataset}_${block_id}_predictions.h5 $datadir/blocks_unet3d_nucl_stapl3d/
+# done
+# TODO: test... output_dir: '/home/adrian/Datasets/DSB2018/test/predictions'
 
-
+# function get_py_plantseg_predict {
+#     ### stapl3d-blocks to plantseg-input
+#
+#     echo '#!/usr/bin/env python'
+#     echo ''
+#     echo 'import sys'
+#     echo 'blockdir_in = sys.argv[1]'
+#     echo 'blockdir_out = sys.argv[2]'
+#     echo 'dset_in = sys.argv[3]'
+#     echo 'dset_out = sys.argv[4]'
+#     echo ''
+#     echo 'import os'
+#     echo 'import h5py'
+#     echo 'import glob'
+#     echo "blockfiles_in = glob.glob(os.path.join(blockdir_in, '*.h5'))"
+#     echo "blockfiles_in.sort()"
+#     echo "blockfiles_out = glob.glob(os.path.join(blockdir_out, '*.h5'))"
+#     echo "blockfiles_out.sort()"
+#     echo "for blockfile_in, blockfile_out in zip(blockfiles_in, blockfiles_out):"
+#     echo "    blockstem_in = os.path.splitext(os.path.basename(blockfile_in))[0]"
+#     echo "    blockstem_out = os.path.splitext(os.path.basename(blockfile_out))[0]"
+#     echo "    filepath_in = os.path.join(blockdir_in, '{}.h5'.format(blockstem_in))"
+#     echo "    filepath_out = os.path.join(blockdir_out, '{}.h5'.format(blockstem_out))"
+#     echo "    f = h5py.File(filepath_out, 'r+')"
+#     echo "    if blockdir_in == blockdir_out:"
+#     echo "        f[dset_out] = f[dset_in]"
+#     echo "    else:"
+#     echo "        f[dset_out] = h5py.ExternalLink(filepath_in, dset_in)"
+#     echo "    f.close()"
+#
+# }
 function get_py_plantseg_predict {
     ### stapl3d-blocks to plantseg-input
 
@@ -2162,16 +2223,16 @@ function prep_plantseg_predict {
     for filepath in `ls ${blockdir}/*.h5`; do
         filename=`basename "${filepath}"`
         mkdir -p "${datadir}/${blocks_ps}/${filename%.h5}"
+        # rm "${datadir}/${blocks_ps}/${filename%.h5}/${filename}"
         ln -s "${blockdir}/${filename}" "${datadir}/${blocks_ps}/${filename%.h5}/${filename}"
     done
 
 }
 function get_cmd_plantseg_predict {
 
-    echo blockstem=\${blockdir}/\${dataset}_\${block_id}  # for HFK16w
     pyfile="${datadir}/${jobname}.py"
     eval get_py_${stage} > "$pyfile"
-    echo python "${pyfile}" "\${blockstem}.h5" "\${blockstem}.h5" 'raw' 'memb/mean' 'True' 'True' 'False'
+    echo python "${pyfile}" "\${blockstem}.h5" "\${blockstem}.h5" 'memb/mean' 'raw' 'True' 'True' 'False'
     echo prep_plantseg_predict "${plantseg_predict__params__ps_blockdir}"
     echo ""
     echo ps_path="\${datadir}/${plantseg_predict__params__ps_blockdir}/\${dataset}_\${block_id}"

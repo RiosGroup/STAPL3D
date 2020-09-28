@@ -590,8 +590,10 @@ stardist_mergeblocks:
 
 unet3d_memb_train:
     params:
-        unetdir: /hpc/pmc_rios/mkleinnijenhuis/plant-seg_kidney
-        modelname: kidney_confocal_3d_unet
+        unetdir: /hpc/pmc_rios/mkleinnijenhuis/unet3d_memb_kidney
+        modelname: multiresGT_memb
+        ids_image: raw_memb
+        ids_label: label_cell
     submit:
         conda_env: 3dunet
         partition: gpu
@@ -601,10 +603,12 @@ unet3d_memb_train:
 
 unet3d_memb_predict:
     params:
-        unetdir: /hpc/pmc_rios/mkleinnijenhuis/plant-seg_kidney
-        modelname: kidney_confocal_3d_unet
-        ids_membrane: memb/mean
+        unetdir: /hpc/pmc_rios/mkleinnijenhuis/unet3d_memb_kidney
+        modelname: multiresGT_memb
+        ids_image: memb/mean
+        ps_blockdir: blocks_ps
     submit:
+        array: block
         conda_env: 3dunet
         partition: gpu
         tasks: 8
@@ -614,25 +618,29 @@ unet3d_memb_predict:
 unet3d_nucl_train:
     params:
         unetdir: /hpc/pmc_rios/mkleinnijenhuis/unet3d_nucl_kidney
-        modelname: kidney_confocal_unet3d_nucl
+        modelname: multiresGT_nucl
+        ids_image: raw_nucl
+        ids_label: label_nucl
     submit:
         conda_env: 3dunet
         partition: gpu
         tasks: 8
-        gpus_per_node: RTX6000:4
+        gpus_per_node: RTX6000:1
         wtime: 96:00:00
 
 unet3d_nucl_predict:
     params:
         unetdir: /hpc/pmc_rios/mkleinnijenhuis/unet3d_nucl_kidney
-        modelname: kidney_confocal_unet3d_nucl
-        ids_nucleus: nucl/mean
+        modelname: multiresGT_nucl
+        ids_image: nucl/mean
+        ps_blockdir: blocks_ps
     submit:
+        array: block
         conda_env: 3dunet
         partition: gpu
         tasks: 8
-        gpus_per_node: RTX6000:4
-        wtime: 96:00:00
+        gpus_per_node: RTX6000:1
+        wtime: 02:00:00
 
 plantseg_predict:
     params:

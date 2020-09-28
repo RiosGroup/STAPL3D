@@ -6,12 +6,12 @@ eval_metric:
 loaders:
   dataset: StandardHDF5Dataset
   batch_size: 4
-  label_internal_path: /label
+  label_internal_path: IDS_LABEL
   num_workers: 8
-  raw_internal_path: /raw
+  raw_internal_path: IDS_IMAGE
   train:
     file_paths:
-      - "UNETDIR/data/train"
+      - "UNETDIR/data/MODELNAME/train"
     slice_builder:
       name: FilterSliceBuilder
       patch_shape:
@@ -58,7 +58,7 @@ loaders:
         name: ToTensor
   val:
     file_paths:
-    - "UNETDIR/data/val"
+    - "UNETDIR/data/MODELNAME/val"
     slice_builder:
       name: FilterSliceBuilder
       patch_shape:

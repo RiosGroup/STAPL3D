@@ -144,7 +144,10 @@ def augmenter(x, y,
 def get_training_data(datadir, filestem_train, h5_path_pat, z_range, trainblock_list, ids_dapi, ids_label, ids_memb, use_memb, axis_norm, ind_val, normalizer, **kwargs):
     X, Y = [], []
     for trainblock in trainblock_list:
-        z_slc = slice(z_range[0], z_range[1])
+        if z_range:
+            z_slc = slice(z_range[0], z_range[1])
+        else:
+            z_slc = slice(None)
         h5_path = h5_path_pat.format(filestem_train, trainblock)
         img_path = os.path.join(datadir, '{}/{}'.format(h5_path, ids_dapi))
         img_im = Image(img_path, permission='r')
