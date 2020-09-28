@@ -236,56 +236,115 @@ membrane_enhancement:
         wtime: 01:00:00
 
 segmentation:
+
     params:
-        ids_memb_mask: memb/planarity
-        ids_memb_chan: memb/mean
-        ids_nucl_chan: chan/ch00
-        ids_dset_mean: mean
-        segments_ods: labels_memb_del
-        dapi_shift_planes: 0
-        nucl_opening_footprint:
+
+        prep_dset:
+            ids_image: mean
+            ods_image: prep
+            filter:
+                inplane: true
+                type: 'gaussian'
+                sigma: 50.0
+
+        mask_dset:
+            ids_image: prep
+            ods_mask: mask
+            threshold: 1000.0
+
+        prep_nucl:
+            ids_image: chan/ch00
+            ods_image: nucl/prep
+            shift_planes:
+                n_planes: 0
+                postfix: _shifted
+            opening:
+                selem: null
+                postfix: _opened
+            filter:
+                inplane: true
+                type: 'median'
+                sigma: 1.0
+
+        prep_unet:
+            ids_image: nucl/unet_stapl3d
+            ods_image: nucl/unet_stapl3d_prep
+            shift_planes:
+                n_planes: 3
+
+        mask_nucl:
+            ids_image: nucl/unet_stapl3d_prep
+            ods_mask: nucl/mask
+            threshold: 0.9
+            fill: true
+
+        prep_memb:
+            ids_image: memb/mean
+            ods_image: memb/prep
+            filter:
+                inplane: true
+                type: 'median'
+                sigma: 1.0
+
+        mask_memb:
+            ids_image: memb/unet_stapl3d
+            ods_mask: memb/mask
+            threshold: 0.6
+
+        combine_masks:
+            ids_nucl: nucl/mask
+            ids_memb: memb/mask
+            ods_mask: segm/seeds_mask
+            opening_footprint:
             - 3
             - 7
             - 7
-        dapi_filter: 'median'
-        dapi_sigma: 1
-        dapi_dog_sigma1: 2
-        dapi_dog_sigma2: 4
-        dapi_thr: 5000
-        sauvola_window_size:
-            - 19
-            - 75
-            - 75
-        sauvola_k: 0.2
-        dapi_absmin: 1000
-        dapi_erodisk: 3
-        dist_max: 5
-        peaks_size:
-            - 11
-            - 19
-            - 19
-        peaks_thr: 1.16
-        peaks_dil_footprint:
-            - 3
-            - 7
-            - 7
-        compactness: 0.0
-        memb_filter: 'median'
-        memb_sigma: 3.0
-        planarity_thr: 0.0005
-        dset_mask_filter: 'gaussian'
-        dset_mask_sigma: 50
-        dset_mask_thr: 1000
-        steps:
-            - 0
-            - 1
-            - 2
-            - 3
-            - 4
-            - 5
-            - 6
-            - 7
-            - 8
+
+        seed:
+            ids_mask: segm/seeds_mask
+            ids_image: nucl/prep
+            ods_labels: segm/labels_edt
+            edt:
+                threshold: 5.0
+                postfix: _edt
+            filter:
+                inplane: false
+                type: 'dog'
+                sigma1: 2.0
+                sigma2: 4.0
+                min: 1.00
+                max: 1.01
+                postfix: _dog
+            peaks:
+                threshold: 1.16
+                window:
+                - 11
+                - 19
+                - 19
+                dilate:
+                    footprint:
+                    - 3
+                    - 7
+                    - 7
+                    postfix: _dil
+            seeds:
+                threshold: 1.16
+
+        segment:
+            ids_image: memb/prep
+            ids_labels: segm/labels_edt
+            ods_labels: segm/labels
+            watershed:
+                compactness: 0.80
+                voxel_spacing:
+                    - 4
+                    - 1
+                    - 1
+                postfix: _ws0
+            filter:
+                ids_mask: prep
+                postfix: _dset
+
     submit:
         array: block
         mem: 60G

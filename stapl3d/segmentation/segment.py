@@ -106,29 +106,6 @@ def estimate(
     outputdir='',
     n_workers=0,
     blocks=[],
-    dapi_shift_planes=0,
-    nucl_opening_footprint=[3, 7, 7],
-    dapi_filter='median',
-    dapi_sigma=1,
-    dapi_dog_sigma1=2,
-    dapi_dog_sigma2=4,
-    dapi_thr=0,
-    sauvola_window_size=[19, 75, 75],
-    sauvola_k=0.2,
-    dapi_absmin=500,
-    dapi_erodisk=0,
-    dist_max=5,
-    peaks_size=[11, 19, 19],
-    peaks_thr=1.0,
-    peaks_dil_footprint=[3, 7, 7],
-    compactness=0.80,
-    memb_filter='median',
-    memb_sigma=3,
-    planarity_thr=0.0005,
-    dset_mask_filter='gaussian',
-    dset_mask_sigma=50,
-    dset_mask_thr=1000,
-    steps=[0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
     ):
     """Segment cells from membrane and nuclear channels."""
 
@@ -141,39 +118,7 @@ def estimate(
 
     filepaths, blocks = get_blockfiles(image_in, outputdir, params['blocks'])
 
-    arglist = [
-        (
-            filepath,
-            params['ids_memb_mask'],
-            params['ids_memb_chan'],
-            params['ids_nucl_chan'],
-            params['ids_dset_mean'],
-            params['dapi_shift_planes'],
-            params['nucl_opening_footprint'],
-            params['dapi_filter'],
-            params['dapi_sigma'],
-            params['dapi_dog_sigma1'],
-            params['dapi_dog_sigma2'],
-            params['dapi_thr'],
-            params['sauvola_window_size'],
-            params['sauvola_k'],
-            params['dapi_absmin'],
-            params['dapi_erodisk'],
-            params['dist_max'],
-            params['peaks_size'],
-            params['peaks_thr'],
-            params['peaks_dil_footprint'],
-            params['compactness'],
-            params['memb_filter'],
-            params['memb_sigma'],
-            params['planarity_thr'],
-            params['dset_mask_filter'],
-            params['dset_mask_sigma'],
-            params['dset_mask_thr'],
-            params['steps'],
-            outputdir,
-        )
-        for block_idx, filepath in zip(blocks, filepaths)]
+    arglist = [(filepath, params, True) for filepath in filepaths]
 
     n_workers = get_n_workers(len(blocks), subparams)
     with multiprocessing.Pool(processes=n_workers) as pool:
@@ -182,620 +127,332 @@ def estimate(
 
 def cell_segmentation(
     filepath,
-    ids_memb_mask,
-    ids_memb_chan,
-    ids_nucl_chan,
-    ids_dset_mean,
-    dapi_shift_planes=0,
-    nucl_opening_footprint=[3, 7, 7],
-    dapi_filter='median',
-    dapi_sigma=1,
-    dapi_dog_sigma1=2,
-    dapi_dog_sigma2=4,
-    dapi_thr=0,
-    sauvola_window_size=[19, 75, 75],
-    sauvola_k=0.2,
-    dapi_absmin=500,
-    dapi_erodisk=0,
-    dist_max=5,
-    peaks_size=[11, 19, 19],
-    peaks_thr=1.0,
-    peaks_dil_footprint=[3, 7, 7],
-    compactness=0.80,
-    memb_filter='median',
-    memb_sigma=3,
-    planarity_thr=0.0005,
-    dset_mask_filter='gaussian',
-    dset_mask_sigma=50,
-    dset_mask_thr=1000,
-    steps=[0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
-    outputdir='',
+    params,
+    save_steps=True,
     ):
 
-    fill_nuclei = True
-
-    # Prepare the output.
-    outputstem = os.path.splitext(filepath)[0]
-    save_steps = True
-
-    logging.basicConfig(filename='{}.log'.format(outputstem), level=logging.INFO)
+    logging.basicConfig(filename='{}.log'.format(filepath), level=logging.INFO)
     report = {'parameters': locals()}
 
-    # load images
-    im_dapi = Image('{}/{}'.format(filepath, ids_nucl_chan))
-    im_dapi.load()
-    nucl_props = im_dapi.get_props()
+    for step_key, pars in params.items():
 
-    if ids_memb_chan:
-        im_memb = Image('{}/{}'.format(filepath, ids_memb_chan))
-        im_memb.load()
-        memb_props = im_memb.get_props()
+        t = time.time()
+
+        if step_key.startswith('prep'):
+            im = prep_volume(filepath, step_key, pars, save_steps)
+        elif step_key.startswith('mask'):
+            im = mask_volume(filepath, step_key, pars, save_steps)
+        elif step_key.startswith('combine'):
+            im = combine_volumes(filepath, step_key, pars, save_steps)
+        elif step_key == 'seed':
+            im = seed_volume(filepath, step_key, pars, save_steps)
+        elif step_key == 'segment':
+            im = segment_volume(filepath, step_key, pars, save_steps)
+
+        elapsed = time.time() - t
+        print('{} took {:1f} s'.format(step_key, elapsed))
+
+
+def prep_volume(filepath, step_key, pars, save_steps=True):
+
+    image_in = '{}/{}'.format(filepath, pars['ids_image'])
+    print(image_in)
+    im = Image(image_in)
+    im.load()
+    data = im.slice_dataset()
+    im.close()
+
+    # if 'shift_planes' in pars.keys():
+    #     p = pars['shift_planes']
+    try:
+        p = pars['shift_planes']
+        print(p)
+    except KeyError:
+        pass
     else:
-        im_memb, memb_props = None, None
+        data = shift_channel(data, n_planes=p['n_planes'])
+        if 'postfix' in p.keys(): write(data, image_in, p['postfix'], im)
 
-    if ids_memb_mask:
-        im_plan = Image('{}/{}'.format(filepath, ids_memb_mask))
-        im_plan.load()
+    try:
+        p = pars['opening']
+        print(p)
+    except KeyError:
+        pass
     else:
-        im_plan = Image('{}/{}'.format(filepath, 'memb/planarity'), **nucl_props)
-        im_plan.create()
-        im_plan.write(np.zeros(im_plan.dims))
+        try:
+            selem = p['selem']
+        except KeyError:
+            selem = None
+        data = opening(data, selem=selem, out=data)
+        if 'postfix' in p.keys(): write(data, image_in, p['postfix'], im)
 
-    # im_dset_mask = Image(dset_mask_path, permission='r')
-    # im_dset_mask.load(load_data=False)
-    im_mean = Image('{}/{}'.format(filepath, ids_dset_mean))
-    im_mean.load()
-
-    # preprocess dapi channel
-    # .h5/nucl/dapi<_shifted><_opened><_preprocess>
-    stage = 'nucleus channel'
-    t = time.time()
-    outstem = '{}.h5{}'.format(outputstem, '/nucl/dapi')
-    if 0 not in steps:
-        op = 'reading'
-        im_dapi_pp = get_image('{}{}'.format(outstem, '_preprocess'))
+    try:
+        p = pars['filter']
+        print(p)
+    except KeyError:
+        pass
     else:
-        op = 'processing'
-        im_dapi_pp = preprocess_nucl(
-            im_dapi,
-            dapi_shift_planes,
-            dapi_filter,
-            dapi_sigma,
-            outstem,
-            save_steps,
-            )
-    elapsed = time.time() - t
-    print('{} ({}) took {:1f} s'.format(stage, op, elapsed))
 
-    # create a nuclear mask from the dapi channel
-    # .h5/nucl/dapi<_mask_thr><_sauvola><_mask><_mask_ero>
-    stage = 'nucleus mask'
-    t = time.time()
-    outstem = '{}.h5{}'.format(outputstem, '/nucl/dapi')
-    if 1 not in steps:
-        op = 'reading'
-        im_dapi_mask = get_image('{}{}'.format(outstem, '_mask_ero'))
+        if p['type'] in ['median', 'gaussian']:
+            if p['inplane']:
+                data = smooth_channel_inplane(data, p['sigma'], p['type'])
+            else:
+                # TODO
+                data = smooth_channel(data, p['sigma'], p['type'])
+        elif p['type'] == 'dog':
+            data = smooth_dog(data, im.elsize, p['sigma1'], p['sigma2'])
+            data = data.astype('float16')
+
+        if 'postfix' in p.keys(): write(data, image_in, p['postfix'], im)
+
+    im = write(data, '{}/'.format(filepath), pars['ods_image'], im, 'Image')
+
+    return im
+
+
+def mask_volume(filepath, step_key, pars, save_steps=True):
+
+    image_in = '{}/{}'.format(filepath, pars['ids_image'])
+    im = Image(image_in)
+    im.load()
+    data = im.slice_dataset()
+    im.close()
+
+    try:
+        p = pars['threshold']
+        print(p)
+    except KeyError:
+        pass
     else:
-        op = 'processing'
-        im_dapi_mask = create_nuclear_mask(
-            im_dapi_pp,
-            dapi_thr,
-            sauvola_window_size,
-            sauvola_k,
-            dapi_absmin,
-            fill_nuclei,
-            dapi_erodisk,
-            outstem,
-            save_steps,
-            )
-    elapsed = time.time() - t
-    print('{} ({}) took {:1f} s'.format(stage, op, elapsed))
+        mask = data > pars['threshold']
 
-    # preprocess membrane mean channel
-    # .h5/memb/preprocess<_smooth>
-    stage = 'membrane channel'
-    t = time.time()
-    outstem = '{}.h5{}'.format(outputstem, '/memb/mean')
-    if not ids_memb_chan:
-        im_memb_pp = None
-    elif 5 not in steps:
-        op = 'reading'
-        im_memb_pp = get_image('{}{}'.format(outstem, '_smooth'))
+    try:
+        p = pars['sauvola']
+        print(p)
+    except KeyError:
+        pass
     else:
-        op = 'processing'
-        im_memb_pp = preprocess_memb(
-            im_memb,
-            memb_filter,
-            memb_sigma,
-            outstem,
-            save_steps,
-            )
-    elapsed = time.time() - t
-    print('{} ({}) took {:1f} s'.format(stage, op, elapsed))
 
-    # create a membrane mask from the membrane mean
-    # .h5/memb/planarity<_mask>
-    stage = 'membrane mask'
-    t = time.time()
-    outstem = '{}.h5{}'.format(outputstem, '/memb/planarity')
-    if ids_memb_chan == ids_memb_mask:
-        im_plan = im_memb_pp
-    if 2 not in steps:
-        op = 'reading'
-        im_memb_mask = get_image('{}{}'.format(outstem, '_mask'))
+        if 'absmin' in p.keys():
+            mask = data > p['absmin']
+        else:
+            mask = np.zeros_like(data, dtype='bool')
+
+        if 'k' in p.keys():
+            thr = threshold_sauvola(data, window_size=p['window_size'], k=p['k'])
+            mask_sauvola = data > thr
+            mask &= mask_sauvola
+
+        if 'threshold' in p.keys():
+            mask_threshold = data > p['threshold']
+            mask_threshold = binary_closing(mask_threshold)
+            mask |= mask_threshold
+
+    try:
+        p = pars['fill']
+        print(p)
+    except KeyError:
+        pass
     else:
-        op = 'processing'
-        im_memb_mask = create_membrane_mask(
-            im_plan,
-            planarity_thr,
-            outstem,
-            save_steps,
-            )
-    elapsed = time.time() - t
-    print('{} ({}) took {:1f} s'.format(stage, op, elapsed))
+        if p:
+            binary_fill_holes(mask, output=mask)
 
-    # combine nuclear and membrane mask
-    # .h5/segm/seeds<_mask>
-    stage = 'mask combination'
-    t = time.time()
-    outstem = '{}.h5{}'.format(outputstem, '/segm/seeds')
-    if 3 not in steps:
-        op = 'reading'
-        im_nucl_mask = get_image('{}{}'.format(outstem, '_mask'))
+    try:
+        p = pars['erode']
+        print(p)
+    except KeyError:
+        pass
     else:
-        op = 'processing'
-        im_nucl_mask = combine_nucl_and_memb_masks(
-            im_memb_mask,
-            im_dapi_mask,
-            nucl_opening_footprint,
-            outstem,
-            save_steps,
-            )
-    elapsed = time.time() - t
-    print('{} ({}) took {:1f} s'.format(stage, op, elapsed))
-
-    # find seeds for watershed
-    stage = 'nucleus detection'
-    t = time.time()
-    outstem = '{}.h5{}'.format(outputstem, '/segm/seeds')
-    if 4 not in steps:
-        op = 'reading'
-        im_dt = get_image('{}{}'.format(outstem, '_edt'))
-        im_peaks = get_image('{}{}'.format(outstem, '_peaks'))
-    # .h5/segm/seeds<_edt><_mask_distmax><_peaks><_peaks_dil>
-    else:
-        op = 'processing'
-        im_dt, im_peaks = define_seeds(
-            im_nucl_mask,
-            im_memb_mask,
-            im_dapi_pp,
-            dapi_dog_sigma1,
-            dapi_dog_sigma2,
-            dist_max,
-            peaks_size, peaks_thr,
-            peaks_dil_footprint,
-            outstem,
-            save_steps,
-            )
-    elapsed = time.time() - t
-    print('{} ({}) took {:1f} s'.format(stage, op, elapsed))
-
-    # perform watershed from the peaks to fill the nuclei
-    # .h5/segm/labels<_edt><_memb>
-    stage = 'watershed'
-    t = time.time()
-    outstem = '{}.h5{}'.format(outputstem, '/segm/labels')
-    if 6 not in steps:
-        op = 'reading'
-        im_ws = get_image('{}{}'.format(outstem, '_memb'), imtype='Label')
-    else:
-        op = 'processing'
-        im_ws = perform_watershed(
-            im_peaks,
-            im_memb_pp,
-            im_dt,
-            peaks_thr,
-            memb_sigma,
-            memb_filter,
-            compactness,
-            outstem,
-            save_steps,
-            )
-    elapsed = time.time() - t
-    print('{} ({}) took {:1f} s'.format(stage, op, elapsed))
-
-    # generate a dataset mask from the mean of all channels
-    # .h5/mean<_smooth><_mask>
-    stage = 'dataset mask'
-    t = time.time()
-    outstem = '{}.h5{}'.format(outputstem, '/mean')
-    if 7 not in steps:
-        op = 'reading'
-        im_dset_mask = get_image('{}{}'.format(outstem, '_mask'), imtype='Mask')
-    else:
-        op = 'processing'
-        im_dset_mask = create_dataset_mask(
-            im_mean,
-            filter=dset_mask_filter,
-            sigma=dset_mask_sigma,
-            threshold=dset_mask_thr,
-            outstem=outstem,
-            save_steps=save_steps,
-            )
-    elapsed = time.time() - t
-    print('{} ({}) took {:1f} s'.format(stage, op, elapsed))
-
-    # filter the segments with the dataset mask
-    # .h5/segm/labels<_memb_del>
-    # .h5/mask
-    stage = 'segment filter'
-    t = time.time()
-    outstem = '{}.h5{}'.format(outputstem, '/segm/labels')
-    if 8 not in steps:
-        im_ws_pp = get_image('{}{}'.format(outstem, '_memb_del'), imtype='Label')
-    else:
-        op = 'processing'
-        im_ws_pp = segmentation_postprocessing(
-            im_dset_mask,
-            im_ws,
-            outstem,
-            save_steps,
-            )
-    elapsed = time.time() - t
-    print('{} ({}) took {:1f} s'.format(stage, op, elapsed))
-
-    # write report
-    generate_report('{}.h5/{}'.format(outputstem, 'mean_mask'))
-
-
-def preprocess_nucl(
-    im_nucl,
-    shift_planes=0,
-    filter='median',
-    sigma=1,
-    outstem='',
-    save_steps=False,
-    ):
-    """Preprocess nuclear channel.
-
-    - shift in z by an integer number of planes.
-    - greyscale opening.
-    - in-plane smoothing.
-    - difference of gaussians.
-    """
-
-    # preprocess dapi: shift in z, opening and smoothing
-    # TODO: move this step outside of this segmentation pipeline
-    # it's too data-acquisition specific NOTE: (into sumsplit?)
-    nucl_pp = shift_channel(im_nucl.ds[:], n_planes=shift_planes)
-    if save_steps: write(nucl_pp, outstem, '_shifted', im_nucl)
-
-    selem = None  # TODO
-    nucl_pp = opening(nucl_pp, selem=selem, out=nucl_pp)
-    if save_steps: write(nucl_pp, outstem, '_opened', im_nucl)
-
-    nucl_pp = smooth_channel_inplane(nucl_pp, sigma, filter)
-    im_nucl_pp = write(nucl_pp, outstem, '_preprocess', im_nucl)
-
-    return im_nucl_pp
-
-
-
-def dog_nucl(
-    im_nucl,
-    dog_sigma1=2,
-    dog_sigma2=4,
-    outstem='',
-    save_steps=False,
-    ):
-    """Preprocess nuclear channel.
-
-    - difference of gaussians.
-    """
-
-    elsize = np.absolute(im_nucl.elsize)
-    sigma1 = [dog_sigma1 / es for es in elsize]
-    sigma2 = [dog_sigma2 / es for es in elsize]
-    dog = gaussian(im_nucl.ds[:], sigma1) - gaussian(im_nucl.ds[:], sigma2)
-    im_dog = write(dog.astype('float16'), outstem, '_dog', im_nucl)
-
-    return im_dog
-
-
-
-def create_nuclear_mask(
-    im_nucl,
-    threshold=5000.0,
-    window_size=[19, 75, 75],
-    k=0.2,
-    absolute_min_intensity=2000.0,
-    fill_nuclei=True,
-    disksize_erosion=3,
-    outstem='',
-    save_steps=False,
-    ):
-    """Generate a nuclear mask.
-
-    - absolute minumum intensity
-    - simple thresholding
-    - sauvola thresholding
-    - mask erosion
-    """
-
-    mask = im_nucl.ds[:] > absolute_min_intensity
-    if save_steps: write(mask, outstem, '_mask_absmin', im_nucl)
-
-    if k:
-        thr = threshold_sauvola(im_nucl.ds[:], window_size=window_size, k=k)
-        mask_sauvola = im_nucl.ds[:] > thr
-        if save_steps: write(mask_sauvola, outstem, '_mask_sauvola', im_nucl)
-        mask &= mask_sauvola
-        if save_steps: write(mask, outstem, '_mask_nuclei', im_nucl)
-
-    if threshold:
-        mask_threshold = im_nucl.ds[:] > threshold
-        mask_threshold = binary_closing(mask_threshold)
-        if save_steps: write(mask_threshold, outstem, '_mask_thr', im_nucl)
-        mask |= mask_threshold
-
-    if fill_nuclei:
-        binary_fill_holes(mask, output=mask)
-
-    im_mask = write(mask, outstem, '_mask', im_nucl)
-
-    if disksize_erosion:
-        disk_erosion = disk(disksize_erosion)
+        # FIXME: this may or may not be the desired primary output
+        disk_erosion = disk(p['disk'])
         mask_ero = np.zeros_like(mask, dtype='bool')
         for i, slc in enumerate(mask):  # FIXME: assuming zyx here
             mask_ero[i, :, :] = binary_erosion(slc, disk_erosion)
-        im_mask = write(mask_ero, outstem, '_mask_ero', im_nucl)
-    else:
-        im_mask = write(mask, outstem, '_mask_ero', im_nucl)
+        if 'postfix' in p.keys(): write(mask_ero, image_in, p['postfix'], im, 'MaskImage')
 
-    return im_mask
+    im = write(mask, '{}/'.format(filepath), pars['ods_mask'], im, 'MaskImage')
 
-
-
-def create_membrane_mask(
-    im_planarity,
-    threshold=0.001,
-    outstem='',
-    save_steps=False,
-    ):
-    """Generate a membrane mask.
-
-    - simple thresholding of (preprocessed) membranes
-    """
-
-    mask = im_planarity.ds[:] > threshold
-    im_mask = write(mask, outstem, '_mask', im_planarity)
-
-    return im_mask
+    return im
 
 
+def combine_volumes(filepath, step_key, pars, save_steps=True):
+    # TODO: make more general and versatile
 
-def create_dataset_mask(
-    im_mean,
-    filter='gaussian',
-    sigma=50.0,
-    threshold=1000.0,
-    outstem='',
-    save_steps=False,
-    ):
-    """Generate a dataset mask.
+    if step_key.endswith('masks'):
 
-    - simple thresholding after smoothing with a large kernel
-    """
+        image_in = '{}/{}'.format(filepath, pars['ids_nucl'])
+        im = MaskImage(image_in)
+        im.load()
+        mask_nucl = im.slice_dataset().astype('bool')
+        im.close()
 
-    smooth = smooth_channel_inplane(im_mean.ds[:], sigma, filter)
-    if save_steps: write(smooth, outstem, '_smooth', im_mean)
+        image_in = '{}/{}'.format(filepath, pars['ids_memb'])
+        im = MaskImage(image_in)
+        im.load()
+        mask_memb = im.slice_dataset().astype('bool')
+        im.close()
 
-    mask = smooth > threshold
-    im_mask = write(mask, outstem, '_mask', im_mean)
+        mask = np.logical_and(mask_nucl, ~mask_memb)
 
-    return im_mask
-
-
-
-def combine_nucl_and_memb_masks(
-    im_memb_mask,
-    im_nucl_mask,
-    opening_footprint=[],
-    outstem='',
-    save_steps=False,
-    ):
-    """Combine the nuclear and membrane mask to separate the nuclei.
-
-    - bitwise AND
-    - opening of the result
-    """
-
-    comb_mask = np.logical_and(im_nucl_mask.ds[:].astype('bool'),
-                               ~im_memb_mask.ds[:].astype('bool'))
-
-    if opening_footprint:
-        footprint = create_footprint(opening_footprint)
-        combined_mask = binary_opening(comb_mask, footprint, out=comb_mask)
-
-    im_comb_mask = write(comb_mask, outstem, '_mask', im_memb_mask)
-
-    return im_comb_mask
-
-
-
-def define_seeds(
-    im_nucl_mask,
-    im_memb_mask,
-    im_nucl=None,
-    dog_sigma1=2.0,
-    dog_sigma2=4.0,
-    distance_threshold=0.0,
-    peaks_window=[7, 21, 21],
-    peaks_threshold=1.0,
-    peaks_dilate_footprint=[3, 7, 7],
-    outstem='',
-    save_steps=False,
-    ):
-    """Generate watershed seeds.
-
-    - distance transform on the nuclei
-    - maximal distance threshold
-    - modulation towards nuclei centre (because discretized distance transform)
-    - peak detection
-    - dilation (for visualization)
-    """
-
-    # calculate distance transform
-    elsize = np.absolute(im_nucl_mask.elsize)
-    dt = distance_transform_edt(im_nucl_mask.ds[:], sampling=elsize)
-    im_dt = write(dt, outstem, '_edt', im_memb_mask)
-
-    # define a mask to constrain the watershed (unused for now)
-    if distance_threshold:
-        mask_maxdist = dt < distance_threshold
-        if save_steps: write(mask_maxdist, outstem, '_mask_distmax', im_memb_mask)
-
-    # modulate dt with normalized DoG dapi
-    if im_nucl is not None:
-        im_dog = dog_nucl(im_nucl, dog_sigma1, dog_sigma2, outstem, save_steps)
-        dt *= normalize_data(im_dog.ds[:], a=1.00, b=1.01)[0]
-
-    # find peaks in the distance transform
-    peaks = find_local_maxima(dt, peaks_window, peaks_threshold)
-    im_peaks = write(peaks, outstem, '_peaks', im_memb_mask)
-
-    if save_steps:
-        footprint = create_footprint(peaks_dilate_footprint)
-        peaks_dil = binary_dilation(peaks, selem=footprint)
-        write(peaks_dil, outstem, '_peaks_dil', im_memb_mask)
-
-    return im_dt, im_peaks
-
-
-
-def preprocess_memb(
-    im_memb,
-    filter='median',
-    sigma=1.0,
-    outstem='',
-    save_steps=False,
-    ):
-    """Preprocess the membrame image before watershed.
-
-    - inplane smoothing
-    """
-
-    memb = smooth_channel_inplane(im_memb.ds[:], sigma, filter)
-    im_memb_pp = write(memb, outstem, '_smooth', im_memb)
-
-    return im_memb_pp
-
-
-
-def perform_watershed(
-    im_peaks,
-    im_memb,
-    im_dt=None,
-    peaks_thr=1.0,
-    memb_sigma=1.0,
-    memb_filter='median',
-    compactness=0.0,
-    outstem='',
-    save_steps=False,
-    ):
-    """Create segments by watershed in a two-step procedure.
-
-    - masked watershed in distance transform to fatten the seeds
-        and avoid local minima in the membrane image
-    - unmasked watershed to cell boundaries
-    """
-
-    seeds = ndi.label(im_peaks.ds[:])[0]
-
-    if im_dt is not None:
-        seeds = watershed(-im_dt.ds[:], seeds, mask=im_dt.ds[:] > peaks_thr)
-        if save_steps:
-            if im_memb is not None:
-                im_ws = write(seeds, outstem, '_edt', im_peaks, imtype='Label')
-            else:
-                im_ws = write(seeds, outstem, '_edt', im_peaks, imtype='Label')
-                im_ws = write(seeds, outstem, '_memb', im_peaks, imtype='Label')
-        seeds = im_ws.ds[:]
-
-    if False:
-        mstem = outstem.replace('/segm/labels', '/memb/planarity')
-        im_memb_mask_final = get_image('{}{}'.format(mstem, '_mask'), imtype='Mask')
-        memb_mask = im_memb_mask_final.ds[:].astype('bool')
-        im_memb_mask_final.close()
-
-        nstem = outstem.replace('/segm/labels', '/nucl/dapi')
-        im_nucl_mask_final = get_image('{}{}'.format(nstem, '_mask'), imtype='Mask')
-        nucl_mask = im_nucl_mask_final.ds[:].astype('bool')
-        im_nucl_mask_final.close()
-
-        memb_mask[nucl_mask] = False
-        mask = binary_erosion(memb_mask)
-        im_mask = write(mask, outstem, '_csol_mask', im_peaks, imtype='Mask')
-
-        cells = watershed(im_memb.ds[:], seeds, mask=~mask)
-        im_cells = write(cells, outstem, '_csol', im_peaks, imtype='Label')
-        seeds = im_cells.ds[:]
-
-    if im_memb is not None:
-        # TODO: try masked watershed, e.g.:
-        # 1) simple dataset mask from channel-mean,
-        # 2) dilated dapi mask for contraining cells
         try:
-            ws = watershed(im_memb.ds[:], seeds, compactness=compactness, spacing=im_memb.elsize)
+            p = pars['opening_footprint']
+        except KeyError:
+            pass
+        else:
+            footprint = create_footprint(p)
+            mask = binary_opening(mask, footprint, out=mask)
+
+    im = write(mask, '{}/'.format(filepath), pars['ods_mask'], im, 'MaskImage')
+
+    return im
+
+
+def seed_volume(filepath, step_key, pars, save_steps=True):
+
+    image_in = '{}/{}'.format(filepath, pars['ids_image'])
+    im = Image(image_in)
+    im.load()
+    data = im.slice_dataset()
+    im.close()
+
+    image_in = '{}/{}'.format(filepath, pars['ids_mask'])
+    im = Image(image_in)
+    im.load()
+    mask = im.slice_dataset()
+    im.close()
+
+    try:
+        p = pars['edt']
+    except KeyError:
+        pass
+    else:
+        edt = distance_transform_edt(mask, sampling=np.absolute(im.elsize))
+        # mask = im.ds[:].astype('uint32')
+        # edt = edt.edt(mask, anisotropy=im.elsize, black_border=True, order='F', parallel=1)
+        # TODO?: leverage parallel
+        try:
+            threshold = p['threshold']
+        except KeyError:
+            pass
+        else:
+            edt[edt > threshold] = 0
+        if 'postfix' in p.keys(): write(edt, image_in, p['postfix'], im, 'Image')
+
+    try:
+        p = pars['modulate']
+    except KeyError:
+        pass
+    else:
+        dog = smooth_dog(data, im.elsize, p['sigma1'], p['sigma2'])
+        edt *= normalize_data(dog, a=p['min'], b=p['max'])[0]
+        if 'postfix' in p.keys(): write(dog, image_in, p['postfix'], im, 'Image')  # edt and/or dog?
+
+    try:
+        p = pars['edt_threshold']
+        print(p)
+    except KeyError:
+        pass
+    else:
+        mask = edt > pars['edt_threshold']
+
+    try:
+        p = pars['peaks']
+    except KeyError:
+        pass
+    else:
+        # find peaks in the distance transform
+        mask = find_local_maxima(edt, p['window'], p['threshold'])
+        try:
+            footprint = p['dilate']['footprint']
+        except KeyError:
+            pass
+        else:
+            footprint = create_footprint(footprint)
+            mask_dil = binary_dilation(mask, selem=footprint)
+            if 'postfix' in p['dilate'].keys(): write(mask_dil, image_in, p['dilate']['postfix'], im, 'MaskImage')
+
+    try:
+        p = pars['label']
+    except KeyError:
+        pass
+    else:
+        seeds = ndi.label(mask)[0]
+
+    try:
+        p = pars['seeds']
+    except KeyError:
+        pass
+    else:
+        if 'threshold' in p.keys():
+            seeds = watershed(-edt, seeds, mask=edt > p['threshold'])
+
+    im = write(seeds, '{}/'.format(filepath), pars['ods_labels'], im, 'LabelImage')
+
+    return im
+
+
+def segment_volume(filepath, step_key, pars, save_steps=True):
+
+    image_in = '{}/{}'.format(filepath, pars['ids_image'])
+    im = Image(image_in)
+    im.load()
+    data = im.slice_dataset()
+    im.close()
+
+    image_in = '{}/{}'.format(filepath, pars['ids_labels'])
+    im = Image(image_in)
+    im.load()
+    seeds = im.slice_dataset()
+    im.close()
+
+    try:
+        p = pars['watershed']
+    except KeyError:
+        pass
+    else:
+        if 'ids_mask' in p.keys():
+            image_in = '{}/{}'.format(filepath, p['ids_mask'])
+            im = Image(image_in)
+            im.load()
+            mask = im.slice_dataset()
+            im.close()
+        else:
+            mask = None
+
+        if 'voxel_spacing' in p.keys():
+            spacing = p['voxel_spacing']
+        else:
+            spacing = im.elsize
+
+        if 'compactness' in p.keys():
+            compactness = p['compactness']
+        else:
+            compactness = 0.0
+
+        try:
+            ws = watershed(data, seeds, mask=mask, compactness=compactness, spacing=spacing)
         except TypeError:
             print('WARNING: possibly not using correct spacing for compact watershed')
-            ws = watershed(im_memb.ds[:], seeds, compactness=compactness)
+            ws = watershed(data, seeds, mask=mask, compactness=compactness)
 
-        im_ws = write(ws, outstem, '_memb', im_memb, imtype='Label')
+        if 'postfix' in p.keys(): write(ws, image_in, p['postfix'], im, 'MaskImage')
 
-    return im_ws
+    try:
+        p = pars['filter']
+    except KeyError:
+        pass
+    else:
+        image_in = '{}/{}'.format(filepath, p['ids_mask'])
+        im = MaskImage(image_in)
+        im.load()
+        mask = im.slice_dataset().astype('bool')
+        im.close()
+        maxlabel = max(np.unique(ws))
+        ws = delete_labels_in_mask(ws, ~mask, maxlabel)
 
+    im = write(ws, '{}/'.format(filepath), pars['ods_labels'], im, 'LabelImage')
 
-
-def segmentation_postprocessing(
-    im_dset_mask,
-    im_ws,
-    outstem='',
-    save_steps=False,
-    ):
-    """Postprocess the segments.
-
-    - delete labels outside of the dataset mask
-    """
-
-    ws_del = delete_labels_in_mask(im_ws.ds[:], ~im_dset_mask.ds[:], im_ws.maxlabel)
-    im_ws_postproc = write(ws_del, outstem, '_memb_del', im_ws, imtype='Label')
-
-    # NOTE: split_nucl_and_memb is done in export_regionprops for now
-    # im_memb, im_nucl = split_nucl_and_memb(im_ws_postproc, outstem, save_steps)
-
-    return im_ws_postproc
-
-
-# TODO: unused?
-def split_nucl_and_memb(
-    im,
-    outstem='',
-    save_steps=False,
-    ):
-
-    data = im.slice_dataset()
-
-    memb_mask = binary_dilation(find_boundaries(data))
-    labels = np.copy(data)
-    labels[~memb_mask] = 0
-    im_memb = write(labels, outstem, '_memb', im, imtype='Label')
-
-    labels = np.copy(data)
-    labels[memb_mask] = 0
-    im_nucl = write(labels, outstem, '_nucl', im, imtype='Label')
-
-    return im_memb, im_nucl
+    return im
 
 
 def normalize_data(data, a=1.00, b=1.01):
@@ -826,8 +483,11 @@ def gen_outpath(im, pf):
 def write(out, outstem, postfix, ref_im, imtype='Image'):
     """Write an image to disk."""
 
+    print(outstem)
     outstem = outstem or gen_outpath(ref_im, '')
+    print(outstem)
     outpath = '{}{}'.format(outstem, postfix)
+    print(outpath)
 
     props = ref_im.get_props()
     props['dtype'] = out.dtype
@@ -849,49 +509,19 @@ def write(out, outstem, postfix, ref_im, imtype='Image'):
     return mo
 
 
-# TODO: unused?
-def write_output(outpath, out, props):
-
-
-    props['dtype'] = out.dtype
-    mo = Image(outpath, **props)
-    mo.create()
-    mo.write(out)
-
-    return mo
-
-
-# TODO: unused?
-def calculate_edt(im, outpath=''):
-    """Calculate distance from mask."""
-
-    mask = im.ds[:].astype('bool')
-    abs_es = np.absolute(im.elsize)
-    dt = distance_transform_edt(~mask, sampling=abs_es)
-
-    # mask = im.ds[:].astype('uint32')
-    # dt = edt.edt(mask, anisotropy=im.elsize, black_border=True, order='F', parallel=1)
-    # TODO?: leverage parallel
-
-    mo = write_output(outpath, dt, im.get_props())
-
-    return mo, mask
-
-
-def add_noise(data, sd=0.001):
-
-    mask = data == 0
-    data += np.random.normal(0, sd, (data.shape))
-    data[mask] = 0
-
-    return data
-
-
 def find_local_maxima(data, size=[13, 13, 3], threshold=0.05, noise_sd=0.0):
     """Find peaks in image."""
 
     if threshold == -float('Inf'):
         threshold = img.min()
+
+    def add_noise(data, sd=0.001):
+
+        mask = data == 0
+        data += np.random.normal(0, sd, (data.shape))
+        data[mask] = 0
+
+        return data
 
     """
     NOTE: handle double identified peaks within the footprint region
@@ -938,22 +568,6 @@ def create_footprint(size=[5, 21, 21]):
     return footprint
 
 
-# TODO: unused?
-def watershed_dog(im, markers, mask=None, inv=True, outpath=''):
-    """Calculate watershed."""
-
-    if inv:
-    	data = -im.ds[:]
-    else:
-    	data = im.ds[:]
-
-    ws = watershed(data, markers, mask=mask)
-
-    mo = write_output(outpath, ws, im.get_props())
-
-    return mo
-
-
 def shift_channel(data, n_planes=0, zdim_idx=0):
 
     if n_planes:
@@ -965,6 +579,17 @@ def shift_channel(data, n_planes=0, zdim_idx=0):
             data[:, :, :n_planes] = 0
 
     return data
+
+
+def smooth_channel(data, sigma=3, filter='median'):
+
+    if filter == 'median':
+        k = ball(sigma)  # TODO footprint
+        data_smooth = median(data, k)
+    elif filter == 'gaussian':
+        data_smooth = gaussian(data, sigma=sigma, preserve_range=True)
+
+    return data_smooth
 
 
 def smooth_channel_inplane(data, sigma=3, filter='median'):
@@ -980,6 +605,17 @@ def smooth_channel_inplane(data, sigma=3, filter='median'):
     return data_smooth
 
 
+def smooth_dog(data, elsize, sigma1, sigma2):
+
+    elsize = np.absolute(elsize)
+    s1 = [sigma1 / es for es in elsize]
+    s2 = [sigma2 / es for es in elsize]
+    dog = gaussian(data, s1) - gaussian(data, s2)
+
+    return dog
+
+
+# UNUSED?
 def upsample_to_block(mask_ds, block_us, dsfacs=[1, 16, 16, 1], order=0):
     """Upsample a low-res mask to a full-res block."""
 
@@ -1012,6 +648,7 @@ def delete_labels_in_mask(labels, mask, maxlabel=0):
     return labels_del
 
 
+# UNUSED?
 def find_border_segments(im):
 
     segments = set([])
@@ -1058,6 +695,7 @@ def subsegment(
     ods_full='',
     ods_memb='',
     ods_nucl='',
+    ods_csol='',
     ):
     """Perform N4 bias field correction."""
 
@@ -1077,6 +715,7 @@ def subsegment(
             params['ods_full'],
             params['ods_memb'],
             params['ods_nucl'],
+            params['ods_csol'],
             outputdir,
         )
         for block_idx, filepath in zip(blocks, filepaths)]
@@ -1092,6 +731,7 @@ def split_segments(
     ods_full='',
     ods_memb='',
     ods_nucl='',
+    ods_csol='',
     outputdir='',
     ):
 
@@ -1127,6 +767,32 @@ def split_segments(
         labs = np.copy(labels_ds)
         labs[~mask_memb] = 0
         write(labs, outstem, '', labels, imtype='Label')
+
+    # fstem = '{}/'.format(inputfile)  # TODO: flexible naming
+    # # nuclei  # TODO: this has probably already been written as .h5/nucl/dapi_mask
+    # nuclstem = '{}/{}'.format(inputfile, 'nucl/dapi')  # TODO: flexible naming
+    # maskpath_nucl = '{}_mask'.format(nuclstem)
+    # mask_nucl_im = MaskImage(maskpath_nucl, permission='r')
+    # mask_nucl_im.load(load_data=False)
+    # mask_nucl = mask_nucl_im.slice_dataset().astype('bool')
+    # write(mask_nucl, fstem, 'mask_nuclei', labels, imtype='Mask')
+    #
+    # membstem = '{}/{}'.format(inputfile, 'segm/labels_csol')  # TODO: flexible naming
+    # maskpath_memb = '{}_mask'.format(membstem)
+    # mask_memb_im = MaskImage(maskpath_memb, permission='r')
+    # mask_memb_im.load(load_data=False)
+    # mask_memb = mask_memb_im.slice_dataset().astype('bool')
+    # write(mask_memb, fstem, 'mask_membrane', labels, imtype='Mask')
+    # # membranes  # TODO: may combine with planarity_mask to make it more data-informed
+    #
+    # mask_csol = ~mask_memb & ~mask_nucl
+    # write(mask_csol, fstem, 'mask_cytosol', labels, imtype='Mask')
+    #
+    # for mask, ods in zip([mask_memb, mask_nucl, mask_csol], [ods_memb, ods_nucl, ods_csol]):
+    #     outstem = '{}/{}'.format(inputfile, ods)
+    #     labs = np.copy(labels_ds)
+    #     labs[~mask] = 0
+    #     write(labs, outstem, '', labels, imtype='Label')
 
 
 def plot_images(axs, info_dict={}):
