@@ -21,7 +21,7 @@ from sklearn.svm import SVC, SVR
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.model_selection import train_test_split, cross_val_score
 
-from devprof.umap_plotting import plot_umap_series
+from stapl3d.profiling.umap_plotting import plot_umap_series
 
 sc.settings.verbosity = 2
 sc.settings.autoshow = False
@@ -563,7 +563,7 @@ def pick_obs(adata, size=0):
 
 def nii_to_adata(filepath, filepath_mask='', slices=[]):
 
-    from wmem import Image, LabelImage, MaskImage
+    from stapl3d import Image, LabelImage, MaskImage
 
     im = Image(filepath, permission='r')
     im.load()
