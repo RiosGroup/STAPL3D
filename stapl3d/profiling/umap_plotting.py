@@ -113,7 +113,6 @@ def plot_umap(
         'leiden-0.40': (['C1', 'C2', 'C3', 'C4', 'C5', 'C6'], css),
         'batch': (['C1', 'C2'], css),
         }
-    if ckey == ''
 
     dfn = df.copy()
     if ckey in mappings.keys():
