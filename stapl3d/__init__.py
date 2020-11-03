@@ -2374,7 +2374,7 @@ def transpose_props(props, outlayout=''):
     return props
 
 
-def h5_nii_convert(image_in, image_out, datatype=''):
+def h5_nii_convert(image_in, image_out, datatype='', minmax=False):
     """Convert between h5 (zyx) and nii (xyz) file formats."""
 
     im_in = Image(image_in)
@@ -2382,7 +2382,17 @@ def h5_nii_convert(image_in, image_out, datatype=''):
     data = im_in.slice_dataset()
 
     props = transpose_props(im_in.get_props())
-    if datatype:
+
+    if minmax:
+        from skimage import exposure
+        data = exposure.rescale_intensity(data)
+
+    if datatype == 'uint8':  # for ACME
+        from skimage import img_as_ubyte
+        data = img_as_ubyte(data)
+        props['dtype'] = datatype
+
+    elif datatype:
         from skimage.util.dtype import convert
         data = convert(data, np.dtype(datatype), force_copy=False)
         props['dtype'] = datatype
