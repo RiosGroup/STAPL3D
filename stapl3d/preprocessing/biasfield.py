@@ -462,7 +462,12 @@ def apply_channel(
         dsfacs_bf, dsfacs_rl, _ = calculate_downsample_factors(image_in, resolution_level)
         downsample_factors = list(np.array(dsfacs_bf) * np.array(dsfacs_rl))
 
-    im = Image(image_in, permission='r')
+    if image_ref:
+        perm = 'r'
+    else:
+        perm = 'r+'
+
+    im = Image(image_in, permission=perm)
     im.load(load_data=False)
 
     bf = Image(bias_in, permission='r')
