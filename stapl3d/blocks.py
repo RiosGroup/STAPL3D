@@ -565,8 +565,9 @@ def link_blocks(filepath_in, filepath_out, dset_in, dset_out, delete=True, links
         im.close()
 
     if delete:
-
-        delete_dataset(filepath_out, dset_out)
+        mode = 'w'
+    else:
+        mode = 'r+'
 
     if links:
         import h5py
@@ -592,7 +593,7 @@ def link_blocks(filepath_in, filepath_out, dset_in, dset_out, delete=True, links
 
         im.close()
 
-        mo = Image('{}/{}'.format(filepath_out, dset_out), **props)
+        mo = Image('{}/{}'.format(filepath_out, dset_out), permission=mode, **props)
         mo.create()
         mo.write(data)
         mo.close()
