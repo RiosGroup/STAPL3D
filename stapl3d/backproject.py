@@ -17,7 +17,8 @@ from stapl3d import (
     LabelImage,
     wmeMPI,
     )
-from stapl3d.segmentation.segment import gen_outpath, write_output
+from stapl3d.segmentation.segment import gen_outpath
+
 
 def main(argv):
     """Write segment backprojection."""
@@ -274,6 +275,14 @@ def transpose_props(props, outlayout=''):
             props['chunks'] = np.array(props['chunks'])[in2out]
 
     return props
+
+
+def write_output(outpath, out, props):
+    props['dtype'] = out.dtype
+    mo = Image(outpath, **props)
+    mo.create()
+    mo.write(out)
+    return mo
 
 
 if __name__ == "__main__":
