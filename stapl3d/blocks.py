@@ -343,14 +343,14 @@ def prep_props(im, datatype, chunksize, blockmargin):
     return props
 
 
-def splitblocks(image_in, blocksize, blockmargin, outputtemplate):
+def splitblocks(image_in, blocksize, blockmargin, blockrange, outputtemplate):
     """Split an image into blocks."""
 
     mpi = wmeMPI(usempi=False)
     im = Image(image_in, permission='r')
     im.load(load_data=False)
 
-    mpi.set_blocks(im, blocksize, blockmargin, [], outputtemplate)
+    mpi.set_blocks(im, blocksize, blockmargin, blockrange, outputtemplate)
     mpi.scatter_series()
     props = im.get_props()
     for i in mpi.series:
