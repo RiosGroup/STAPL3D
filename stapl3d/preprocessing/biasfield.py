@@ -519,7 +519,8 @@ def apply_channel(
             m_stop = m_start + bs
             m_stop = min(m_stop, ds)
             data_slices.append(slice(m_start, m_stop, None))
-        data_slices[3] = block['slices'][3]
+        if len(data_slices) > 3:
+            data_slices[3] = block['slices'][3]
         data_shape = list(im.slices2shape(data_slices))
 
         # get the fullres image block
@@ -532,7 +533,8 @@ def apply_channel(
         data = np.nan_to_num(data, copy=False)
 
         mo.slices = block_nm['slices']
-        mo.slices[3] = slice(0, 1, 1)
+        if len(data_slices) > 3:
+            mo.slices[3] = slice(0, 1, 1)
         data = data[tuple(data_slices[:3])].astype(mo.dtype)
         mo.write(data)
 
