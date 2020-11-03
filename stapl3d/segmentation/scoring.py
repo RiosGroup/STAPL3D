@@ -10,14 +10,62 @@ import tifffile as tiffpy
 import argparse
 import datetime
 
+import pickle
+
 # parser = argparse.ArgumentParser()
 # parser = argparse.ArgumentParser(description='Input parameters')
 # parser.add_argument('-i', '--image', type=str, help='Segmentated image', required=False)
 # parser.add_argument('-t', '--truth', type=str, help='Segmentation truth', required=False)
 # args = parser.parse_args()
 
+
+def score_segmentation(blockdir, dataset, blocks, models, idss):
+
+    import multiprocessing
+
+    def read(image_in, slcs=[]):
+        from stapl3d import Image
+        im = Image(image_in)
+        im.load()
+        if slcs:
+            im.slices = slcs
+        data = im.slice_dataset()
+        im.close()
+        return data
+
+    arglist = []
+    for block_id, d in blocks.items():
+
+        blockstem = '{}_{}'.format(dataset, block_id)
+
+        for model in models:
+
+            filestem = os.path.join(blockdir, '{}_{}'.format(blockstem, model))
+            filepath = '{}.h5'.format(filestem)
+
+            for ids in idss:
+
+                outstem = '{}{}_scores'.format(filestem, ids)
+
+                if ids == '_unet3d': ids = ''
+
+                arglist.append(
+                    (
+                        d['gt'],
+                        read('{}/{}'.format(filepath, 'segm/labels{}'.format(ids)), slcs=[]),
+                        [], [], 1.5, 0.5, 0.5,
+                        outstem,
+                    )
+                )
+
+    n_workers = min(14, len(arglist))
+    with multiprocessing.Pool(processes=n_workers) as pool:
+        pool.starmap(assess_segmentation, arglist)
+
+
 def assess_segmentation(truth, segmentation, seg_slices=[], seg_transpose=[],
-                        F_weight=1.5, OSS_weight_ADS=0.5, OSS_weight_F=0.5):
+                        F_weight=1.5, OSS_weight_ADS=0.5, OSS_weight_F=0.5,
+                        outstem=''):
     """Assign each segment to a ground truth label"""
 
     if not isinstance(truth, np.ndarray):
@@ -214,6 +262,10 @@ def assess_segmentation(truth, segmentation, seg_slices=[], seg_transpose=[],
     print("Number of cells oversegmented: {}/{}".format(len(overseg), nr_labels_truth))
     print("Number of cells undersegmented: {}/{}".format(len(underseg), nr_labels_truth))
     #display_dice(dice_dict_TP_seg, dice_dict, truth, segmentation, affine, seg_labels)
+
+    if outstem:
+        with open('{}.pickle'.format(outstem), 'wb') as f:
+            pickle.dump(scores, f)
 
     return(scores)
 
