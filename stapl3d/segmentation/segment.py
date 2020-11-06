@@ -291,6 +291,15 @@ def combine_volumes(filepath, step_key, pars, save_steps=True):
         mask_memb = im.slice_dataset().astype('bool')
         im.close()
 
+        try:
+            p = pars['erode_nucl']
+        except KeyError:
+            pass
+        else:
+            disk_erosion = disk(p['disk'])
+            for i, slc in enumerate(mask_nucl):  # FIXME: assuming zyx here
+                mask_nucl[i, :, :] = binary_erosion(slc, disk_erosion)
+
         mask = np.logical_and(mask_nucl, ~mask_memb)
 
         try:
