@@ -427,6 +427,9 @@ def segment_volume(filepath, step_key, pars, save_steps=True):
         else:
             mask = None
 
+        if 'invert_data' in p.keys():
+            data = -data
+
         if 'voxel_spacing' in p.keys():
             spacing = p['voxel_spacing']
         else:
