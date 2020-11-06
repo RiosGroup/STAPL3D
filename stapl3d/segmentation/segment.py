@@ -106,10 +106,9 @@ def estimate(
     outputdir='',
     n_workers=0,
     blocks=[],
+    step_id='segmentation',
     ):
     """Segment cells from membrane and nuclear channels."""
-
-    step_id = 'segmentation'
 
     outputdir = get_outputdir(image_in, parameter_file, outputdir, step_id, fallback='blocks')
 
