@@ -253,8 +253,8 @@ def mask_volume(filepath, step_key, pars, save_steps=True):
     except KeyError:
         pass
     else:
-        if p:
-            binary_fill_holes(mask, output=mask)
+        binary_fill_holes(mask, output=mask)
+        if 'postfix' in p.keys(): write(mask, image_in, p['postfix'], im, 'MaskImage')
 
     try:
         p = pars['erode']
