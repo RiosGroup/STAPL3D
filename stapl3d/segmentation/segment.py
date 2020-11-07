@@ -446,6 +446,14 @@ def segment_volume(filepath, step_key, pars, save_steps=True):
             print('WARNING: possibly not using correct spacing for compact watershed')
             ws = watershed(data, seeds, mask=mask, compactness=compactness)
 
+        if 'ids_mask_post' in p.keys():
+            image_in = '{}/{}'.format(filepath, p['ids_mask_post'])
+            im = Image(image_in)
+            im.load()
+            mask = im.slice_dataset().astype('bool')
+            im.close()
+            ws[~mask] = 0
+
         if 'postfix' in p.keys(): write(ws, image_in, p['postfix'], im, 'MaskImage')
 
     try:
