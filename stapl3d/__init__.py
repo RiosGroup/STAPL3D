@@ -2318,19 +2318,6 @@ def get_outputdir(image_in, parameter_file, outputdir, step_id, fallback=''):
     return outputdir
 
 
-def prep_outputdir(outputdir, image_in='', subdir=''):
-    """"""
-
-    if not outputdir:
-        paths = get_paths(image_in)
-        datadir, filename = os.path.split(paths['base'])
-        outputdir = os.path.join(datadir, subdir)
-
-    os.makedirs(outputdir, exist_ok=True)
-
-    return outputdir
-
-
 def get_paths(image_in, resolution_level=-1, channel=0, outputstem='', step='', save_steps=False):
     """Get split path from inputfile."""
 

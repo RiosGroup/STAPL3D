@@ -25,7 +25,6 @@ from readlif.reader import LifFile
 from stapl3d import (
     get_n_workers,
     get_outputdir,
-    prep_outputdir,
     get_params,
     get_paths,
     Image,

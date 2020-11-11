@@ -28,7 +28,6 @@ from skimage.measure import block_reduce
 from stapl3d import (
     get_n_workers,
     get_outputdir,
-    prep_outputdir,
     get_imageprops,
     get_params,
     get_paths,
