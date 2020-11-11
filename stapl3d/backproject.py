@@ -16,6 +16,7 @@ from stapl3d import (
     Image,
     LabelImage,
     wmeMPI,
+    transpose_props,
     )
 from stapl3d.segmentation.segment import gen_outpath
 
@@ -258,23 +259,6 @@ def shuffle_labels(ulabels, wrap=65535, filepath=''):
         df.to_csv(filepath)
 
     return relabeled_seq, relabeled_shuffled, relabeled_wrapped
-
-
-def transpose_props(props, outlayout=''):
-    """Transpose the attributes of an image."""
-
-    if not outlayout:
-        outlayout = props['axlab'][::-1]
-    in2out = [props['axlab'].index(l) for l in outlayout]
-    props['elsize'] = np.array(props['elsize'])[in2out]
-    props['slices'] = [props['slices'][i] for i in in2out]
-    props['shape'] = np.array(props['shape'])[in2out]
-    props['axlab'] = ''.join([props['axlab'][i] for i in in2out])
-    if 'chunks' in props.keys():
-        if props['chunks'] is not None:
-            props['chunks'] = np.array(props['chunks'])[in2out]
-
-    return props
 
 
 def write_output(outpath, out, props):
