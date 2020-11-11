@@ -2169,12 +2169,12 @@ def split_filename(filename, blockoffset=[0, 0, 0]):
     return dset_info, x, X, y, Y, z, Z
 
 
-def get_n_workers(n_workers, params):
+def get_n_workers(n_workers=0, params={}):
     """Determine the number of workers."""
 
     cpu_count = multiprocessing.cpu_count()
 
-    n_workers = cpu_count
+    n_workers = n_workers or cpu_count
 
     try:
         if params['n_workers'] > 0:
