@@ -28,6 +28,7 @@ from stapl3d import (
 def split_channels(
     image_in,
     parameter_file,
+    step_id='splitchannels',
     outputdir='',
     n_workers=0,
     channels=[],
@@ -38,8 +39,6 @@ def split_channels(
     replace=False,
     ):
     """Split imarisfile into separate channels."""
-
-    step_id = 'splitchannels'
 
     outputdir = get_outputdir(image_in, parameter_file, outputdir, step_id, 'channels')
 

@@ -103,10 +103,10 @@ def main(argv):
 def estimate(
     image_in,
     parameter_file,
+    step_id='segmentation',
     outputdir='',
     n_workers=0,
     blocks=[],
-    step_id='segmentation',
     ):
     """Segment cells from membrane and nuclear channels."""
 
@@ -133,6 +133,17 @@ def cell_segmentation(
     logging.basicConfig(filename='{}.log'.format(filepath), level=logging.INFO)
     report = {'parameters': locals()}
 
+    # FIXME: makes sure this is an ordered dict or handle otherwise
+    # TODO: make python=3.7 a requirement
+    """ https://stackoverflow.com/questions/5121931/in-python-how-can-you-load-yaml-mappings-as-ordereddicts
+    Update: In python 3.6+ you probably don't need OrderedDict at all due to the new dict implementation that has been in use in pypy for some time (although considered CPython implementation detail for now).
+    Update: In python 3.7+, the insertion-order preservation nature of dict objects has been declared to be an official part of the Python language spec, see What's New In Python 3.7.
+    #for step_key in ["prep_mean", "mask_mean", "prep_nucl", "mask_nucl", "prep_memb", "mask_memb", "combine_masks", "seed", "segment"]:
+        pars = params[step_key]
+        print(step_key)
+        if step_key not in params.keys():
+            continue
+    """
     for step_key, pars in params.items():
 
         t = time.time()
@@ -707,6 +718,7 @@ def memb_mask(labels_ds, memb_meth='ip'):
 def subsegment(
     image_in,
     parameter_file,
+    step_id='subsegment',
     outputdir='',
     n_workers=0,
     blocks=[],
@@ -717,8 +729,6 @@ def subsegment(
     ods_csol='',
     ):
     """Perform N4 bias field correction."""
-
-    step_id = 'subsegment'
 
     outputdir = get_outputdir(image_in, parameter_file, outputdir, step_id, 'blocks')
 
@@ -735,6 +745,7 @@ def subsegment(
             params['ods_memb'],
             params['ods_nucl'],
             params['ods_csol'],
+            step_id,
             outputdir,
         )
         for block_idx, filepath in zip(blocks, filepaths)]
@@ -751,8 +762,10 @@ def split_segments(
     ods_memb='',
     ods_nucl='',
     ods_csol='',
+    step_id='subsegment',
     outputdir='',
     ):
+    # TODO: make flexible
 
     labels = LabelImage('{}/{}'.format(inputfile, ids))
     labels.load(load_data=False)

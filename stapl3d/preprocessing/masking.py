@@ -74,6 +74,7 @@ def main(argv):
 def estimate(
     image_in,
     parameter_file,
+    step_id='mask',
     outputdir='',
     resolution_level=-1,
     sigma=48.0,
@@ -84,8 +85,6 @@ def estimate(
     postfix='',
     ):
     """Generate a mask that covers the tissue."""
-
-    step_id = 'mask'
 
     outputdir = get_outputdir(image_in, parameter_file, outputdir, step_id)
 
@@ -101,6 +100,7 @@ def estimate(
         params['thresholds'],
         params['distance_to_edge'],
         params['postfix'],
+        step_id,
         outputdir,
         )
 
@@ -115,12 +115,12 @@ def generate_dataset_mask(
     thresholds=[500, 1000, 2000, 3000, 4000, 5000],
     distance_to_edge=True,
     postfix='',
+    step_id='mask',
     outputdir='',
     ):
     """Generate a mask that covers the tissue."""
 
     # Prepare the output.
-    step_id = 'mask'
     postfix = postfix or '_{}'.format(step_id)
 
     outputdir = get_outputdir(image_in, '', outputdir, step_id, step_id)

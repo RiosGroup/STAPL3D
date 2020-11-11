@@ -73,6 +73,7 @@ def main(argv):
 def estimate(
     image_in,
     parameter_file,
+    step_id='shading',
     outputdir='',
     n_workers=0,
     channels=[],
@@ -85,8 +86,6 @@ def estimate(
     postfix='',
     ):
     """Correct z-stack shading."""
-
-    step_id = 'shading'
 
     outputdir = get_outputdir(image_in, parameter_file, outputdir, step_id, step_id)
 
@@ -131,6 +130,7 @@ def estimate_plane(
     quantile_threshold=0.8,
     polynomial_order=3,
     postfix='',
+    step_id='shading',
     outputdir='',
     ):
     """Estimate the x- and y-profiles for a channel in a czi file.
@@ -144,7 +144,6 @@ def estimate_plane(
     """
 
     # Prepare the output.
-    step_id = 'shading'
     postfix = postfix or '_{}'.format(step_id)
     postfix = 'ch{:02d}_Z{:03d}{}'.format(channel, plane, postfix)
 
@@ -216,6 +215,7 @@ def read_tiled_plane(image_in, channel, plane):
 def postprocess(
     image_in,
     parameter_file,
+    step_id='shading_postproc',
     outputdir='',
     n_workers=0,
     channels=[],
@@ -226,8 +226,6 @@ def postprocess(
     polynomial_order=3,
     postfix='',
     ):
-
-    step_id = 'shading_postproc'
 
     outputdir = get_outputdir(image_in, parameter_file, outputdir, 'shading', 'shading')
 
@@ -265,10 +263,10 @@ def postprocess_channel(
     quantile_threshold=0.8,
     polynomial_order=3,
     postfix='',
+    step_id='shading',
     outputdir='',
     ):
 
-    step_id = 'shading'
     postfix = postfix or '_{}'.format(step_id)
     pf = postfix
     postfix = 'ch{:02d}{}'.format(channel, postfix)
@@ -367,6 +365,7 @@ def fit_profile(data, order=3):
 def apply(
     image_in,
     parameter_file,
+    step_id='shading_apply',
     outputdir='',
     n_workers=0,
     stacks=[],
@@ -376,8 +375,6 @@ def apply(
     write_to_tif=True,
     postfix='',
     ):
-
-    step_id = 'shading_apply'
 
     outputdir = get_outputdir(image_in, parameter_file, outputdir, '', 'stacks')
 
@@ -403,6 +400,7 @@ def apply(
             params['shadingpat'],
             params['write_to_tif'],
             params['postfix'],
+            step_id,
             outputdir,
         )
         for stack_idx in subparams['stacks']]
@@ -420,6 +418,7 @@ def unshade_zstack(
     shadingpat='',
     write_to_tif=True,
     postfix='',
+    step_id='shading_apply',
     outputdir='',
     ):
     """Correct zstack shading."""

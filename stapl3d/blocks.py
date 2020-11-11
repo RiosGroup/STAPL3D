@@ -69,6 +69,7 @@ def main(argv):
 def split(
     image_in,
     parameter_file='',
+    step_id='splitblocks',
     outputdir='',
     n_workers=0,
     blocksize=[],
@@ -88,8 +89,6 @@ def split(
     outputtemplate='',
     ):
     """Average membrane and nuclear channels and write as blocks."""
-
-    step_id = 'splitblocks'
 
     outputdir = get_outputdir(image_in, parameter_file, outputdir, 'blocks', 'blocks')
 
@@ -116,6 +115,7 @@ def split(
             params['datatype'],
             params['chunksize'],
             params['outputtemplate'],
+            step_id,
             outputdir,
         )
         for b_idx in blocks]
@@ -142,12 +142,12 @@ def split_with_combinechannels(
     datatype='',
     chunksize=[],
     outputtemplate='',
+    step_id='splitblocks',
     outputdir='',
     ):
     """Average membrane and nuclear channels and write as blocks."""
 
     # Prepare the output.
-    step_id = 'splitblocks'
     postfix = ''
 
     outputdir = get_outputdir(image_in, '', outputdir, 'blocks', 'blocks')
@@ -362,9 +362,9 @@ def splitblocks(image_in, blocksize, blockmargin, blockrange, outputtemplate):
 def merge(
     image_in,
     parameter_file='',
+    step_id='mergeblocks',
     outputdir='',
     n_workers=0,
-    step_id='mergeblocks',
     idss_select=[],
     blocksize=[],
     blockmargin=[],
@@ -381,7 +381,7 @@ def merge(
     ):
     """Average membrane and nuclear channels and write as blocks."""
 
-    blockdir = get_outputdir(image_in, parameter_file, '', 'blocks', 'blocks')
+    blockdir = get_outputdir(image_in, parameter_file, '', step_id, 'blocks')
     outputdir = get_outputdir(image_in, parameter_file, outputdir, step_id, '')
 
     params = get_params(locals().copy(), parameter_file, step_id)

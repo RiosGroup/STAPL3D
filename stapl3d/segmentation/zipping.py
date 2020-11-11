@@ -81,6 +81,7 @@ def main(argv):
 def estimate(
     image_in,
     parameter_file,
+    step_id='zipping',
     outputdir='',
     n_workers=0,
     blocksize=[],
@@ -98,8 +99,6 @@ def estimate(
     compactness=0.80,
     ):
     """Correct z-stack shading."""
-
-    step_id = 'zipping'
 
     outputdir = get_outputdir(image_in, parameter_file, outputdir, step_id, fallback='blocks')
 
@@ -800,6 +799,7 @@ def create_resegmentation_mask_datasets(info):
 def relabel(
     image_in,
     parameter_file,
+    step_id='relabel',
     outputdir='',
     n_workers=0,
     blocks=[],
@@ -808,8 +808,6 @@ def relabel(
     postfix='_relabeled',
     ):
     """Correct z-stack shading."""
-
-    step_id = 'relabel'
 
     outputdir = get_outputdir(image_in, parameter_file, outputdir, step_id, 'blocks')
 
@@ -883,6 +881,7 @@ def relabel_block(im, pf='_relabeled', maxlabel=1, bg_label=0, force_sequential=
 def copyblocks(
     image_in,
     parameter_file,
+    step_id='copyblocks',
     outputdir='',
     n_workers=0,
     blocks=[],
@@ -891,8 +890,6 @@ def copyblocks(
     postfix='_fix',
     ):
     """Correct z-stack shading."""
-
-    step_id = 'copyblocks'
 
     outputdir = get_outputdir(image_in, parameter_file, outputdir, step_id, 'blocks')
 

@@ -82,6 +82,7 @@ def main(argv):
 def estimate(
     image_in,
     parameter_file,
+    step_id='biasfield',
     outputdir='',
     n_workers=0,
     channels=[],
@@ -94,8 +95,6 @@ def estimate(
     postfix='',
     ):
     """Perform N4 bias field correction."""
-
-    step_id = 'biasfield'
 
     outputdir = get_outputdir(image_in, parameter_file, outputdir, step_id, step_id)
 
@@ -127,6 +126,7 @@ def estimate(
             params['n_fitlevels'],
             params['n_bspline_cps'],
             params['postfix'],
+            step_id,
             outputdir,
         )
         for ch in subparams['channels']]
@@ -149,6 +149,7 @@ def estimate_channel(
     n_fitlevels=4,
     n_bspline_cps={'z': 5, 'y': 5, 'x': 5},
     postfix='',
+    step_id='biasfield',
     outputdir='',
     ):
     """Estimate the x- and y-profiles for a channel in a czi file.
@@ -166,7 +167,6 @@ def estimate_channel(
         downsample_factors, _, resolution_level = calculate_downsample_factors(image_in, resolution_level)
 
     # Prepare the output.
-    step_id = 'biasfield'
     postfix = postfix or '_{}'.format(step_id)
     postfix = 'ch{:02d}{}'.format(channel, postfix)
 
@@ -376,6 +376,7 @@ def stack_bias(inputfiles, outputfile, idss=['data', 'bias', 'corr']):
 def apply(
     image_in,
     parameter_file,
+    step_id='biasfield_apply',
     outputdir='',
     n_workers=0,
     image_ref='',
@@ -386,8 +387,6 @@ def apply(
     postfix=''
     ):
     """Perform N4 bias field correction."""
-
-    step_id = 'biasfield_apply'
 
     channeldir = get_outputdir(image_in, parameter_file, '', 'channels', 'channels')
     outputdir = get_outputdir(image_in, parameter_file, outputdir, 'biasfield', 'biasfield')

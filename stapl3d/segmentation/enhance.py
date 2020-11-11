@@ -69,16 +69,15 @@ def main(argv):
 def estimate(
     image_in,
     parameter_file,
+    step_id='membrane_enhancement',
     outputdir='',
     n_workers=0,
-    blocks=[],
+    blocks=[],  # FIXME: note that block selection implies selection of globbed files, not block idxs..
     ACMEdir='',
     median_filter_par=0.5,
     membrane_filter_par=1.1,
     ):
     """Perform planarity estimation."""
-
-    step_id = 'membrane_enhancement'
 
     outputdir = get_outputdir(image_in, parameter_file, outputdir, step_id, fallback='blocks')
 
@@ -95,6 +94,7 @@ def estimate(
             ACMEdir,
             params['median_filter_par'],
             params['membrane_filter_par'],
+            step_id,
             outputdir,
         )
         for block_idx, filepath in zip(blocks, filepaths)]
@@ -109,6 +109,7 @@ def membrane_enhancement(
     ACMEdir,
     median_filter_par=0.5,
     membrane_filter_par=1.1,
+    step_id='membrane_enhancement',
     outputdir='',
     ):
     """Perform membrane enhancement."""
@@ -119,12 +120,12 @@ def membrane_enhancement(
     logging.basicConfig(filename='{}.log'.format(blockstem), level=logging.INFO)
     report = {'parameters': locals()}
 
-    grp = 'memb'
+    grp = 'memb'; ids = 'mean'; # TODO: make flexible
 
-    ids = 'mean'
     image_in = '{}.h5/{}/{}'.format(blockstem, grp, ids)
     image_out = '{}_{}-{}.nii.gz'.format(blockstem, grp, ids)
     h5_nii_convert(image_in, image_out, datatype='uint8')
+    #h5_nii_convert(image_in, image_out)  # dtype_in='uint8'  (NOTE: used for mito: airyscan63x, FIXME: this was actually uint16 with low range)
 
     subprocess.call([
         os.path.join(ACMEdir, "cellPreprocess"),
@@ -159,12 +160,12 @@ def membrane_enhancement(
     ])
     """
 
-    ids = 'preprocess'
+    grp = 'memb'; ids = 'preprocess';  # TODO: make flexible
     image_in = '{}_{}-{}.nii.gz'.format(blockstem, grp, ids)
     image_out = '{}.h5/{}/{}'.format(blockstem, grp, ids)
     h5_nii_convert(image_in, image_out)
 
-    ids = 'planarity'
+    grp = 'memb'; ids = 'planarity';  # TODO: make flexible
     image_in = '{}_{}-{}.nii.gz'.format(blockstem, grp, ids)
     image_out = '{}.h5/{}/{}'.format(blockstem, grp, ids)
     h5_nii_convert(image_in, image_out)

@@ -75,6 +75,7 @@ def main(argv):
 def estimate(
     image_in,
     parameter_file,
+    step_id='features',
     outputdir='',
     n_workers=0,
     blocks=[],
@@ -97,8 +98,6 @@ def estimate(
     fset_addit=[],
     ):
     """Calculate features of segments."""
-
-    step_id = 'features'
 
     outputdir = get_outputdir(image_in, parameter_file, outputdir, step_id, 'blocks')
 
@@ -153,6 +152,7 @@ def estimate(
             params['fset_morph'],
             params['fset_intens'],
             params['fset_addit'],
+            step_id,
             outputdir,
         )
         for block_idx, filepath in zip(blocks, filepaths)]
@@ -179,6 +179,7 @@ def export_regionprops(
     fset_morph='minimal',
     fset_intens='minimal',
     fset_addit=[],
+    step_id='features',
     outputdir='',
     ):
 
@@ -885,6 +886,7 @@ def get_feature_names(fset_morph='', fset_intens='', metrics=['mean'], d={}):
 def postproc(
     image_in,
     parameter_file,
+    step_id='features_postproc',
     outputdir='',
     seg_paths=[],
     blocksize=[],
@@ -905,8 +907,6 @@ def postproc(
     csol_idxs=[],
     ):
     """Generate a mask that covers the tissue."""
-
-    step_id = 'features_postproc'
 
     outputdir = get_outputdir(image_in, parameter_file, outputdir, step_id, '')
 
@@ -949,6 +949,7 @@ def postproc(
         params['memb_idxs'],
         params['nucl_idxs'],
         params['csol_idxs'],
+        step_id,
         outputdir,
         )
 
@@ -971,6 +972,7 @@ def postprocess_features(
     memb_idxs=[],
     nucl_idxs=[],
     csol_idxs=[],
+    step_id='features_postproc',
     outputdir='',
     ):
 

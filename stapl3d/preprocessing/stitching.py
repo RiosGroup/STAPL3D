@@ -66,6 +66,7 @@ def main(argv):
 def estimate(
     image_in,
     parameter_file,
+    step_id='stitching',
     outputdir='',
     n_workers=0,
     channels=[],
@@ -77,8 +78,6 @@ def estimate(
     postfix='',
     ):
     """Stitch dataset."""
-
-    step_id = 'stitching'
 
     stackdir = get_outputdir(image_in, '', '', 'stacks', 'stacks')
     outputdir = get_outputdir(image_in, parameter_file, outputdir, step_id, step_id)
@@ -109,6 +108,7 @@ def estimate(
             params['z_shift'],
             params['elsize'],
             postfix,
+            step_id,
             outputdir,
         )
         for ch in subparams['channels']]
@@ -128,11 +128,11 @@ def estimate_channel(
     z_shift=0,
     elsize=[],
     postfix='',
+    step_id='stitching',
     outputdir='',
     ):
 
     # Prepare the output.
-    step_id = 'stitching'
     postfix = postfix or '_{}'.format(step_id)
 
     outputdir = get_outputdir(image_in, '', outputdir, step_id, step_id)
