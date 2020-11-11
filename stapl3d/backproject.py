@@ -262,10 +262,13 @@ def shuffle_labels(ulabels, wrap=65535, filepath=''):
 
 
 def write_output(outpath, out, props):
+    """Write data to image file."""
+
     props['dtype'] = out.dtype
     mo = Image(outpath, **props)
     mo.create()
     mo.write(out)
+
     return mo
 
 
