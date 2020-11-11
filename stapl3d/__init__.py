@@ -2188,6 +2188,7 @@ def get_n_workers(n_workers, params):
 
 
 def get_blockfiles(image_in, block_dir, block_selection=[], block_postfix='.h5'):
+    """Return a list of filepaths (with indices) in the blockdirectory."""
 
     paths = get_paths(image_in)
     datadir, filename = os.path.split(paths['base'])
@@ -2204,6 +2205,7 @@ def get_blockfiles(image_in, block_dir, block_selection=[], block_postfix='.h5')
 
 
 def get_blocksize(image_in, bs=640):
+    """Load the matrix size from file, replacing xy-blocksize."""
 
     im = Image(image_in, permission='r')
     im.load(load_data=False)
@@ -2215,6 +2217,7 @@ def get_blocksize(image_in, bs=640):
 
 
 def get_blockmargin(image_in, bm=64):
+    """Return a 0-list (len=ndim) with blockmargins inserted for xy."""
 
     im = Image(image_in, permission='r')
     im.load(load_data=False)
@@ -2254,6 +2257,7 @@ def get_blockinfo(image_in, parameter_file, params=dict(blocksize=[], blockmargi
 
 
 def get_n_blocks(image_in, blocksize, blockmargin):
+    """Return the number of blocks in the dataset."""
 
     im = Image(image_in, permission='r')
     im.load(load_data=False)
@@ -2283,6 +2287,12 @@ def get_params(params, parameter_file, pfile_entry, sub_entry='params'):
 
 
 def get_outputdir(image_in, parameter_file, outputdir, step_id, fallback=''):
+    """Work out the output (sub)directory.
+
+    1. Use supplied outputdir.
+    2. Use <imagedir>/<step_id> (as parameterfile 'dirtree:datadir:<step_id>').
+    3. Use <imagedir>/<fallback>.
+    """
 
     dirs = get_params(dict(), parameter_file, 'dirtree')
     try:
@@ -2348,6 +2358,7 @@ def get_ims_ref_path(image_in, parameter_file, ims_ref_path=''):
 
 
 def get_imageprops(image_in):
+    """Return a dict with image attributes."""
 
     im = Image(image_in, permission='r')
     im.load(load_data=False)
@@ -2393,6 +2404,7 @@ def h5_nii_convert(image_in, image_out, datatype='', minmax=False):
         props['dtype'] = datatype
 
     elif datatype:
+        # FIXME: skimage.util.dtype.convert will be deprecated
         from skimage.util.dtype import convert
         data = convert(data, np.dtype(datatype), force_copy=False)
         props['dtype'] = datatype
