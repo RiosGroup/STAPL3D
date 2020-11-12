@@ -23,6 +23,7 @@ import czifile
 from readlif.reader import LifFile
 
 from stapl3d import (
+    parse_args_common,
     get_n_workers,
     get_outputdir,
     get_params,
@@ -36,32 +37,52 @@ logger = logging.getLogger(__name__)
 
 
 def main(argv):
-    """Generate a mask that covers the tissue."""
+    """Stitch z-stacks with FiJi BigStitcher.
 
-    parser = argparse.ArgumentParser(
-        description=__doc__,
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter
-        )
-    parser.add_argument(
-        '-i', '--image_in',
-        required=True,
-        help='path to image file',
-        )
-    parser.add_argument(
-        '-p', '--parameter_file',
-        required=True,
-        help='path to yaml parameter file',
-        )
-    parser.add_argument(
-        '-o', '--outputdir',
-        required=False,
-        help='path to output directory',
-        )
+    """
 
-    args = parser.parse_args()
+    steptype = '4step'  # TODO: decide on control level
+    if steptype == '4step':
+        step_ids = ['stitching'] * 4
+        stepmap = {'prep': [0], 'load': [1, 2], 'calc': [3, 4, 5], 'fuse': [6]}
+        single_chan = ['calc']
+    elif steptype == '7step':
+        step_ids = ['stitching'] * 7
+        stepmap = {
+            'prep': [0],
+            'define_dataset': [1],
+            'load_tile_positions': [2],
+            'calculate_shifts': [3],
+            'filter_shifts': [4],
+            'global_optimization': [5],
+            'fuse_dataset': [6],
+            }
+        single_chan = ['calculate_shifts', 'filter_shifts', 'global_optimization']
+    fun_selector = {k: estimate for k in stepmap.keys()}
 
-    estimate(args.image_in, args.parameter_file, args.outputdir)
+    args, mapper = parse_args_common(step_ids, fun_selector, *argv)
 
+    for step, step_id in mapper.items():
+
+        if step in single_chan:
+            with open(args.parameter_file, 'r') as ymlfile:
+                cfg = yaml.safe_load(ymlfile)
+            channels = [cfg[step_id]['params']['channel']]
+        else:
+            channels = []
+
+        if step in ['prep']:
+            write_stack_offsets(args.image_in)
+        else:
+            fun_selector[step](
+                args.image_in,
+                args.parameter_file,
+                step_id,
+                args.outputdir,
+                args.n_workers,
+                stitch_steps=stepmap[step],
+                channels=channels,
+                )
 
 def estimate(
     image_in,
@@ -80,7 +101,7 @@ def estimate(
     """Stitch dataset."""
 
     stackdir = get_outputdir(image_in, '', '', 'stacks', 'stacks')
-    outputdir = get_outputdir(image_in, parameter_file, outputdir, step_id, step_id)
+    outputdir = get_outputdir(image_in, parameter_file, outputdir, 'stitching', 'stitching')
 
     params = get_params(locals().copy(), parameter_file, step_id)
     subparams = get_params(locals().copy(), parameter_file, step_id, 'submit')
@@ -113,7 +134,7 @@ def estimate(
         )
         for ch in subparams['channels']]
 
-    n_workers = get_n_workers(subparams['channels'], subparams)
+    n_workers = get_n_workers(len(subparams['channels']), subparams)
     with multiprocessing.Pool(processes=n_workers) as pool:
         pool.starmap(estimate_channel, arglist)
 

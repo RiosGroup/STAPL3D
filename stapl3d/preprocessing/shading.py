@@ -32,6 +32,7 @@ import czifile
 from readlif.reader import LifFile
 
 from stapl3d import (
+    parse_args_common,
     get_n_workers,
     get_outputdir,
     get_params,
@@ -43,32 +44,27 @@ logger = logging.getLogger(__name__)
 
 
 def main(argv):
-    """Correct z-stack shading."""
+    """Correct z-stack shading.
 
-    parser = argparse.ArgumentParser(
-        description=__doc__,
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter
-        )
-    parser.add_argument(
-        '-i', '--image_in',
-        required=True,
-        help='path to image file',
-        )
-    parser.add_argument(
-        '-p', '--parameter_file',
-        required=True,
-        help='path to yaml parameter file',
-        )
-    parser.add_argument(
-        '-o', '--outputdir',
-        required=False,
-        help='path to output directory',
-        )
+    """
 
-    args = parser.parse_args()
+    step_ids = ['shading', 'shading_postproc', 'shading_apply']
+    fun_selector = {
+        'estimate': estimate,
+        'postprocess': postprocess,
+        'apply': apply,
+        }
 
-    estimate(args.image_in, args.parameter_file, args.outputdir)
+    args, mapper = parse_args_common(step_ids, fun_selector, *argv)
 
+    for step, step_id in mapper.items():
+        fun_selector[step](
+            args.image_in,
+            args.parameter_file,
+            step_id,
+            args.outputdir,
+            args.n_workers,
+            )
 
 def estimate(
     image_in,
@@ -87,7 +83,7 @@ def estimate(
     ):
     """Correct z-stack shading."""
 
-    outputdir = get_outputdir(image_in, parameter_file, outputdir, step_id, step_id)
+    outputdir = get_outputdir(image_in, parameter_file, outputdir, 'shading', 'shading')
 
     params = get_params(locals().copy(), parameter_file, step_id)
     subparams = get_params(locals().copy(), parameter_file, step_id, 'submit')
@@ -147,7 +143,7 @@ def estimate_plane(
     postfix = postfix or '_{}'.format(step_id)
     postfix = 'ch{:02d}_Z{:03d}{}'.format(channel, plane, postfix)
 
-    outputdir = get_outputdir(image_in, '', outputdir, step_id, step_id)
+    outputdir = get_outputdir(image_in, '', outputdir, 'shading', 'shading')
 
     paths = get_paths(image_in, channel=channel)
     datadir, filename = os.path.split(paths['base'])
@@ -263,7 +259,7 @@ def postprocess_channel(
     quantile_threshold=0.8,
     polynomial_order=3,
     postfix='',
-    step_id='shading',
+    step_id='shading_postproc',
     outputdir='',
     ):
 
@@ -271,7 +267,7 @@ def postprocess_channel(
     pf = postfix
     postfix = 'ch{:02d}{}'.format(channel, postfix)
 
-    outputdir = get_outputdir(image_in, '', outputdir, step_id, step_id)
+    outputdir = get_outputdir(image_in, '', outputdir, 'shading', 'shading')
 
     paths = get_paths(image_in, channel=channel)
     datadir, filename = os.path.split(paths['base'])
@@ -376,7 +372,7 @@ def apply(
     postfix='',
     ):
 
-    outputdir = get_outputdir(image_in, parameter_file, outputdir, '', 'stacks')
+    outputdir = get_outputdir(image_in, parameter_file, outputdir, 'stacks', 'stacks')
 
     params = get_params(locals().copy(), parameter_file, 'shading')
     subparams = get_params(locals().copy(), parameter_file, step_id, 'submit')
@@ -480,12 +476,13 @@ def correct_zstack(data, c_axis=0, shadingpat=''):
         return data
 
     shadingdata = []
+
     for ch in range(data.shape[c_axis]):
         filepath_shading = shadingpat.format(ch)
         shading_img = img_as_float(imread(filepath_shading))
         shadingdata.append(np.tile(shading_img, (data.shape[1], 1, 1)))
+
     data = data / np.stack(shadingdata, axis=c_axis)
-    return data
 
 #    TODO: efficiency tradeoff in cpu and memory (30GB per stack)
 #        dtype = data.dtype
@@ -493,6 +490,8 @@ def correct_zstack(data, c_axis=0, shadingpat=''):
 #        for z in range(data.shape[1]):
 #            data[ch, z, :, :] /= shading_img
 #    return data.astype(dtype)
+
+    return data
 
 
 def stack2tifs(data, c_axis, outputstem, props):
@@ -507,7 +506,7 @@ def stack2tifs(data, c_axis, outputstem, props):
         mo.create()
         slcs = [slc for slc in mo.slices]
         slcs.insert(c_axis, slice(ch, ch+1))
-        mo.write(data[slcs])
+        mo.write(data[tuple(slcs)])
         mo.close()
 
 

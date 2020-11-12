@@ -26,6 +26,7 @@ from skimage.transform import resize, downscale_local_mean
 from skimage.measure import block_reduce
 
 from stapl3d import (
+    parse_args_common,
     get_n_workers,
     get_outputdir,
     get_imageprops,
@@ -46,37 +47,35 @@ from stapl3d.reporting import (
     get_centreslice,
     get_centreslices,
     get_zyx_medians,
+    merge_reports,
+    zip_parameters,
     )
 
 logger = logging.getLogger(__name__)
 
 
 def main(argv):
-    """Perform N4 bias field correction."""
+    """Perform N4 bias field correction.
 
-    parser = argparse.ArgumentParser(
-        description=__doc__,
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter
-        )
-    parser.add_argument(
-        '-i', '--image_in',
-        required=True,
-        help='path to image file',
-        )
-    parser.add_argument(
-        '-p', '--parameter_file',
-        required=True,
-        help='path to yaml parameter file',
-        )
-    parser.add_argument(
-        '-o', '--outputdir',
-        required=False,
-        help='path to output directory',
-        )
+    """
 
-    args = parser.parse_args()
+    step_ids = ['biasfield', 'biasfield_postproc', 'biasfield_apply']
+    fun_selector = {
+        'estimate': estimate,
+        'postprocess': postprocess,
+        'apply': apply,
+        }
 
-    estimate(args.image_in, args.parameter_file, args.outputdir)
+    args, mapper = parse_args_common(step_ids, fun_selector, *argv)
+
+    for step, step_id in mapper.items():
+        fun_selector[step](
+            args.image_in,
+            args.parameter_file,
+            step_id,
+            args.outputdir,
+            args.n_workers,
+            )
 
 
 def estimate(
@@ -96,7 +95,7 @@ def estimate(
     ):
     """Perform N4 bias field correction."""
 
-    outputdir = get_outputdir(image_in, parameter_file, outputdir, step_id, step_id)
+    outputdir = get_outputdir(image_in, parameter_file, outputdir, 'biasfield', 'biasfield')
 
     params = get_params(locals().copy(), parameter_file, step_id)
     subparams = get_params(locals().copy(), parameter_file, step_id, 'submit')
@@ -118,7 +117,7 @@ def estimate(
         (
             image_in,
             ch,
-            subparams['tasks'],
+            subparams['tasks'],  # FIXME: must exist
             params['mask_in'],
             params['resolution_level'],
             params['downsample_factors'],
@@ -170,7 +169,7 @@ def estimate_channel(
     postfix = postfix or '_{}'.format(step_id)
     postfix = 'ch{:02d}{}'.format(channel, postfix)
 
-    outputdir = get_outputdir(image_in, '', outputdir, step_id, step_id)
+    outputdir = get_outputdir(image_in, '', outputdir, 'biasfield', 'biasfield')
 
     paths = get_paths(image_in, resolution_level, channel)
     datadir, filename = os.path.split(paths['base'])
@@ -371,6 +370,55 @@ def stack_bias(inputfiles, outputfile, idss=['data', 'bias', 'corr']):
         images_in = ['{}/{}'.format(filepath, ids) for filepath in inputfiles]
         outputpath = '{}/{}'.format(outputfile, ids)
         stack_channels(images_in, outputpath)
+
+
+def postprocess(
+    image_in,
+    parameter_file,
+    step_id='biasfield_postproc',
+    outputdir='',
+    n_workers=0,
+    ):
+
+    outputdir = get_outputdir(image_in, parameter_file, outputdir, 'biasfield', 'biasfield')
+
+    params = get_params(locals().copy(), parameter_file, 'biasfield')
+
+    paths = get_paths(image_in, 0, 0)
+    datadir, _ = os.path.split(paths['base'])
+
+    with open(parameter_file, 'r') as ymlfile:
+        cfg = yaml.safe_load(ymlfile)
+
+    fstem = cfg['dataset']['name']
+    fstem += cfg['shading']['params']['postfix']
+    fstem += cfg['stitching']['params']['postfix']
+    inputstem = os.path.join(outputdir, fstem)
+    fstem += cfg['biasfield']['params']['postfix']
+    outputstem = os.path.join(datadir, fstem)
+
+    postprocess_biasfield(inputstem, outputstem, params['postfix'])
+
+
+def postprocess_biasfield(inputstem, outputstem, biasfield_postfix):
+
+    inputpat = '{}_ch??{}'.format(inputstem, biasfield_postfix)
+
+    inputfiles = glob('{}.h5'.format(inputpat))
+    inputfiles.sort()
+
+    outputfile = '{}.h5'.format(outputstem)
+    stack_bias(inputfiles, outputfile)
+
+    pdfs = glob('{}.pdf'.format(inputpat))
+    pdfs.sort()
+    pdf_out = '{}.pdf'.format(outputstem)
+    merge_reports(pdfs, pdf_out)
+
+    pickles = glob('{}.pickle'.format(inputpat))
+    pickles.sort()
+    zip_out = '{}.zip'.format(outputstem)
+    zip_parameters(pickles, zip_out)
 
 
 def apply(

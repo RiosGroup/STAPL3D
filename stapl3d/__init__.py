@@ -15,6 +15,7 @@ import h5py
 import glob
 import pickle
 import random
+import argparse
 import multiprocessing
 import numpy as np
 from xml import etree as et
@@ -2300,13 +2301,14 @@ def get_outputdir(image_in, parameter_file, outputdir, step_id, fallback=''):
     1. Use supplied outputdir.
     2. Use <imagedir>/<step_id> (as parameterfile 'dirtree:datadir:<step_id>').
     3. Use <imagedir>/<fallback>.
+    4. Use <imagedir>/<parfile_key>.
     """
 
     dirs = get_params(dict(), parameter_file, 'dirtree')
     try:
         subdir = dirs['datadir'][step_id] or ''
     except KeyError:
-        subdir = fallback
+        subdir = fallback or step_id  # TODO: check backward compat
 
     if not outputdir:
         paths = get_paths(image_in)
@@ -2409,3 +2411,64 @@ def h5_nii_convert(image_in, image_out, datatype='', minmax=False):
     im_out.write(data.transpose().astype(props['dtype']))
     im_in.close()
     im_out.close()
+
+
+def parse_args_common(step_ids, fun_selector, *argv):
+    """Parse arguments common to all modules."""
+
+    steps = list(fun_selector.keys())
+
+    parser = argparse.ArgumentParser(
+        description=__doc__,
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter
+        )
+    parser.add_argument(
+        '-i', '--image_in',
+        required=True,
+        help='path to image file',
+        )
+    parser.add_argument(
+        '-p', '--parameter_file',
+        required=True,
+        help='path to yaml parameter file',
+        )
+    parser.add_argument(
+        '-s', '--steps',
+        default='all',
+        nargs='+',
+        choices=steps,
+        required=False,
+        help='processing steps to execute',
+        )
+    parser.add_argument(
+        '-S', '--step_ids',
+        default=step_ids,
+        nargs='+',
+        required=False,
+        help='top level name(s) of the processing step(s) in parameter file',
+        )
+    parser.add_argument(
+        '-o', '--outputdir',
+        required=False,
+        help='path to output directory',
+        )
+    parser.add_argument(
+        '-n', '--n_workers',
+        type=int,
+        default=0,
+        required=False,
+        help='number of workers (0: automatic)',
+        )
+
+    args = parser.parse_args()
+
+    if args.steps is None or args.steps == 'all':
+        mapper = dict(zip(steps, args.step_ids))
+    else:
+        # FIXME: this is dodgy for when the wrong number of args is supplied
+        if len(args.step_ids) != len(args.steps):
+            idxs = [steps.index(step) for step in args.steps]
+            step_ids = [step_ids[i] for i in idxs]
+        mapper = dict(zip(args.steps, step_ids))
+
+    return args, mapper

@@ -23,6 +23,7 @@ from scipy.ndimage.morphology import binary_fill_holes
 from scipy.ndimage import distance_transform_edt
 
 from stapl3d import (
+    parse_args_common,
     get_outputdir,
     get_imageprops,
     get_params,
@@ -46,30 +47,23 @@ logger = logging.getLogger(__name__)
 def main(argv):
     """Generate a mask that covers the tissue."""
 
-    parser = argparse.ArgumentParser(
-        description=__doc__,
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter
-        )
-    parser.add_argument(
-        '-i', '--image_in',
-        required=True,
-        help='path to image file',
-        )
-    parser.add_argument(
-        '-p', '--parameter_file',
-        required=True,
-        help='path to yaml parameter file',
-        )
-    parser.add_argument(
-        '-o', '--outputdir',
-        required=False,
-        help='path to output directory',
-        )
+    step_ids = ['mask']
+    fun_selector = {
+        'estimate': estimate,
+        }
 
-    args = parser.parse_args()
+    args, mapper = parse_args_common(step_ids, fun_selector, *argv)
 
-    estimate(args.image_in, args.parameter_file, args.outputdir)
+    outputdir = get_outputdir(args.image_in, args.parameter_file, args.outputdir, step_ids[0])  # FIXME
 
+    for step, step_id in mapper.items():
+        fun_selector[step](
+            args.image_in,
+            args.parameter_file,
+            step_id,
+            outputdir,
+            args.n_workers,
+            )
 
 def estimate(
     image_in,
