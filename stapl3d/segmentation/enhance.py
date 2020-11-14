@@ -27,12 +27,8 @@ from stapl3d import (
     get_params,
     get_n_workers,
     Image,
-    LabelImage,
-    MaskImage,
-    wmeMPI,
+    h5_nii_convert,
     )
-
-from stapl3d import h5_nii_convert
 
 logger = logging.getLogger(__name__)
 
@@ -66,12 +62,17 @@ def estimate(
     n_workers=0,
     blocks=[],  # FIXME: note that block selection implies selection of globbed files, not block idxs..
     ACMEdir='',
+    ids_membrane='memb/mean',
+    ods_preprocess='memb/preprocess',
+    ods_planarity='memb/planarity',
     median_filter_par=0.5,
     membrane_filter_par=1.1,
+    cleanup=True,
     ):
     """Perform planarity estimation."""
 
-    outputdir = get_outputdir(image_in, parameter_file, outputdir, step_id, fallback='blocks')
+    outputdir = get_outputdir(image_in, parameter_file, outputdir,
+                              step_id, 'blocks')
 
     params = get_params(locals().copy(), parameter_file, step_id)
     subparams = get_params(locals().copy(), parameter_file, step_id, 'submit')
@@ -84,8 +85,12 @@ def estimate(
         (
             filepath,
             ACMEdir,
+            params['ids_membrane'],
+            params['ods_preprocess'],
+            params['ods_planarity'],
             params['median_filter_par'],
             params['membrane_filter_par'],
+            params['cleanup'],
             step_id,
             outputdir,
         )
@@ -99,68 +104,69 @@ def estimate(
 def membrane_enhancement(
     filepath,
     ACMEdir,
+    ids_membrane='memb/mean',
+    ods_preprocess='memb/preprocess',
+    ods_planarity='memb/planarity',
     median_filter_par=0.5,
     membrane_filter_par=1.1,
+    cleanup=True,
     step_id='membrane_enhancement',
     outputdir='',
     ):
     """Perform membrane enhancement."""
 
-    # Prepare the output.
     blockstem = os.path.splitext(filepath)[0]
 
     logging.basicConfig(filename='{}.log'.format(blockstem), level=logging.INFO)
     report = {'parameters': locals()}
 
-    grp = 'memb'; ids = 'mean'; # TODO: make flexible
+    image_in = '{}.h5/{}'.format(blockstem, ids_membrane)
+    niipath_memb = '{}_{}.nii.gz'.format(blockstem, ids_membrane.replace('/', '-'))
+    h5path_prep = '{}.h5/{}'.format(blockstem, ods_preprocess)
+    niipath_prep = '{}_{}.nii.gz'.format(blockstem, ods_preprocess.replace('/', '-'))
+    h5path_plan = '{}.h5/{}'.format(blockstem, ods_planarity)
+    niipath_plan = '{}_{}.nii.gz'.format(blockstem, ods_planarity.replace('/', '-'))
 
-    image_in = '{}.h5/{}/{}'.format(blockstem, grp, ids)
-    image_out = '{}_{}-{}.nii.gz'.format(blockstem, grp, ids)
-    h5_nii_convert(image_in, image_out, datatype='uint8')
-    #h5_nii_convert(image_in, image_out)  # dtype_in='uint8'  (NOTE: used for mito: airyscan63x, FIXME: this was actually uint16 with low range)
+    h5_nii_convert(image_in, niipath_memb, datatype='uint8')
 
     subprocess.call([
         os.path.join(ACMEdir, "cellPreprocess"),
-        "{}_memb-mean.nii.gz".format(blockstem),
-        "{}_memb-preprocess.nii.gz".format(blockstem),
+        niipath_memb, niipath_prep,
         "{}".format(median_filter_par),
     ])
 
     subprocess.call([
         os.path.join(ACMEdir, "multiscalePlateMeasureImageFilter"),
-        "{}_memb-preprocess.nii.gz".format(blockstem),
-        "{}_memb-planarity.nii.gz".format(blockstem),
-        "{}_memb-eigen.mha".format(blockstem),
+        niipath_prep, niipath_plan,
+        "{}_eigen.mha".format(blockstem),
         "{}".format(membrane_filter_par),
     ])
 
     """
     subprocess.call([
         os.path.join(ACMEdir, "membraneVotingField3D"),
-        "{}_memb-planarity.nii.gz".format(blockstem),
-        "{}_memb-eigen.mha".format(blockstem),
-        "{}_memb-TV.mha".format(blockstem),
+        niipath_plan,
+        "{}_eigen.mha".format(blockstem),
+        "{}_TV.mha".format(blockstem),
         "1.0",
     ])
 
     subprocess.call([
         os.path.join(ACMEdir, "membraneSegmentation"),
-        "{}_memb-preprocess.nii.gz".format(blockstem),
-        "{}_memb-TV.mha".format(blockstem),
-        "{}_memb-segment.mha".format(blockstem),
+        niipath_prep,
+        "{}_TV.mha".format(blockstem),
+        "{}_segment.mha".format(blockstem),
         "1.0",
     ])
     """
 
-    grp = 'memb'; ids = 'preprocess';  # TODO: make flexible
-    image_in = '{}_{}-{}.nii.gz'.format(blockstem, grp, ids)
-    image_out = '{}.h5/{}/{}'.format(blockstem, grp, ids)
-    h5_nii_convert(image_in, image_out)
-
-    grp = 'memb'; ids = 'planarity';  # TODO: make flexible
-    image_in = '{}_{}-{}.nii.gz'.format(blockstem, grp, ids)
-    image_out = '{}.h5/{}/{}'.format(blockstem, grp, ids)
-    h5_nii_convert(image_in, image_out)
+    if cleanup:
+        h5_nii_convert(niipath_prep, h5path_prep)
+        h5_nii_convert(niipath_plan, h5path_plan)
+        os.remove(niipath_memb)
+        os.remove(niipath_prep)
+        os.remove(niipath_plan)
+        os.remove("{}_eigen.mha".format(blockstem))
 
 
 if __name__ == "__main__":
