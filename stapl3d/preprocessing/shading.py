@@ -535,7 +535,8 @@ def get_image_info(image_in):
         iminfo['zstack_shape'] = zstack_shape
         iminfo['tilesize'] = zstack_shape[-3:-1]
 
-        zyxc_idxs = [8, 9, 10, 6]
+        zyxc_idxs = [czi.axes.index(dim) for dim in 'ZYXC']
+        # zyxc_idxs = [8, 9, 10, 6]  # TODO: check with zstack
         iminfo['dims_zyxc'] = [iminfo['zstack_shape'][idx] for idx in zyxc_idxs]
         iminfo['elsize_zyxc'] = czi_get_elsize(czi) + [1]
 
