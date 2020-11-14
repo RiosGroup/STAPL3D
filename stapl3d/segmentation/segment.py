@@ -257,7 +257,7 @@ def mask_volume(filepath, step_key, pars, save_steps=True):
         pass
     else:
         binary_fill_holes(mask, output=mask)
-        if 'postfix' in p.keys(): write(mask, image_in, p['postfix'], im, 'MaskImage')
+        if 'postfix' in p.keys(): write(mask, image_in, p['postfix'], im, 'Mask')
 
     try:
         p = pars['erode']
@@ -270,9 +270,9 @@ def mask_volume(filepath, step_key, pars, save_steps=True):
         mask_ero = np.zeros_like(mask, dtype='bool')
         for i, slc in enumerate(mask):  # FIXME: assuming zyx here
             mask_ero[i, :, :] = binary_erosion(slc, disk_erosion)
-        if 'postfix' in p.keys(): write(mask_ero, image_in, p['postfix'], im, 'MaskImage')
+        if 'postfix' in p.keys(): write(mask_ero, image_in, p['postfix'], im, 'Mask')
 
-    im = write(mask, '{}/'.format(filepath), pars['ods_mask'], im, 'MaskImage')
+    im = write(mask, '{}/'.format(filepath), pars['ods_mask'], im, 'Mask')
 
     return im
 
@@ -313,7 +313,7 @@ def combine_volumes(filepath, step_key, pars, save_steps=True):
             footprint = create_footprint(p)
             mask = binary_opening(mask, footprint, out=mask)
 
-    im = write(mask, '{}/'.format(filepath), pars['ods_mask'], im, 'MaskImage')
+    im = write(mask, '{}/'.format(filepath), pars['ods_mask'], im, 'Mask')
 
     return im
 
@@ -380,7 +380,7 @@ def seed_volume(filepath, step_key, pars, save_steps=True):
         else:
             footprint = create_footprint(footprint)
             mask_dil = binary_dilation(mask, selem=footprint)
-            if 'postfix' in p['dilate'].keys(): write(mask_dil, image_in, p['dilate']['postfix'], im, 'MaskImage')
+            if 'postfix' in p['dilate'].keys(): write(mask_dil, image_in, p['dilate']['postfix'], im, 'Mask')
 
     try:
         p = pars['label']
@@ -397,7 +397,7 @@ def seed_volume(filepath, step_key, pars, save_steps=True):
         if 'threshold' in p.keys():
             seeds = watershed(-edt, seeds, mask=edt > p['threshold'])
 
-    im = write(seeds, '{}/'.format(filepath), pars['ods_labels'], im, 'LabelImage')
+    im = write(seeds, '{}/'.format(filepath), pars['ods_labels'], im, 'Label')
 
     return im
 
@@ -457,7 +457,7 @@ def segment_volume(filepath, step_key, pars, save_steps=True):
             im.close()
             ws[~mask] = 0
 
-        if 'postfix' in p.keys(): write(ws, image_in, p['postfix'], im, 'MaskImage')
+        if 'postfix' in p.keys(): write(ws, image_in, p['postfix'], im, 'Mask')
 
     try:
         p = pars['filter']
@@ -472,7 +472,7 @@ def segment_volume(filepath, step_key, pars, save_steps=True):
         maxlabel = max(np.unique(ws))
         ws = delete_labels_in_mask(ws, ~mask, maxlabel)
 
-    im = write(ws, '{}/'.format(filepath), pars['ods_labels'], im, 'LabelImage')
+    im = write(ws, '{}/'.format(filepath), pars['ods_labels'], im, 'Label')
 
     return im
 
