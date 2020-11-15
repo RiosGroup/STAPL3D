@@ -20,6 +20,7 @@ from skimage.transform import resize
 from skimage.segmentation import relabel_sequential
 
 from stapl3d import (
+    parse_args_common,
     get_outputdir,
     get_params,
     get_blockinfo,
@@ -39,31 +40,26 @@ logger = logging.getLogger(__name__)
 
 
 def main(argv):
-    """Correct z-stack shading."""
+    """Correct z-stack shading.
 
-    parser = argparse.ArgumentParser(
-        description=__doc__,
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter
-        )
-    parser.add_argument(
-        '-i', '--image_in',
-        required=True,
-        help='path to image file',
-        )
-    parser.add_argument(
-        '-p', '--parameter_file',
-        required=True,
-        help='path to yaml parameter file',
-        )
-    parser.add_argument(
-        '-o', '--outputdir',
-        required=False,
-        help='path to output directory',
-        )
+    """
 
-    args = parser.parse_args()
+    step_ids = ['splitblocks', 'mergeblocks']
+    fun_selector = {
+        'split': split,
+        'merge': merge,
+        }
 
-    split(args.image_in, args.parameter_file, args.outputdir)
+    args, mapper = parse_args_common(step_ids, fun_selector, *argv)
+
+    for step, step_id in mapper.items():
+        fun_selector[step](
+            args.image_in,
+            args.parameter_file,
+            step_id,
+            args.outputdir,
+            args.n_workers,
+            )
 
 
 def split(
