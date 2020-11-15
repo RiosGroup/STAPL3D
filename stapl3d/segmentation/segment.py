@@ -156,6 +156,8 @@ def cell_segmentation(
             im = seed_volume(filepath, step_key, pars, save_steps)
         elif step_key == 'segment':
             im = segment_volume(filepath, step_key, pars, save_steps)
+        elif step_key == 'filter':
+            im = filter_segments(filepath, step_key, pars, save_steps)
 
         elapsed = time.time() - t
         print('{} took {:1f} s'.format(step_key, elapsed))
@@ -465,18 +467,40 @@ def segment_volume(filepath, step_key, pars, save_steps=True):
 
         if 'postfix' in p.keys(): write(ws, image_in, p['postfix'], im, 'Mask')
 
-    try:
-        p = pars['filter']
-    except KeyError:
-        pass
-    else:
-        image_in = '{}/{}'.format(filepath, p['ids_mask'])
+    im = write(ws, '{}/'.format(filepath), pars['ods_labels'], im, 'Label')
+
+    return im
+
+
+def filter_segments(filepath, step_key, pars, save_steps=True):
+
+    # TODO: option to pass image?
+    image_in = '{}/{}'.format(filepath, pars['ids_labels'])
+    im = Image(image_in)
+    im.load()
+    ws = im.slice_dataset()
+    im.close()
+
+    labelset = set([])
+
+    if 'ids_mask' in pars.keys():
+        image_in = '{}/{}'.format(filepath, pars['ids_mask'])
         im = MaskImage(image_in)
         im.load()
         mask = im.slice_dataset().astype('bool')
         im.close()
-        maxlabel = max(np.unique(ws))
-        ws = delete_labels_in_mask(ws, ~mask, maxlabel)
+        labelset |= set(np.unique(ws[~mask]))
+
+    if 'max_size' in pars.keys():
+        nvoxels = int(pars['max_size'] / np.prod(im.elsize))
+        bc = np.bincount(np.ravel(ws))
+        labelset |= set(np.where(bc > nvoxels)[0])
+
+    # TODO: dump deleted labelset?
+    maxlabel = max(np.unique(ws))
+    if maxlabel:
+        fwmap = [True if l in labelset else False for l in range(0, maxlabel + 1)]
+        ws[np.array(fwmap)[ws]] = 0
 
     im = write(ws, '{}/'.format(filepath), pars['ods_labels'], im, 'Label')
 
