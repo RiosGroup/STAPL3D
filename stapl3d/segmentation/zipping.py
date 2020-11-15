@@ -6,7 +6,6 @@
 
 import os
 import sys
-import argparse
 import logging
 import pickle
 import shutil
@@ -26,6 +25,7 @@ from skimage.segmentation import relabel_sequential, watershed
 from skimage.color import label2rgb
 
 from stapl3d import (
+    parse_args_common,
     get_outputdir,
     get_blockfiles,
     get_blockinfo,
@@ -54,28 +54,23 @@ def main(argv):
 
     """
 
-    parser = argparse.ArgumentParser(
-        description=__doc__,
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter
-        )
-    parser.add_argument(
-        '-i', '--image_in',
-        required=True,
-        help='path to image file',
-        )
-    parser.add_argument(
-        'parameter_file',
-        help='path to yaml parameter file',
-        )
-    parser.add_argument(
-        '-o', '--outputdir',
-        required=False,
-        help='path to output directory',
-        )
+    step_ids = ['relabel', 'copyblocks', 'zipping']
+    fun_selector = {
+        'relabel': relabel,
+        'copyblocks': copyblocks,
+        'zipping': estimate,
+        }
 
-    args = parser.parse_args()
+    args, mapper = parse_args_common(step_ids, fun_selector, *argv)
 
-    estimate(args.image_in, args.parameter_file, args.outputdir)
+    for step, step_id in mapper.items():
+        fun_selector[step](
+            args.image_in,
+            args.parameter_file,
+            step_id,
+            args.outputdir,
+            args.n_workers,
+            )
 
 
 def estimate(
