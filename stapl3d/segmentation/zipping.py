@@ -87,6 +87,7 @@ def estimate(
     ids='labels_memb_del_relabeled_fix',
     postfix='',
     ids_memb_chan='memb/mean_smooth',
+    ids_nucl='',
     find_peaks=False,
     peaks_thr=1.0,
     peaks_size=[11, 19, 19],
@@ -125,7 +126,7 @@ def estimate(
     save_steps = False
     args = [images_in, blocksize, blockmargin, axis, seamnumbers, mask_dataset,
             relabel, maxlabel, in_place,
-            segparams['ids_memb_chan'],
+            segparams['ids_nucl'], segparams['ids_memb_chan'],
             segparams['find_peaks'], segparams['peaks_thr'], segparams['peaks_size'],
             segparams['peaks_dil_footprint'], segparams['compactness'],
             outputstem, save_steps]
@@ -217,7 +218,7 @@ def resegment_block_boundaries(
     maxlabel='',
     in_place=False,
     ids_nucl='',
-    ids_memb_chan='memb/mean_smooth',
+    ids_memb_chan='memb/prep',
     find_peaks=False,
     peaks_thr=1.16,
     peaks_size=[11, 19, 19],
