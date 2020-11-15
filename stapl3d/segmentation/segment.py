@@ -388,6 +388,7 @@ def seed_volume(filepath, step_key, pars, save_steps=True):
         pass
     else:
         seeds = ndi.label(mask)[0]
+        write(seeds, '{}/'.format(filepath), p['ods_peaks'], im, 'Label')
 
     try:
         p = pars['seeds']
