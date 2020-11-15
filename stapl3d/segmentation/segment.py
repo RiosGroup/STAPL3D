@@ -137,6 +137,11 @@ def cell_segmentation(
         if step_key not in params.keys():
             continue
     """
+
+    dpar = ['image_in', 'parameter_file', 'step_id', 'outputdir', 'n_workers', 'blocks']
+    for p in dpar:
+        del params[p]
+
     for step_key, pars in params.items():
 
         t = time.time()
