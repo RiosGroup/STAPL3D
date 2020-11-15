@@ -84,10 +84,10 @@ def estimate(
     blockrange=[],
     blocks=[],
     grp='segm',
-    ids='labels_memb_del_relabeled_fix',
+    ids='labels_zip',
     postfix='',
-    ids_memb_chan='memb/mean_smooth',
     ids_nucl='',
+    ids_memb_chan='memb/prep',
     find_peaks=False,
     peaks_thr=1.0,
     peaks_size=[11, 19, 19],
@@ -419,7 +419,7 @@ def write_output(outpath, out, props, imtype='Label'):
     return mo
 
 
-def read_image(im_info, ids='segm/labels_memb_del', imtype='Label'):
+def read_image(im_info, ids='segm/labels', imtype='Label'):
     """"Read a h5 dataset as Image object."""
 
     fname = '{}_{}'.format(im_info['base'], im_info['postfix'])
@@ -437,7 +437,7 @@ def read_image(im_info, ids='segm/labels_memb_del', imtype='Label'):
     return im
 
 
-def read_images(info_ims, ids='segm/labels_memb_del', imtype='Label',
+def read_images(info_ims, ids='segm/labels', imtype='Label',
                 axis=2, margin=64, n=2, include_margin=False, concat=False):
     """Read a set of block and slice along the block margins."""
 
@@ -619,14 +619,14 @@ def get_resegmentation_mask(info_ims, ids, axis=2, margin=64, n=2):
 
 def process_pair(
     info_ims,
-    ids='segm/labels_memb_fix',
+    ids='segm/labels_zip',
     margin=64,
     axis=2,
     maxlabel=1,
     n=2,
     n_max=4,
     ids_nucl='',
-    ids_memb_chan='memb/mean_smooth',
+    ids_memb_chan='memb/prep',
     find_peaks=False,
     peaks_thr=1.16,
     peaks_size=[11, 19, 19],
@@ -663,10 +663,10 @@ def process_pair(
                                       axis, margin, n, include_margin=False,
                                       concat=True)
     else:
-        edts, edts_ds = read_images(info_ims, 'segm/seeds_edt', 'Image',
+        edts, edts_ds = read_images(info_ims, 'segm/seeds_mask_edt', 'Image',
                                     axis, margin, n, include_margin=False,
                                     concat=True)
-        peaks, peaks_ds = read_images(info_ims, 'segm/seeds_peaks', 'Mask',
+        peaks, peaks_ds = read_images(info_ims, 'segm/peaks', 'Mask',
                                       axis, margin, n, include_margin=False,
                                       concat=True)
     if ids_memb_chan:
@@ -800,8 +800,8 @@ def relabel(
     n_workers=0,
     blocks=[],
     grp='segm',
-    ids='labels_memb_del',
-    postfix='_relabeled',
+    ids='labels',
+    postfix='_zip',
     ):
     """Correct z-stack shading."""
 
@@ -832,7 +832,7 @@ def relabel(
         pool.starmap(relabel_parallel, arglist)
 
 
-def relabel_parallel(image_in, block_idx, maxlabelfile, pf='_relabeled'):
+def relabel_parallel(image_in, block_idx, maxlabelfile, pf='_zip'):
 
     maxlabels = np.loadtxt(maxlabelfile, dtype=np.uint32)
     maxlabel = np.sum(maxlabels[:block_idx])
@@ -843,7 +843,7 @@ def relabel_parallel(image_in, block_idx, maxlabelfile, pf='_relabeled'):
     relabel_block(seg, pf, maxlabel)
 
 
-def relabel_block(im, pf='_relabeled', maxlabel=1, bg_label=0, force_sequential=False):
+def relabel_block(im, pf='_zip', maxlabel=1, bg_label=0, force_sequential=False):
     """Relabel dataset sequentially."""
 
     data = im.slice_dataset()
@@ -882,8 +882,8 @@ def copyblocks(
     n_workers=0,
     blocks=[],
     grp='segm',
-    ids='labels_memb_del_relabeled',
-    postfix='_fix',
+    ids='labels_zip',
+    postfix='',
     ):
     """Correct z-stack shading."""
 
@@ -913,16 +913,17 @@ def copyblocks(
         pool.starmap(copy_blocks_parallel, arglist)
 
 
-def copy_blocks_parallel(image_in, block_idx, postfix='_fix'):
+def copy_blocks_parallel(image_in, block_idx, postfix=''):
 
     im = LabelImage(image_in)
     im.load(load_data=False)
 
-    vols = {'{}'.format(postfix): ['Label', 'uint32'],
-            '{}_reseg_mask'.format(postfix): ['Mask', 'bool'],
-            'block_idxs': ['Label', 'uint16']}
-
-    #vols = {postfix: ['Mask', 'bool']}
+    vols = {}
+    if postfix:
+        vols['{}'.format(postfix)] = ['Label', 'uint32']
+    vols['{}_reseg_mask'.format(postfix)] = ['Mask', 'bool']
+    # vols['block_idxs'] = ['Label', 'uint16']
+    # vols = {postfix: ['Mask', 'bool']}
 
     for pf, (imtype, dtype) in vols.items():
         copy_h5_dataset(im, imtype, pf, dtype, k=block_idx)
