@@ -475,6 +475,8 @@ def segment_volume(filepath, step_key, pars, save_steps=True):
 
     im = write(ws, '{}/'.format(filepath), pars['ods_labels'], im, 'Label')
 
+    generate_report('{}/mean'.format(filepath, 'mean'))
+
     return im
 
 
@@ -843,8 +845,8 @@ def plot_images(axs, info_dict={}):
     aspects = ['equal', 'auto', 'auto']
     for i, (dim, aspect) in enumerate(zip('zyx', aspects)):
 
-        data_nucl = get_data('nucl/dapi_preprocess', 'chan/ch00', dimfac=3)
-        data_memb = get_data('memb/mean_smooth', 'memb/mean', dimfac=5)
+        data_nucl = get_data('nucl/prep', 'chan/ch00', dimfac=3)
+        data_memb = get_data('memb/prep', 'memb/mean', dimfac=5)
         if data_memb is None:
             data_memb = np.zeros(data_nucl.shape)
 
@@ -857,35 +859,35 @@ def plot_images(axs, info_dict={}):
 
         try:
 
-            data_edt = centreslices['segm/seeds_edt'][dim]
+            data_edt = centreslices['segm/seeds_mask_edt'][dim]
 
             if dim == 'x':
                 data_edt = data_edt.transpose()
 
-            # labels = centreslices['nucl/dapi_mask'][dim]
-            labels = centreslices['mean_mask'][dim].astype('uint8')
-            labels[centreslices['nucl/dapi_mask'][dim]] = 2
+            # labels = centreslices['nucl/mask'][dim]
+            labels = centreslices['mask'][dim].astype('uint8')
+            labels[centreslices['nucl/mask'][dim]] = 2
             if dim == 'x':
                 labels = labels.transpose()
             clabels = label2rgb(labels, image=data_nucl, alpha=0.5, bg_label=0, colors=[[1, 0, 0], [0, 1, 0]])
             axs[1][i].imshow(clabels, aspect=aspect)
 
             # labels = centreslices['memb/mask'][dim]
-            labels = centreslices['mean_mask'][dim].astype('uint8')
-            labels[centreslices['memb/planarity_mask'][dim]] = 2
+            labels = centreslices['mask'][dim].astype('uint8')
+            labels[centreslices['memb/mask'][dim]] = 2
             if dim == 'x':
                 labels = labels.transpose()
             clabels = label2rgb(labels, image=data_memb, alpha=0.5, bg_label=0, colors=[[1, 0, 0], [0, 1, 0]])
             axs[5][i].imshow(clabels, aspect=aspect)
 
             labels = centreslices['segm/seeds_mask'][dim].astype('uint8')
-            labels[centreslices['segm/seeds_peaks_dil'][dim]] = 2
+            labels[centreslices['segm/seeds_mask_dil'][dim]] = 2
             if dim == 'x':
                 labels = labels.transpose()
             clabels = label2rgb(labels, image=data_nucl, alpha=0.5, bg_label=0, colors=[[1, 0, 0], [0, 1, 0]])
             axs[2][i].imshow(clabels, aspect=aspect)
 
-            labels = centreslices['segm/seeds_peaks_dil'][dim]
+            labels = centreslices['segm/seeds_mask_dil'][dim]
             if dim == 'x':
                 labels = labels.transpose()
             clabels = label2rgb(labels, image=data_edt, alpha=0.5, bg_label=0, colors=None)
@@ -897,7 +899,7 @@ def plot_images(axs, info_dict={}):
             clabels = label2rgb(labels, image=data_nucl, alpha=0.7, bg_label=0, colors=None)
             axs[3][i].imshow(clabels, aspect=aspect)
 
-            labels = centreslices['segm/labels_memb_del'][dim]
+            labels = centreslices['segm/labels'][dim]
             if dim == 'x':
                 labels = labels.transpose()
             clabels = label2rgb(labels, image=data_memb, alpha=0.3, bg_label=0, colors=None)
@@ -906,7 +908,7 @@ def plot_images(axs, info_dict={}):
         except (TypeError, KeyError):
             print('not all steps were found: generating simplified report')
 
-            labels = centreslices['segm/labels_memb'][dim]
+            labels = centreslices['segm/labels'][dim]
             if dim == 'x':
                 labels = labels.transpose()
             clabels = label2rgb(labels, image=data_memb, alpha=0.3, bg_label=0)
@@ -962,19 +964,19 @@ def generate_report(image_in, info_dict={}, ioff=True):
         im.close()
         info_dict['parameters'] = load_parameters(info_dict['paths']['out_base'])
         info_dict['centreslices'] = get_centreslices(info_dict, idss=[
-            'mean_mask',
-            'memb/planarity_mask',
-            'memb/mean',
-            'memb/mean_smooth',
+            'mask',
             'chan/ch00',
-            'nucl/dapi_mask',
-            'nucl/dapi_preprocess',
-            'segm/labels_edt',
-            'segm/labels_memb',
-            'segm/labels_memb_del',
-            'segm/seeds_edt',
+            'memb/mask',
+            'memb/mean',
+            'memb/prep',
+            'nucl/mask',
+            'nucl/prep',
             'segm/seeds_mask',
-            'segm/seeds_peaks_dil',
+            'segm/seeds_mask_edt',
+            'segm/seeds_mask_dil',
+            'segm/labels',
+            'segm/labels_edt',
+            'segm/labels_edt_ws0',
             ])
         info_dict['medians'] = {}
 
