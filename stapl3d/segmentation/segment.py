@@ -76,9 +76,10 @@ def main(argv):
 
     """
 
-    step_ids = ['segmentation']  # TODO: add subsegment (after zipping)
+    step_ids = ['segmentation', 'subsegment']
     fun_selector = {
         'estimate': estimate,
+        'subsegment': subsegment,
         }
 
     args, mapper = parse_args_common(step_ids, fun_selector, *argv)
@@ -711,29 +712,40 @@ def find_border_segments(im):
     return segments
 
 
-def nucl_mask(maskpath_sauvola, maskpath_absmin):
+def memb_mask(labels, footprint=None):
+    """Create membrane mask from label boundaries."""
 
-    mask_sauvola_im = MaskImage(maskpath_sauvola, permission='r')
-    mask_sauvola_im.load(load_data=False)
-    mask_sauvola = mask_sauvola_im.slice_dataset().astype('bool')
+    mask = find_boundaries(labels)
 
-    mask_absmin_im = MaskImage(maskpath_absmin, permission='r')
-    mask_absmin_im.load(load_data=False)
-    mask_absmin = mask_absmin_im.slice_dataset().astype('bool')
+    if footprint is None:
+        from skimage.morphology import ball
+        footprint = ball(1, dtype='bool')
+        footprint[0, :, :] = False
+        footprint[-1, :, :] = False
+    else:
+        footprint = create_footprint(footprint)
+    mask = binary_dilation(mask, selem=footprint)
 
-    mask = mask_absmin & mask_sauvola
+    # constrain within cells
+    mask[~labels.astype('bool')] = False
 
     return mask
 
 
-def memb_mask(labels_ds, memb_meth='ip'):
-    mask = find_boundaries(labels_ds)
-    if memb_meth == 'iso':  # 0) isotropic dilation
-        mask = binary_dilation(mask)
-    elif memb_meth == 'ip':  # 1) in-plane dilation only
-        for i, slc in enumerate(mask):
-            mask[i, :, :] = binary_dilation(slc)
-    return mask
+def nucl_mask(labels):
+    """Create nuclear mask."""
+    # TODO
+    return labels.astype('bool')
+
+
+def csol_mask(labels, mask_nucl, mask_memb):
+    """Create cytoplasm mask from labels and nuclear/membrane masks."""
+
+    mask_csol = labels.astype('bool')
+    mask_csol &= ~mask_nucl
+    mask_csol &= ~mask_memb
+
+    return mask_csol
 
 
 def subsegment(
@@ -743,11 +755,15 @@ def subsegment(
     outputdir='',
     n_workers=0,
     blocks=[],
-    ids='segm/labels_memb_del_relabeled_fix',
+    ids_labels='segm/labels_zip',
+    ids_nucl_mask='nucl/mask',
+    ids_memb_mask='',
+    ids_csol_mask='',
     ods_full='',
     ods_memb='',
     ods_nucl='',
     ods_csol='',
+    footprint_memb=None,
     ):
     """Perform N4 bias field correction."""
 
@@ -761,11 +777,15 @@ def subsegment(
     arglist = [
         (
             filepath,
-            params['ids'],
+            params['ids_labels'],
+            params['ids_nucl_mask'],
+            params['ids_memb_mask'],
+            params['ids_csol_mask'],
             params['ods_full'],
             params['ods_memb'],
             params['ods_nucl'],
             params['ods_csol'],
+            params['footprint_memb'],
             step_id,
             outputdir,
         )
@@ -778,74 +798,62 @@ def subsegment(
 
 def split_segments(
     inputfile,
-    ids='segm/labels_memb_del_relabeled_fix',
+    ids_labels='segm/labels_zip',
+    ids_nucl_mask='nucl/mask',
+    ids_memb_mask='',
+    ids_csol_mask='',
     ods_full='',
     ods_memb='',
     ods_nucl='',
     ods_csol='',
+    footprint_memb=None,
     step_id='subsegment',
     outputdir='',
     ):
-    # TODO: make flexible
 
-    labels = LabelImage('{}/{}'.format(inputfile, ids))
-    labels.load(load_data=False)
+    label_im = LabelImage('{}/{}'.format(inputfile, ids_labels))
+    label_im.load(load_data=False)
     try:
-        del labels.file[ods_full]
+        del label_im.file[ods_full]
     except KeyError:
         pass
-    labels.file[ods_full] = labels.file[ids]
-    labels_ds = labels.slice_dataset()
+    label_im.file[ods_full] = label_im.file[ids_labels]
+    labels = label_im.slice_dataset()
+    label_im.close()
 
-    if ods_nucl:
-        # nuclei
-        nuclstem = '{}/{}'.format(inputfile, 'nucl/dapi')  # TODO: flexible naming
-        maskpath_sauvola = '{}_mask_sauvola'.format(nuclstem)
-        maskpath_absmin = '{}_mask_absmin'.format(nuclstem)
-        mask_nucl = nucl_mask(maskpath_sauvola, maskpath_absmin)
-        write(mask_nucl, nuclstem, '_mask_nuclei', labels, imtype='Mask')
+    def read_mask(inputfile, ids):
+        im = MaskImage('{}/{}'.format(inputfile, ids), permission='r')
+        im.load()
+        mask = im.slice_dataset().astype('bool')
+        im.close()
+        return mask
 
-        outstem = '{}/{}'.format(inputfile, ods_nucl)
-        labs = np.copy(labels_ds)
-        labs[~mask_nucl] = 0
-        write(labs, outstem, '', labels, imtype='Label')
+    def write_masked(label_im, inputfile, ods, labels, mask):
+        outstem = '{}/{}'.format(inputfile, ods)
+        labs = np.copy(labels)
+        labs[~mask.astype('bool')] = 0
+        write(labs, outstem, '', label_im, imtype='Label')
 
     if ods_memb:
-        # membranes  # TODO: may combine with planarity_mask to make it more data-informed
-        membstem = '{}/{}'.format(inputfile, 'memb/boundary')
-        mask_memb = memb_mask(labels_ds)
-        write(mask_memb, membstem, '_mask', labels, imtype='Mask')
+        if ids_memb_mask:
+            mask_memb = read_mask(inputfile, ids_memb_mask)
+        else:
+            mask_memb = memb_mask(labels, footprint_memb)
+        write_masked(label_im, inputfile, ods_memb, labels, mask_memb)
 
-        outstem = '{}/{}'.format(inputfile, ods_memb)
-        labs = np.copy(labels_ds)
-        labs[~mask_memb] = 0
-        write(labs, outstem, '', labels, imtype='Label')
+    if ods_nucl:
+        if ids_nucl_mask:
+            mask_nucl = read_mask(inputfile, ids_nucl_mask)
+        else:
+            mask_nucl = nucl_mask(labels)
+        write_masked(label_im, inputfile, ods_nucl, labels, mask_nucl)
 
-    # fstem = '{}/'.format(inputfile)  # TODO: flexible naming
-    # # nuclei  # TODO: this has probably already been written as .h5/nucl/dapi_mask
-    # nuclstem = '{}/{}'.format(inputfile, 'nucl/dapi')  # TODO: flexible naming
-    # maskpath_nucl = '{}_mask'.format(nuclstem)
-    # mask_nucl_im = MaskImage(maskpath_nucl, permission='r')
-    # mask_nucl_im.load(load_data=False)
-    # mask_nucl = mask_nucl_im.slice_dataset().astype('bool')
-    # write(mask_nucl, fstem, 'mask_nuclei', labels, imtype='Mask')
-    #
-    # membstem = '{}/{}'.format(inputfile, 'segm/labels_csol')  # TODO: flexible naming
-    # maskpath_memb = '{}_mask'.format(membstem)
-    # mask_memb_im = MaskImage(maskpath_memb, permission='r')
-    # mask_memb_im.load(load_data=False)
-    # mask_memb = mask_memb_im.slice_dataset().astype('bool')
-    # write(mask_memb, fstem, 'mask_membrane', labels, imtype='Mask')
-    # # membranes  # TODO: may combine with planarity_mask to make it more data-informed
-    #
-    # mask_csol = ~mask_memb & ~mask_nucl
-    # write(mask_csol, fstem, 'mask_cytosol', labels, imtype='Mask')
-    #
-    # for mask, ods in zip([mask_memb, mask_nucl, mask_csol], [ods_memb, ods_nucl, ods_csol]):
-    #     outstem = '{}/{}'.format(inputfile, ods)
-    #     labs = np.copy(labels_ds)
-    #     labs[~mask] = 0
-    #     write(labs, outstem, '', labels, imtype='Label')
+    if ods_csol:
+        if ids_csol_mask:
+            mask_csol = read_mask(inputfile, ids_csol_mask)
+        else:
+            mask_csol = csol_mask(labels, mask_nucl, mask_memb)
+        write_masked(label_im, inputfile, ods_csol, labels, mask_csol)
 
 
 def plot_images(axs, info_dict={}):
