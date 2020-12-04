@@ -337,7 +337,7 @@ def seed_volume(filepath, step_key, pars, save_steps=True):
     image_in = '{}/{}'.format(filepath, pars['ids_mask'])
     im = Image(image_in)
     im.load()
-    mask = im.slice_dataset()
+    mask = im.slice_dataset().astype('bool')
     im.close()
 
     try:
@@ -404,7 +404,12 @@ def seed_volume(filepath, step_key, pars, save_steps=True):
         pass
     else:
         if 'threshold' in p.keys():
-            seeds = watershed(-edt, seeds, mask=edt > p['threshold'])
+            thr = p['threshold']
+        elif 'threshold' in pars['seeds'].keys():
+            thr = pars['seeds']['threshold']
+        else:
+            thr = 0
+        seeds = watershed(-edt, seeds, mask=edt > thr)
 
     im = write(seeds, '{}/'.format(filepath), pars['ods_labels'], im, 'Label')
 
@@ -603,6 +608,11 @@ def create_footprint(size=[5, 21, 21]):
     """Create a 3D ellipsoid-like structure element for anisotropic data.
 
     FIXME: why don't I just get an isotropic ball and delete some slices?
+    r = int(footprint[2] / 2)
+    b = ball(r, dtype='bool')
+    slc = [0, ..., r, ..., -1]
+    e = b[slc, :, :]
+    #e = np.delete(b, , axis=0)  # TODO flexible z
     """
 
     footprint = np.zeros(size)

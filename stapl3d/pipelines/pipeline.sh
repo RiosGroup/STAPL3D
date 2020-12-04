@@ -1,16 +1,43 @@
 ###==========================================================================###
 ### RUN PIPELINE
+# FIXME config load from clean
+# TODO: write to specific blockdirs for different runs
 ###==========================================================================###
 ### analysis preparation
 
 source "${HOME}/.stapl3d.ini" && load_stapl3d_config
 
+projectdir='/hpc/pmc_rios/mkleinnijenhuis/Kidney'
 projectdir='/hpc/pmc_rios/Kidney'
-dataset='200706_AP_P30T_LSR3D_25x_150um'
-
+dataset='190910_rl57_fungi_16bit_25x_125um_corr-stitching'
+# dataset='200706_AP_P30T_LSR3D_25x_150um'
+# dataset='190921_P25T_RL57_FUnGI_16Bit_25x'
+# dataset='200803_RL64_BCorganoids_25x'
+# dataset='200924_RL57_HFK_multipleresolutions_63x_zstack2'
+# dataset='200924_RL57_HFK_multipleresolutions_63x_zstack3'
+# dataset='200929_RL68A_HFK_63x_zstack1'
+dataset='200929_RL68A_HFK_63x'
+dataset='mitochondria_airyscan_25x'
+# projectdir='/hpc/pmc_rios/mkleinnijenhuis/Brain'
+# dataset='20200717_MBR04_slice6_tilescan_zstack_25x'
 load_dataset "${projectdir}" "${dataset}"
-[[ -f "${datadir}/${dataset}.yml" ]] || init_dataset
-load_parameters "${dataset}" -v
+
+parfile="${dataset}.yml"
+[[ -f "${parfile}" ]] || init_dataset
+load_parameters "${dataset}" -v "${parfile}"
+
+
+# ln -s /hpc/pmc_rios/Kidney/200706_AP_P30T_LSR3D_25x_150um/200706_AP_P30T_LSR3D_25x_150um.czi 200706_AP_P30T_LSR3D_25x_150um.czi
+# ln -s /hpc/pmc_rios/Kidney/200706_AP_P30T_LSR3D_25x_150um/200706_AP_P30T_LSR3D_25x_150um_shading_stitching.ims 200706_AP_P30T_LSR3D_25x_150um_shading_stitching.ims
+# ln -s /hpc/pmc_rios/Kidney/200706_AP_P30T_LSR3D_25x_150um/200706_AP_P30T_LSR3D_25x_150um_shading_stitching_biasfield.ims 200706_AP_P30T_LSR3D_25x_150um_shading_stitching_biasfield.ims
+# ln -s /hpc/pmc_rios/Kidney/200706_AP_P30T_LSR3D_25x_150um/200706_AP_P30T_LSR3D_25x_150um_shading_stitching_mask.h5 200706_AP_P30T_LSR3D_25x_150um_shading_stitching_mask.h5
+datadir_rvi='/hpc/pmc_rios/Kidney/200706_AP_P30T_LSR3D_25x_150um'
+ln -s $datadir_rvi/${dataset}_shading_stitching_biasfield_segm-labels_memb_del_relabeled_fix_full.h5 $datadir/${dataset}_shading_stitching_biasfield_segm-labels_memb_del_relabeled_fix_full.h5
+ln -s $datadir_rvi/${dataset}_shading_stitching_biasfield_segm-labels_memb_del_relabeled_fix_memb.h5 $datadir/${dataset}_shading_stitching_biasfield_segm-labels_memb_del_relabeled_fix_memb.h5
+ln -s $datadir_rvi/${dataset}_shading_stitching_biasfield_segm-labels_memb_del_relabeled_fix_nucl.h5 $datadir/${dataset}_shading_stitching_biasfield_segm-labels_memb_del_relabeled_fix_nucl.h5
+for blockstem in "${blockstems[@]}"; do
+    ln -s /hpc/pmc_rios/Kidney/200706_AP_P30T_LSR3D_25x_150um/blocks/$blockstem.h5 /hpc/pmc_rios/mkleinnijenhuis/Kidney/200706_AP_P30T_LSR3D_25x_150um/blocks/$blockstem.h5
+done
 
 
 ###==========================================================================###
@@ -107,7 +134,7 @@ submit $( generate_script stardist_mergeblocks ) $jid
 ###==========================================================================###
 ### plantseg
 submit $( generate_script unet3d_memb_train ) $jid
-# FIXME: submit $( generate_script unet_predict ) $jid  # model version error
+submit $( generate_script unet3d_memb_predict ) $jid  # FIXME: model version error for models trained with multiple GPUs
 # copy unet-model to ~/.plantseg_models/
 submit $( generate_script plantseg_predict ) $jid
 submit $( generate_script mergeblocks ) $jid

@@ -925,6 +925,7 @@ def transform_test(teststem, trainstem, pf, nm, ms, start=0, stop=0):
     else:
         par_pf = ''
 
+    # FIXME: saving it to a csv will be easier
     udata = get_adata_selected(adata.copy(), nm, ms)
     adata.obsm['X_umap'] = trans.transform(udata.X)
     adata_path = '{}_{}{}.h5ad'.format(teststem, pf, par_pf)
@@ -993,7 +994,8 @@ def transform_test(teststem, trainstem, nm, ms,
 
 def merge_adata(filestem, pf=''):
 
-    filepaths = [i for i in glob.glob('{}_????????-????????.h5ad'.format(filestem))]
+    filepaths = [i for i in glob.glob('{}_{}_????????-????????.h5ad'.format(filestem, pf))]
+    filepaths.sort()
     adata_umap = sc.read(filepaths[0])
     if len(filepaths) > 1:
         for f in filepaths[1:]:
@@ -1005,13 +1007,35 @@ def merge_adata(filestem, pf=''):
     adata.uns = adata_umap.uns
     adata.obsm = adata_umap.obsm
 
-    # adata.obsm['X_umap'] = adata_umap.obsm['X_umap']
-    # adata.obsm['X_umap_{}'.format(pf)] = adata_umap.obsm['X_umap']
+    adata.obsm['X_umap_{}'.format(pf)] = adata_umap.obsm['X_umap']
 
     adata.write('{}.h5ad'.format(filestem))
 
-    # for filepath in filepaths:
-    #     os.remove(filepath)
+    for filepath in filepaths:
+        os.remove(filepath)
+
+    return adata
+
+
+def merge_umap(filestem, pf=''):
+
+    filepaths = [i for i in glob.glob('{}_{}_????????-????????.h5ad'.format(filestem, pf))]
+    filepaths.sort()
+
+    dfs = []
+    for f in filepaths:
+        adata_umap = sc.read(f)
+        cols = ['umap-{}'.format(i) for i in range(adata_umap.obsm['X_umap'].shape[1])]
+        df = pd.DataFrame(adata_umap.obsm['X_umap'], index=adata_umap.obs['label'], columns=cols)
+        dfs.append(df)
+    df = pd.concat(dfs, axis=0)
+
+    adata = sc.read('{}.h5ad'.format(filestem))
+    adata.obsm['X_umap'] = np.array([df['umap-0'], df['umap-1']]).T
+    adata.write('{}.h5ad'.format(filestem))
+
+    for filepath in filepaths:
+       os.remove(filepath)
 
     return adata
 
@@ -1022,6 +1046,7 @@ def merge_csvs(keys, filestem):
 
         outstem = filestem.replace('train', 'test')
         filepaths = [i for i in glob.glob('{}_????????-????????_{}.csv'.format(outstem, key))]
+        filepaths.sort()
         df = pd.concat([pd.read_csv(f) for f in filepaths])
 
         outpath = '{}_{}.csv'.format(outstem, key)

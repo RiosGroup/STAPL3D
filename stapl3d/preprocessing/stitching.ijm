@@ -3,45 +3,34 @@ args = getArgument()
 args = split(args, " ");
 
 stitch_step = args[0];
-inputstem = args[1];
-outputdir = args[2];
-dataset = args[3];
-channel = args[4];
-postfix = args[5];
-elsize_z = args[6];
-elsize_y = args[7];
-elsize_x = args[8];
+channel = args[1];
+tif_path = args[2];
+outputdir = args[3];
+basename = args[4];
+suffix = args[5];
+cfg_path = args[6];
+elsize_z = args[7];
+elsize_y = args[8];
+elsize_x = args[9];
 
-downsample_in_x = 2;
-downsample_in_y = 2;
-downsample_in_z = 1;
+downsample_in_z = args[10];
+downsample_in_y = args[11];
+downsample_in_x = args[12];
 
-min_r = 0.7;
-max_r = 1.0;
-max_shift_in_x = 0;
-max_shift_in_y = 0;
-max_shift_in_z = 0;
-max_displacement = 0;
+min_r = args[13];
+max_r = args[14];
+max_shift_in_z = args[15];
+max_shift_in_y = args[16];
+max_shift_in_x = args[17];
+max_displacement = args[18];
 
-relative = 2.500;
-absolute = 3.500;
+relative = args[19];
+absolute = args[20];
 
-if (channel<0) {
-	filestem = dataset;
-    xml_file = filestem + ".xml";
-    xml_path = outputdir + File.separator + xml_file;
-	tif_path = inputstem + "_stack*_ch*.tif";
-	cfg_path = inputstem + "_tileoffsets.conf";
-   } else {
-	filestem = dataset + "_ch" + IJ.pad(channel, 2);
-    xml_file = filestem + ".xml";
-    xml_path = outputdir + File.separator + xml_file;
-	tif_path = inputstem + "_stack*_ch" + IJ.pad(channel, 2) + ".tif";
-	cfg_path = inputstem + "_tileoffsets_chxx.conf";
-   }
-
-h5_stem = outputdir + File.separator + filestem;
-h5_fused = outputdir + File.separator + filestem + postfix + ".xml";
+xml_file = basename + "_stacks.xml";
+xml_path = outputdir + File.separator + xml_file;
+h5_stem = outputdir + File.separator + basename + "_stacks";
+h5_fused = outputdir + File.separator + basename + ".xml";
 
 if (stitch_step==1) {
 
@@ -52,7 +41,7 @@ if (stitch_step==1) {
         " project_filename=" + xml_file +
         " path=" + tif_path +
         " exclude=10" +
-        " pattern_0=Tiles pattern_1=Channels" +
+        " pattern_0=Channels pattern_1=Tiles" +
         " modify_voxel_size? voxel_size_x=" + elsize_x + " voxel_size_y=" + elsize_y + " voxel_size_z=" + elsize_z + " voxel_size_unit=µm " +
         " how_to_load_images=[Re-save as multiresolution HDF5]" +
         " dataset_save_path=" + outputdir +
@@ -109,7 +98,7 @@ else if (stitch_step==4) {
         " select=" + xml_path +
         " filter_by_link_quality" +
         " min_r=" + min_r +
-        " max_r= " + max_r +
+        " max_r=" + max_r +
         " max_shift_in_x=" + max_shift_in_x +
         " max_shift_in_y=" + max_shift_in_y +
         " max_shift_in_z=" + max_shift_in_z +

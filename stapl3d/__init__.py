@@ -16,12 +16,19 @@ import glob
 import pickle
 import random
 import argparse
+import itertools
 import multiprocessing
-import numpy as np
+
 from xml import etree as et
-from itertools import islice
+
+import numpy as np
+
+import matplotlib
+import matplotlib.pyplot as plt
+import matplotlib.gridspec as gridspec
 
 import yaml
+# from ruamel import yaml
 
 sys.stdout = open(os.devnull, 'w')
 
@@ -32,6 +39,8 @@ except ImportError:
 
 try:
     from skimage.io import imread, imsave
+    from skimage.transform import downscale_local_mean
+    from skimage.measure import block_reduce
 except ImportError:  # , AttributeError
     print("scikit-image io could not be loaded")
 
@@ -66,7 +75,7 @@ class Image(object):
 
     def __init__(self, path,
                  elsize=None, axlab=None, dtype='float', reslev=0,
-                 shape=None, dataslices=None, slices=None,
+                 shape=None, dims=None, dataslices=None, slices=None,
                  chunks=None, compression='gzip', series=0,
                  protective=False, permission='r+'):
 
@@ -75,7 +84,10 @@ class Image(object):
         self.axlab = axlab
         self.dtype = dtype
         self.reslev = reslev
+        if shape is None:
+            shape = dims
         self.dims = shape
+        self.shape = shape
         if slices is not None:
             self.slices = slices
         else:
@@ -240,7 +252,6 @@ class Image(object):
                 info = "writing to {}".format(self.path)
 #                 raise UserWarning("writing to {}".format(self.path))
             h5file.close()
-            print(info)
 
     def h5_check_chunks(self):
         """Make sure chunksize does not exceed dimensions."""
@@ -248,6 +259,7 @@ class Image(object):
         if self.chunks is None:
             return
 
+        print(self.chunks, self.dims)
         self.chunks = tuple([cs if cs < dim else dim
                              for cs, dim in zip(list(self.chunks), self.dims)])
 
@@ -321,7 +333,10 @@ class Image(object):
 
         if self.format == '.ims':
             if not h5path['int']:
-                h5path['int'] = '/DataSet/ResolutionLevel 0'
+                if self.reslev == -1:
+                    h5path['int'] = '/DataSet/ResolutionLevel 0'
+                else:
+                    h5path['int'] = '/DataSet/ResolutionLevel {}'.format(self.reslev)
 
         if self.format == '.bdv':
             if not h5path['int']:
@@ -725,11 +740,11 @@ class Image(object):
 
         tp_names = ['TimePoint {}'.format(i) for i in range(len(rs0_group))]
         timepoints_sorted = [(tp_name, rs0_group[tp_name]) for tp_name in tp_names]
-        t_iter_slc = islice(timepoints_sorted, t_start, t_stop, t_step)
+        t_iter_slc = itertools.islice(timepoints_sorted, t_start, t_stop, t_step)
         for tp_idx, (_, tp) in enumerate(t_iter_slc):
             ch_names = ['Channel {}'.format(i) for i in range(len(tp))]
             channels_sorted = [(ch_name, tp[ch_name]) for ch_name in ch_names]
-            c_iter_slc = islice(channels_sorted, c_start, c_stop, c_step)
+            c_iter_slc = itertools.islice(channels_sorted, c_start, c_stop, c_step)
             for ch_idx, (_, ch) in enumerate(c_iter_slc):
 
                 data_tmp = ch['Data'][slcs[0], slcs[1], slcs[2]]
@@ -779,11 +794,11 @@ class Image(object):
 
         tp_names = [k for k, v in rs0_group.items() if k.startswith('t')]
         timepoints_sorted = [(tp_name, rs0_group[tp_name]) for tp_name in tp_names]
-        t_iter_slc = islice(timepoints_sorted, t_start, t_stop, t_step)
+        t_iter_slc = itertools.islice(timepoints_sorted, t_start, t_stop, t_step)
         for tp_idx, (_, tp) in enumerate(t_iter_slc):
             ch_names = [k for k, v in tp.items() if k.startswith('s')]
             channels_sorted = [(ch_name, tp[ch_name]) for ch_name in ch_names]
-            c_iter_slc = islice(channels_sorted, c_start, c_stop, c_step)
+            c_iter_slc = itertools.islice(channels_sorted, c_start, c_stop, c_step)
             for ch_idx, (_, ch) in enumerate(c_iter_slc):
                 data_tmp = ch['{}/cells'.format(self.reslev)][slcs[0], slcs[1], slcs[2]]
                 data[..., ch_idx, tp_idx] = data_tmp
@@ -1564,6 +1579,7 @@ class Image(object):
         if self.format in ['.ims', '.bdv']:
             ndim = 3
 
+        # ds[tuple(slices)] = data
         if ndim == 1:
             ds[slices[0]] = data
         elif ndim == 2:
@@ -1786,8 +1802,18 @@ class Image(object):
         self.ds[:] = np.transpose(self.ds[:], in2out)  # FIXME: fail for proxies
         self.slices = [self.slices[i] for i in in2out]
 
-    def squeeze(self):
-        pass
+    def squeeze(self, dims):
+
+        # TODO: squeeze data?
+        squeezable = ['shape', 'dims', 'elsize', 'chunks', 'slices', 'axlab']
+        for dim in dims:
+            for attr in squeezable:
+                attr_val = getattr(self, attr)
+                if attr_val is not None:
+                    attr_list = list(attr_val)
+                    del attr_list[self.axlab.index(dim)]
+                    setattr(self, attr, attr_list)
+                    # setattr(self, attr, tuple(attr_list))
 
     def mkdir_p(self):
         try:
@@ -1798,6 +1824,65 @@ class Image(object):
             else:
                 raise
 
+    def get_props2(self):
+        # TODO: replace get_props throughout
+        props = {k:v for k, v in vars(self).items()}
+        props['path'] = ''
+        props.pop('file')
+        props.pop('filereader')
+        props.pop('ds')
+        props.pop('format')
+        return props
+
+    def downsampled(self, downsample_factors, ismask=False, outputpath=''):
+
+        props = self.get_props2()
+        props['path'] = outputpath
+        props['permission'] = 'r+'
+        mo = Image(**props)
+
+        # downsample
+        dsfac = tuple([downsample_factors[dim] for dim in self.axlab])
+        if ismask:
+            data = block_reduce(self.ds[:], dsfac, np.max)
+        else:
+            data = downscale_local_mean(self.ds[:], dsfac).astype('float32')
+
+        mo.shape = data.shape
+        mo.dims = data.shape
+        mo.elsize = [es * ds for es, ds in zip(self.elsize, dsfac)]
+        mo.slices = None
+        mo.dtype = data.dtype
+
+        mo.create()
+        mo.write(data)
+
+        return mo
+
+    def extract_channel(self, ch=0, tp=0, outputpath=''):
+
+        slcs = [slc for slc in self.slices]
+
+        props = self.get_props2()
+        props['path'] = outputpath
+        props['permission'] = 'r+'
+        mo = Image(**props)
+
+        if 't' in self.axlab:
+            self.slices[self.axlab.index('t')] = slice(tp, tp + 1, 1)
+            mo.squeeze('t')
+
+        if 'c' in self.axlab:
+            self.slices[self.axlab.index('c')] = slice(ch, ch + 1, 1)
+            mo.squeeze('c')
+
+        mo.create()
+        mo.write(self.slice_dataset())
+
+        self.slices = slcs
+
+        return mo
+
 
 class MaskImage(Image):
 
@@ -1806,7 +1891,7 @@ class MaskImage(Image):
 
         super(MaskImage, self).__init__(path, **kwargs)
 
-    def invert(self):
+    def invert(self):  # __invert__(self)
 
         self.ds[:] = ~self.ds[:]
 
@@ -2277,6 +2362,98 @@ def get_n_blocks(image_in, blocksize, blockmargin):
     return len(mpi.blocks)
 
 
+def prep_pars(**kwargs):
+    """Retunr general configuration, specific parameters and outputdirectory."""
+
+    cfg = get_config(kwargs['parameter_file'])
+    kwargs['directory'] = get_outdir(kwargs['image_in'], kwargs['step_id'], kwargs['outputdir'])
+    pars = get_pars(kwargs, cfg, kwargs['step_id'], kwargs['step'])
+
+    return cfg, pars, kwargs['directory']
+
+
+def get_pars(params, cfg, pfile_entry, sub_entry='estimate'):
+    """Merge parameters from arguments and parameterfile(=leading)."""
+
+    file_params = {}
+
+    try:
+        cfg_mod = cfg[pfile_entry]
+    except KeyError:
+        print('Parameters for {} not found in parameterfile'.format(pfile_entry))
+        print('Continuing with all default values')
+        return params
+    else:
+
+        if sub_entry in cfg_mod.keys():
+
+            cfg_step = cfg_mod[sub_entry]
+
+            if cfg_step is not None:
+
+                for k, v in cfg_step.items():
+
+                    if v is not None:
+
+                        file_params.update(v)
+
+        else:
+
+            file_params = cfg_mod
+
+    if file_params:
+        params.update(file_params)
+
+    if 'postfix' in cfg_mod.keys():
+        params['postfix'] = cfg_mod['postfix']
+
+    return params
+
+
+def format_(elements, delimiter='_'):
+    return delimiter.join([x for x in elements if x])
+
+
+def get_prevpath(input, image_in, dataset, step_id, step, formatstring, fallback=''):
+
+    if isinstance(input, bool):
+        if not input:
+            return fallback
+        inputstem = get_inputstem(image_in, dataset, step_id, step)
+        return formatstring.format(inputstem)
+    else:
+        if os.path.exists(get_paths(input)['file']):
+            return input
+
+
+def get_inputstem(image_in, dataset, step_id, step):
+    """Derive the inputstem from the usual previous step."""
+
+    cfg_step = get_config_step(image_in, dataset, step_id, step)
+    basename = format_([cfg_step['files']['dataset'], cfg_step['files']['suffix']])
+    inputstem = os.path.join(cfg_step['files']['directory'], basename)
+
+    return inputstem
+
+
+def dump_pars(step_id, step, outputdir, pars, parsets):
+    """Write parameters to yaml file."""
+
+    d = {step_id: {step: {
+        'files':  {s: pars[s] for s in parsets['fpar']},
+        'params': {s: pars[s] for s in parsets['ppar']},
+        'submit': {s: pars[s] for s in parsets['spar']},
+        }}}
+
+    # TODO: convert any numpy dtypes here.
+    # basename = format_([pars['dataset'], pars['suffix'], step_id, step])
+    # basename = format_([step_id, step])
+    basename = format_([pars['dataset'], step_id, step])
+    outstem = os.path.join(pars['directory'], basename)
+    with open('{}.yml'.format(outstem), 'w') as f:
+        yaml.dump(d, f, default_flow_style=False)
+
+
 def get_params(params, parameter_file, pfile_entry, sub_entry='params'):
     """Merge parameters from arguments and parameterfile(=leading)."""
 
@@ -2295,7 +2472,44 @@ def get_params(params, parameter_file, pfile_entry, sub_entry='params'):
     return params
 
 
-def get_outputdir(image_in, parameter_file, outputdir, step_id, fallback=''):
+def get_config(parameter_file):
+    """Work out the output (sub)directory."""
+
+    with open(parameter_file, 'r') as ymlfile:
+        cfg = yaml.safe_load(ymlfile)
+
+    return cfg
+
+
+def get_config_step(image_in, dataset, step_id, step):
+    """Get saved configuration of a processing step."""
+
+    inputdir = get_outdir(image_in, step_id)
+    basename = format_([dataset, step_id, step])
+    ymlfile = os.path.join(inputdir, '{}.yml'.format(basename))
+    cfg = get_config(ymlfile)
+
+    return cfg[step_id][step]
+
+
+def get_outdir(image_in, step_id, outputdir=''):
+    """Work out the output (sub)directory.
+
+    1. Use supplied outputdir.
+    2. Use <imagedir>/<parfile_key>.
+    """
+
+    if not outputdir:
+        paths = get_paths(image_in)
+        datadir, filename = os.path.split(paths['base'])
+        outputdir = os.path.join(datadir, step_id)
+
+    os.makedirs(outputdir, exist_ok=True)
+
+    return outputdir
+
+
+def get_outputdir(image_in, parameter_file, outputdir, step_id='', fallback=''):
     """Work out the output (sub)directory.
 
     1. Use supplied outputdir.
@@ -2320,7 +2534,7 @@ def get_outputdir(image_in, parameter_file, outputdir, step_id, fallback=''):
     return outputdir
 
 
-def get_paths(image_in, resolution_level=-1, channel=0, outputstem='', step='', save_steps=False):
+def get_paths(image_in, resolution_level=-1):
     """Get split path from inputfile."""
 
     if resolution_level != -1:  # we should have an Imaris pyramid
@@ -2372,12 +2586,14 @@ def transpose_props(props, outlayout=''):
         outlayout = props['axlab'][::-1]
     in2out = [props['axlab'].index(l) for l in outlayout]
     props['elsize'] = np.array(props['elsize'])[in2out]
-    props['slices'] = [props['slices'][i] for i in in2out]
     props['shape'] = np.array(props['shape'])[in2out]
     props['axlab'] = ''.join([props['axlab'][i] for i in in2out])
     if 'chunks' in props.keys():
         if props['chunks'] is not None:
             props['chunks'] = np.array(props['chunks'])[in2out]
+    if 'slices' in props.keys():
+        if props['slices'] is not None:
+            props['slices'] = [props['slices'][i] for i in in2out]
 
     return props
 
@@ -2411,6 +2627,73 @@ def h5_nii_convert(image_in, image_out, datatype='', minmax=False):
     im_out.write(data.transpose().astype(props['dtype']))
     im_in.close()
     im_out.close()
+
+
+def parse_args(step_id, fun_selector, *argv):
+    """Parse arguments common to all modules."""
+
+    if isinstance(fun_selector, dict):
+        steps = list(fun_selector.keys())
+    elif isinstance(fun_selector, list):
+        steps = fun_selector
+
+    parser = argparse.ArgumentParser(
+        description=__doc__,
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter
+        )
+    parser.add_argument(
+        '-i', '--image_in',
+        required=True,
+        help='path to image file',
+        )
+    parser.add_argument(
+        '-p', '--parameter_file',
+        # required=True,
+        help='path to yaml parameter file',
+        )
+    parser.add_argument(
+        '-s', '--steps',
+        default='all',
+        nargs='+',
+        choices=steps,
+        required=False,
+        help='processing steps to execute',
+        )
+    parser.add_argument(
+        '-S', '--step_id',
+        default=step_id,
+        required=False,
+        help='top level name of the module parameters in parameter file',
+        )
+    parser.add_argument(
+        '-o', '--outputdir',
+        required=False,
+        help='path to output directory',
+        )
+    parser.add_argument(
+        '-d', '--dataset',
+        required=False,
+        help='name of the dataset',
+        )
+    parser.add_argument(
+        '-x', '--suffix',
+        required=False,
+        help='path to output directory',
+        )
+    parser.add_argument(
+        '-n', '--n_workers',
+        type=int,
+        default=0,
+        required=False,
+        help='number of workers (0: automatic)',
+        )
+
+    args = parser.parse_args()
+
+    if args.steps is None or args.steps == 'all':
+        args.steps = steps
+
+    return args
 
 
 def parse_args_common(step_ids, fun_selector, *argv):
@@ -2472,3 +2755,567 @@ def parse_args_common(step_ids, fun_selector, *argv):
         mapper = dict(zip(args.steps, step_ids))
 
     return args, mapper
+
+
+class Stapl3r(object):
+    """Base class for STAPL3D framework."""
+
+    def __init__(self,
+        image_in='',
+        parameter_file='',
+        module_id='',
+        step_id='',
+        directory='',
+        dataset='',
+        suffix='',
+        n_workers=0,
+        ):
+
+        self.image_in = image_in
+        self.parameter_file = parameter_file
+        self.step_id = step_id
+        self._module_id = module_id
+        self.directory = directory
+        self.dataset = dataset
+        self.suffix = suffix
+        self.n_workers = n_workers
+
+        self.cfg = {}  # private or public?
+        if self.parameter_file:
+            self.set_config()
+
+        self.datadir = os.path.abspath(os.path.dirname(image_in))
+
+        self.set_directory()
+
+        self._compute_env = os.environ.get('compute_env')
+
+        self._n_jobs = 0
+
+        self._loginit()
+
+        # @property
+        # def _compute_env(self, compute_env=''):
+        #     return compute_env or os.environ.get('compute_env')
+        # @def foo():
+        #     doc = "The  property."
+        #     def fget(self):
+        #         return self._
+        #     def fset(self, value):
+        #         self._ = value
+        #     def fdel(self):
+        #         del self._
+        #     return locals()
+        #  = property(**())
+
+        self._delimiter = '_'
+        self._suffix_formats = {
+            'z': 'Z{:03d}', 'y': 'Y{:03d}', 'x': 'X{:03d}',
+            'c': 'C{:03d}', 't': 'T{:03d}', 's': 'S{:03d}',
+            'b': 'B{:05d}',
+            # 'b': '{:05d}-{:05d}_{:05d}-{:05d}_{:05d}-{:05d}',
+            }
+
+        self._FPAR_NAMES = ('image_in', 'parameter_file', 'directory', 'datadir', 'dataset', 'suffix')
+
+        self._fdict = {
+            'fontsize': 7,
+            'fontweight' : matplotlib.rcParams['axes.titleweight'],
+            'verticalalignment': 'baseline',
+            }
+
+    def __str__(self):
+        return self.dump_parameters()
+
+    def run_all(self):
+        for step, fun in self._fun_selector.items():
+            print('Running {}:{}'.format(self._module_id, step))
+            fun()
+            self.n_workers = 0
+
+    def format_(self, elements=[], delimiter=''):
+        elements = elements or [self.dataset, self.suffix]
+        delimiter = delimiter or self._delimiter
+        return delimiter.join([x for x in elements if x])
+
+    def set_parameters(self, step, kwargs={}):
+
+        if kwargs:
+            kwargs.update({'step': step})
+            self.__dict__.update(kwargs)
+        else:
+            pars = {'step': step}
+            try:
+                pars.update(self.cfg[self.step_id][step])
+            except TypeError:
+                pass
+            except KeyError:
+                pass
+            self.__dict__.update(pars)
+
+    def _get_arglist(self, parallelized_pars):
+
+        def getset(parname, alt_val):
+            par = getattr(self, parname) or alt_val
+            setattr(self, parname, par)
+            return par
+
+        imdims = ['stacks', 'channels', 'planes']
+        if any(pp in imdims for pp in parallelized_pars):
+            from stapl3d.preprocessing import shading  # TODO
+            iminfo = shading.get_image_info(self.image_in)
+            pars = [getset(pp, iminfo[pp]) for pp in parallelized_pars]
+
+        elif parallelized_pars == ['filepaths']:  # may generalize this?
+            pars = [getset(pp, self.filepaths) for pp in parallelized_pars]
+
+        elif parallelized_pars == ['blockfiles']:
+            filepaths = self.blockfiles
+            if self.blocks:
+                filepaths = [filepaths[i] for i in self.blocks]
+            pars = [getset(pp, filepaths) for pp in parallelized_pars]
+
+        elif parallelized_pars == ['_blocks']:
+            pars = [getset(pp, self._blocks) for pp in parallelized_pars]
+
+        elif parallelized_pars == ['volumes']:
+            paths = get_paths(self._blocks[0].path)
+            volumes = self.volumes
+            def extract(name, node):
+                if isinstance(node, h5py.Dataset):
+                    volumes.append({name: {}})
+                return None
+            if not volumes:
+                with h5py.File(paths['file'], 'r') as f:
+                    f.visititems(extract)
+            pars = [getset(pp, volumes) for pp in parallelized_pars]
+
+        arglist = list(itertools.product(*pars))
+        self._n_jobs = len(arglist)
+
+        return arglist
+
+    # def set_pars(self, dicts):
+    #     """Set class attributes from defaults - arguments - parameterfile."""
+    #
+    #     for d in dicts:
+    #         if d is not None:
+    #             self._attr_setter(d)
+    #
+    # def _attr_setter(self, *pars, **kwargs):
+    #     """Set class attributes from dictionary."""
+    #
+    #     # self.__dict__.update(kwargs)  # I think this would work too
+    #     for p in pars:
+    #         for k in p:
+    #             setattr(self, k, p[k])
+    #     for k in kwargs:
+    #         setattr(self, k, kwargs[k])
+
+    def set_config(self):
+        """."""
+
+        with open(self.parameter_file, 'r') as ymlfile:
+            self.cfg = yaml.safe_load(ymlfile)
+
+    def get_config(self):
+        """."""
+
+        with open(self.parameter_file, 'r') as ymlfile:
+            cfg = yaml.safe_load(ymlfile)
+
+        return cfg
+
+    def set_directory(self, directory='', subdirectory=''):
+        """Work out the output (sub)directory.
+
+        # 1) may be set in arg if called from main
+        # 2) may be supplied in parameterfile
+        # 3) may be supplied as argument to estimate
+        # 4) may be supplied as argument to estimate_channel
+
+        1. Use supplied outputdir.
+        2. Use <imagedir>/<parfile_key>.
+        """
+
+        paths = get_paths(self.image_in)
+        datadir, filename = os.path.split(paths['base'])
+
+        if directory:
+            self.directory = directory
+        elif subdirectory:
+            self.directory = os.path.join(datadir, subdirectory)
+
+        if not self.directory:
+            self.directory = os.path.join(datadir, self._module_id)
+
+        if self.directory:
+            os.makedirs(self.directory, exist_ok=True)
+
+    def _step_pars(self, parsets, pdict):
+        return {
+            'files':  {s: pdict[s] for s in parsets['fpar']},
+            'params': {s: pdict[s] for s in parsets['ppar']},
+            'submit': {s: pdict[s] for s in parsets['spar']},
+            }
+
+    def dump_parameters(self, step='', filestem='', write=True):
+
+        # FIXME: not always serialized correctly (if they are references)
+        if not filestem:
+            basename = format_([self.dataset, self._module_id, step])
+            filestem = os.path.join(self.directory, basename)
+
+        steps = [step] if step else self._parsets.keys()
+        stepdict = {step: self._step_pars(self._parsets[step], vars(self)) for step in steps}
+
+        if write:
+            with open('{}.yml'.format(filestem), 'w') as f:
+                yaml.dump({self._module_id: stepdict}, f, default_flow_style=False)
+
+        return yaml.dump({self._module_id: stepdict}, default_flow_style=False)
+
+    def _merge_parameters(self, ymls, trees=[], filestem='', write=True, aggregate=True):
+
+        def replace(d, path, replacement):
+            cur = d
+            for k in path[:-1]:
+                cur = cur[k]
+            cur[path[-1]] = replacement
+
+        with open(ymls[0], 'r') as ymlfile:
+            cfg_out = yaml.safe_load(ymlfile)
+
+        for tree in trees:
+            aggr = {}
+            for ymlpath in ymls:
+                with open(ymlpath, 'r') as ymlfile:
+                    cfg = yaml.safe_load(ymlfile)
+                for item in tree:
+                    cfg = cfg[item]
+                # FIXME: abusing instance for aggregationVSreplace switch
+                if isinstance(cfg, dict):
+                    aggr.update(cfg)
+                else:
+                    aggr = cfg
+            replace(cfg_out, tree, aggr)
+
+        if write:
+            with open('{}.yml'.format(filestem), 'w') as f:
+                yaml.dump(cfg_out, f, default_flow_style=False)
+
+        return yaml.dump(cfg_out, default_flow_style=False)
+
+    def set_n_workers(self, n_workers=0):
+        """Determine the number of workers."""
+
+        cpu_count = multiprocessing.cpu_count()
+        n_workers = self.n_workers or n_workers or cpu_count
+        self.n_workers = min(n_workers, cpu_count)
+
+    def _set_inputstem(self, step_id, step):
+        """Derive the inputstem from the usual previous step."""
+
+        cfg_step = get_config_step(self.image_in, self.dataset, step_id, step)
+        files = cfg_step['files']
+        if 'outputpath' in files.keys():
+            self.inputstem = files['outputpath']
+        else:
+            basename = format_([files['dataset'], files['suffix']])
+            self.inputstem = os.path.join(files['directory'], basename)
+
+    def _get_input(self, input, step_id, step, formatstring, fallback=''):
+        """
+
+        input=False => use fallback value
+        input=True  => derive from step_id+step
+        input=<string> => use input
+        """
+
+        if isinstance(input, bool):
+            if not input:
+                return fallback
+            inputstem = self._set_inputstem(step_id, step)
+            return formatstring.format(self.inputstem)
+        else:
+            if os.path.exists(get_paths(input)['file']):
+                return input
+
+    def _set_inputpath(self, step_id, step, formatstring, fallback=''):
+        self.inputpath = self._get_input(self.inputpath, step_id, step, formatstring, fallback)
+
+    def view_with_napari(self, filepath, idss, ldss=[], slices=[]):
+
+        import napari
+        from stapl3d import Image
+        def get_h5_dset(filepath, ids, slices={}):
+            im = Image('{}/{}'.format(filepath, ids), permission='r')
+            im.load(load_data=False)
+            if slices:
+                for d, slc in slices.items():
+                    idx = im.axlab.index(d)
+                    if slc == 'ctr':
+                        slc = int(im.dims[idx] / 2)
+                    im.slices[idx] = slc
+            data = im.slice_dataset()
+            im.close()
+            return data
+
+        viewer = napari.Viewer()
+        for ids in idss:
+            viewer.add_image( get_h5_dset(filepath, ids, slices), name=ids)
+        for lds in ldss:
+            viewer.add_labels(get_h5_dset(filepath, lds, slices), name=lds)
+
+    def _loginit(self):
+
+        filestem = os.path.join(self.directory, self._module_id)
+        logging.basicConfig(
+            level=logging.INFO,
+            datefmt='%Y-%m-%d %H:%M:%S',
+            format='%(asctime)s [%(threadName)-12.12s] [%(levelname)-5.5s]  %(message)s',
+            handlers=[logging.FileHandler('{}.log'.format(filestem)),
+                      logging.StreamHandler()]
+            )
+
+    def _logstep(self, parameters):
+
+        logging.info('Running step "{}" over {} jobs using {} workers'.format(self.step, self._n_jobs, self.n_workers))
+        logging.info("Parameters: \n {}".format(parameters))
+
+    def _logmp(self, filestem):
+
+        # logging.info('Smoothing with sigma={}'.format(self.sigma))
+        logging.info('foo{}'.format(self.sigma))
+        logging.info("{} in PID {}".format(filestem, os.getpid()))
+
+
+# class Reporter(Stapl3r):
+#     """Correct z-stack shading."""
+#
+#     def __init__(self, image_in, parameter_file, **kwargs):
+#
+#         pass
+#
+    def report(self, ioff=True, channel=None, basename=''):
+
+        figsize = (8.27, 11.69)  # A4 portrait
+        f = plt.figure(figsize=figsize, constrained_layout=False)
+        gs = gridspec.GridSpec(1, 1, figure=f)
+
+        if not basename:
+            basename = self.format_()
+
+        figtitle = 'STAPL-3D {} report'.format(self._module_id)
+        figtitle = '{} \n {}'.format(figtitle, basename)
+
+        if not basename:
+            basename = self.format_()
+
+        if channel is not None:
+            postfix_ch = self._suffix_formats['c'].format(channel)
+            basename = self.format_([basename, postfix_ch])
+            figtitle += ' channel {:02d}'.format(channel)
+
+        filestem = os.path.join(self.directory, basename)
+
+        info_dict = self._get_info_dict(filestem, channel=channel)
+
+        axdict = self._gen_subgrid(f, gs[0], channel=channel)
+
+        self._plot_params(f, axdict, info_dict)
+        self._plot_images(f, axdict, info_dict)
+        self._plot_profiles(f, axdict, info_dict)
+
+        f.suptitle(figtitle, fontsize=14, fontweight='bold')
+        f.savefig('{}.pdf'.format(filestem))
+        if ioff:
+            plt.close(f)
+
+    def summary_report(self, ioff=True, channel=None, basename=''):
+
+        figsize = (8.27, 11.69)  # A4 portrait
+        f = plt.figure(figsize=figsize, constrained_layout=False)
+        gs = gridspec.GridSpec(1, 1, figure=f)
+
+        figtitle = 'STAPL-3D {} report'.format(self._module_id)
+        figtitle = '{} \n {}'.format(figtitle, self.dataset)
+
+        basename = basename or self.dataset or self._module_id
+        filestem = os.path.join(self.directory, basename)
+
+        info_dict = self._get_info_dict_summary(filestem, channel=channel)
+
+        axdict = {'graph': f.add_subplot(gs[0].subgridspec(1, 3)[1:])}
+
+        self._summary_report(f, axdict, info_dict)
+
+        f.suptitle(figtitle, fontsize=14, fontweight='bold')
+        f.savefig('{}_summary.pdf'.format(filestem))
+        if ioff:
+            plt.close(f)
+
+    def _report_axes_pars(self, f, gs):
+
+        gs00 = gs.subgridspec(10, 1)
+        ax = f.add_subplot(gs00[0, 0])
+        ax.set_title('parameters', self._fdict, fontweight='bold')
+        ax.tick_params(axis='both', direction='in')
+
+        return ax
+
+    def load_dumped_step(self, step, pars={}):
+
+        basename = self.format_([self.dataset, self._module_id, step])
+        ymlpath = os.path.join(self.directory, '{}.yml'.format(basename))
+        try:
+            with open(ymlpath, 'r') as ymlfile:
+                cfg = yaml.safe_load(ymlfile)
+        except FileNotFoundError:
+            pass
+        else:
+            for k in ['params', 'files', 'submit']:
+                pars.update(cfg[self._module_id][step][k])
+
+        return pars
+
+    def load_dumped_pars(self, pars={}):
+
+        for step in self._fun_selector.keys():
+            pars = self.load_dumped_step(step, pars)
+
+        return pars
+
+    def _add_titles(self, axdict, titles):
+
+        c = [0.5, 0.5, 0.5]
+        titles_kwargs_sets = {
+            'tl': {'fontweight': 'bold', 'c': c,
+                   'loc': 'left'},
+            'tr': {'fontweight': 'bold', 'c': c,
+                   'loc': 'right'},
+            'lc': {'fontweight': 'bold', 'c': c,
+                   'rotation': 90, 'x': -0.1, 'y': 0.5, 'va': 'center'},
+            'rc': {'fontweight': 'bold', 'c': c,
+                   'rotation': -90, 'x': 1.1, 'y': 0.5, 'va': 'center'},
+            'lcm': {'fontweight': 'bold', 'c': c,
+                   'rotation': 90, 'x': -0.15, 'y': 0.3, 'va': 'center'},
+            'rcm': {'fontweight': 'bold', 'c': c,
+                   'rotation': -90, 'x': 1.6, 'y': 0.3, 'va': 'center'},
+        }
+
+        for axname, (title, kw_key, idx) in titles.items():
+            ax = axdict[axname]
+            if isinstance(ax, list):
+                ax = ax[idx]
+            ax.set_title(title, **titles_kwargs_sets[kw_key])
+
+    def _plot_params(self, f, axdict, info_dict={}):
+        """Show parameter table in report."""
+
+        cellText = []
+        for par, name in self._partable.items():
+            v = info_dict['parameters'][par]
+            if not isinstance(v, list):
+                v = [v]
+            v = [np.round(x, 4) if isinstance(x, float) else x for x in v]
+            cellText.append([name, ', '.join(str(x) for x in v)])
+
+        axdict['p'].table(cellText, loc='bottom')
+        axdict['p'].axis('off')
+
+    def _draw_thresholds(self, ax, thresholds, colors, linestyles, labels, legend='upper right'):
+
+        # r = ax.get_ylim()
+        # cs = ax.vlines(thresholds, r[0], r[1], colors, linestyles, label=['foo', 'bar', 'baz'])
+        # if legend:
+        #     ax.legend(loc=legend)
+
+        def add_label(ax, val, lab, c):
+            x_bounds = ax.get_xlim()
+            x = (val - x_bounds[0]) / (x_bounds[1] - x_bounds[0])
+            ax.annotate(
+                text=lab, xy=(x, 1.01), c=c,
+                xycoords='axes fraction', va='top', ha='center',
+                rotation=270, fontsize=5,
+                )
+
+        for t, c, l, lab in zip(thresholds, colors, linestyles, labels):
+            if t is not None:
+                ax.axvline(t, ymax=0.75, color=c, linestyle=l)
+                add_label(ax, t, lab, c)
+
+    def _gen_axes(self, f, gs, sg_width=9, row=0, col=0, xlab='', slc=None,
+                  spines=[], ticks=[], ticks_position='left'):
+        gs_sp = gs[row, col].subgridspec(1, sg_width)
+        ax = f.add_subplot(gs_sp[slc])
+        for l in spines:
+            ax.spines[l].set_visible(False)
+        if ticks:
+            ax.yaxis.set_ticks(ticks)
+        ax.yaxis.set_ticks_position(ticks_position)
+        ax.tick_params(axis='both', direction='in')
+        ax.set_xlabel('{} [px]'.format(xlab), loc='center', labelpad=-7)
+        return ax
+
+    def _get_extent(self, img, elsize, x_idx=2, y_idx=1):
+        w = elsize[x_idx] * img.shape[1]
+        h = elsize[y_idx] * img.shape[0]
+        extent = [0, w, 0, h]
+        return extent
+
+    def _get_clim(self, cslc, q=[0.05, 0.95], roundfuns=[np.round, np.round]):
+        c_min = np.amin([np.quantile(cslc[d], q[0]) for d in 'xyz'])
+        c_max = np.amax([np.quantile(cslc[d], q[1]) for d in 'xyz'])
+        c_min = self._power_rounder(c_min, roundfuns[0])
+        c_max = self._power_rounder(c_max, roundfuns[1])
+        # TODO: c_min should never be c_max
+        return [c_min, c_max]
+
+    def _power_rounder(self, s, roundfun=np.round):
+        if not s: return s
+        d = np.power(10, np.floor(np.log10(s)))
+        s = roundfun(s / d) * d
+        return s
+
+    def _add_scalebar(self, ax, w, fstring=r'{} $\mu$m', color='white'):
+        from mpl_toolkits.axes_grid1.anchored_artists import AnchoredSizeBar
+        import matplotlib.font_manager as fm
+        fontprops = fm.FontProperties(size=12)
+        size = self._power_rounder(w / 5)
+        scalebar = AnchoredSizeBar(ax.transData,
+                                   size, fstring.format(size),
+                                   'lower right',
+                                   pad=0.1,
+                                   color=color,
+                                   frameon=False,
+                                   size_vertical=1,
+                                   fontproperties=fontprops)
+        ax.add_artist(scalebar)
+
+    def _plot_colorbar(self, f, ax, im, cax=None, orientation='vertical', loc='right', clip_threshold=0.0):
+        cbar = f.colorbar(im, cax=cax, extend='both', shrink=0.9, ax=ax, orientation=orientation)
+        cbar.ax.tick_params(labelsize=7)
+        if cax is not None:
+            cax.yaxis.set_ticks_position(loc)
+        if clip_threshold:
+            cbar.set_ticks([0, clip_threshold, 1])
+        return cbar
+
+    def _clipped_colormap(self, threshold, clip_color, n_colors=100):
+        """Create clipping colormap."""
+
+        colors = matplotlib.cm.viridis(np.linspace(0, 1, n_colors))
+        n = int(threshold * n_colors)
+        for i in range(n):
+            colors[i, :] = clip_color
+
+        return matplotlib.colors.ListedColormap(colors)
+
+    def _plot_profiles(self, f, axdict, info_dict):
+        """Plot graphs with profiles."""
+        pass
+
+    def _plot_images(self, f, axdict, info_dict):
+        """Plot graphs with profiles."""
+        pass

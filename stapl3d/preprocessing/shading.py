@@ -2,6 +2,38 @@
 
 """Correct z-stack shading.
 
+    # TODO: generalize to other formats than czi
+    # TODO: automate threshold estimate
+    # TODO: implement more metrics
+    # TODO: implement logging throughout.
+    # TODO: write corrected output directly to bdv for Fiji BigStitcher.
+    # TODO: try getting median over 4D concatenation directly (forego xy)
+    # TODO: make file deletion optional?
+    # TODO: corrected vs non-corrected images in report
+    # TODO: clipping mask is not automatically included in the tileoffsets for the stitching procedure
+    # TODO: tif input option
+    # TODO: clean <>_X.npz and <>_Y.npz files
+    # TODO: change step_id to module_id throughout?
+
+    # TODO: maybe dump_pars from within functions to be useful for HCP calls too
+
+    # TODO: merge pdfs
+    # TODO: generalize read-write in 'apply'
+
+    # TODO: logging system
+    # logstem = os.path.join(outputdir, '{}_{}'.format(dataset, step_id))
+    # logging.basicConfig(filename='{}.log'.format(logstem), level=logging.INFO)
+    # msg = 'Processing ch{:02d}:plane{:03d}'.format(channel, plane)
+    # logger.info(msg)  # print(msg)
+
+    # # Save derived parameters.
+    # dpars = {'z_sel': [v.item() for v in z_sel]}
+    # with open('{}.yml'.format(outstem), 'w') as f:
+    #     yaml.dump(dpars, f, default_flow_style=False)
+
+        # attrs = vars(self)
+        # print(', '.join("%s: %s" % item for item in attrs.items()))
+
 """
 
 import os
@@ -31,149 +63,457 @@ from skimage.io import imread, imsave
 import czifile
 from readlif.reader import LifFile
 
-from stapl3d import (
-    parse_args_common,
-    get_n_workers,
-    get_outputdir,
-    get_params,
-    get_paths,
-    Image,
-)
+from stapl3d import parse_args, Stapl3r, Image, format_
 
 logger = logging.getLogger(__name__)
 
 
 def main(argv):
-    """Correct z-stack shading.
-
-    """
-
-    step_ids = ['shading', 'shading_postproc', 'shading_apply']
-    fun_selector = {
-        'estimate': estimate,
-        'postprocess': postprocess,
-        'apply': apply,
-        }
-
-    args, mapper = parse_args_common(step_ids, fun_selector, *argv)
-
-    for step, step_id in mapper.items():
-        fun_selector[step](
-            args.image_in,
-            args.parameter_file,
-            step_id,
-            args.outputdir,
-            args.n_workers,
-            )
-
-def estimate(
-    image_in,
-    parameter_file,
-    step_id='shading',
-    outputdir='',
-    n_workers=0,
-    channels=[],
-    planes=[],
-    metric='median',
-    noise_threshold=None,
-    z_range=[],
-    quantile_threshold=0.8,
-    polynomial_order=3,
-    postfix='',
-    ):
     """Correct z-stack shading."""
 
-    outputdir = get_outputdir(image_in, parameter_file, outputdir, 'shading', 'shading')
+    steps = ['estimate', 'postprocess', 'apply']
+    args = parse_args('shading', steps, *argv)
 
-    params = get_params(locals().copy(), parameter_file, step_id)
-    subparams = get_params(locals().copy(), parameter_file, step_id, 'submit')
+    deshader = Deshader(
+        args.image_in,
+        args.parameter_file,
+        step_id=args.step_id,
+        directory=args.outputdir,
+        dataset=args.dataset,
+        suffix=args.suffix,
+        n_workers=args.n_workers,
+    )
 
-    iminfo = get_image_info(image_in)
-    subparams['channels'] = subparams['channels'] or iminfo['channels']
-    subparams['planes'] = subparams['planes'] or iminfo['planes']
-
-    nested_arglist = [[
-        (
-            image_in,
-            ch,
-            pl,
-            params['noise_threshold'],
-            params['metric'],
-            params['z_range'],
-            params['quantile_threshold'],
-            params['polynomial_order'],
-            params['postfix'],
-            outputdir,
-        )
-        for ch in subparams['channels']]
-        for pl in subparams['planes']]
-
-    arglist = [item for sublist in nested_arglist for item in sublist]
-
-    n_jobs = len(subparams['channels']) * len(subparams['planes'])
-    n_workers = get_n_workers(n_jobs, subparams)
-    with multiprocessing.Pool(processes=n_workers) as pool:
-        pool.starmap(estimate_plane, arglist)
+    for step in args.steps:
+        deshader._fun_selector[step]()
 
 
-def estimate_plane(
-    image_in,
-    channel,
-    plane,
-    noise_threshold=None,
-    metric='median',
-    z_range=[],
-    quantile_threshold=0.8,
-    polynomial_order=3,
-    postfix='',
-    step_id='shading',
-    outputdir='',
-    ):
-    """Estimate the x- and y-profiles for a channel in a czi file.
+class Deshader(Stapl3r):
+    """Correct z-stack shading."""
 
-    # TODO: generalize to other formats than czi
-    # TODO: automate threshold estimate
-    # TODO: implement more metrics
-    # TODO: implement logging throughout.
-    # TODO: write corrected output for Fiji BigStitcher.
-    # TODO: try getting median over 4D concatenation directly (forego xy)
-    """
+    def __init__(self, image_in='', parameter_file='', **kwargs):
 
-    # Prepare the output.
-    postfix = postfix or '_{}'.format(step_id)
-    postfix = 'ch{:02d}_Z{:03d}{}'.format(channel, plane, postfix)
+        super(Deshader, self).__init__(
+            image_in, parameter_file,
+            module_id='shading',
+            **kwargs,
+            )
 
-    outputdir = get_outputdir(image_in, '', outputdir, 'shading', 'shading')
+        self._fun_selector = {
+            'estimate': self.estimate,
+            'postprocess': self.postprocess,
+            'apply': self.apply,
+            }
 
-    paths = get_paths(image_in, channel=channel)
-    datadir, filename = os.path.split(paths['base'])
-    dataset, ext = os.path.splitext(filename)
+        default_attr = {
+            'step_id': 'shading',
+            'channels': [],
+            'planes': [],
+            'noise_threshold': 0,
+            'metric': 'median',
+            'quantile_threshold': 0.8,
+            'polynomial_order': 3,
+            'stacks': [],
+            'clipping_mask': False,
+            'correct': True,
+            'shadingpat': '',
+            'write_to_tif': True,
+        }
+        for k, v in default_attr.items():
+            setattr(self, k, v)
 
-    filestem = '{}_{}'.format(dataset, postfix)
-    outputstem = os.path.join(outputdir, filestem)
-    outputpat = '{}.h5/{}'.format(outputstem, '{}')
+        for step in self._fun_selector.keys():
+            self.set_parameters(step)
 
-    # logging.basicConfig(filename='{}.log'.format(outputstem), level=logging.INFO)
-    msg = 'Processing ch{:02d}:plane{:03d}'.format(channel, plane)
-    print(msg)  # logger.info(msg)
+        self._parsets = {
+            'estimate': {
+                'fpar': self._FPAR_NAMES,
+                'ppar': ('noise_threshold', 'metric'),
+                'spar': ('n_workers', 'channels', 'planes'),
+                },
+            'postprocess': {
+                'fpar': self._FPAR_NAMES,
+                'ppar': ('quantile_threshold', 'polynomial_order'),
+                'spar': ('n_workers', 'channels'),
+                },
+            'apply': {
+                'fpar': self._FPAR_NAMES,
+                'ppar': ('clipping_mask', 'correct', 'shadingpat', 'write_to_tif'),
+                'spar': ('n_workers', 'stacks'),
+                },
+            }
 
-    # Compute median values per plane for X and Y concatenation.
-    dstack = read_tiled_plane(image_in, channel, plane)
+        # TODO: merge with parsets
+        self._partable = {
+            'noise_threshold': 'Noise threshold',
+            'metric': 'Metric',
+            'quantile_threshold': 'Quantile threshold',
+            'polynomial_order': 'Polynomial order',
+            }
 
-    out = [noise_threshold, metric]
-    for axis in [0, 1]:
-        dstacked = np.concatenate(dstack, axis=0)
-        ma_data = np.ma.masked_array(dstacked, dstacked < noise_threshold)
-        if metric == 'median':
-            out.append(np.ma.median(ma_data, axis=0))
+    def estimate(self, **kwargs):
+        """Estimate z-stack shading.
+
+        channels=[],
+        planes=[],
+        noise_threshold=0,
+        metric='median',
+        """
+
+        self.set_parameters('estimate', kwargs)
+        arglist = self._get_arglist(['channels', 'planes'])
+        self.set_n_workers(len(arglist))
+        pars = self.dump_parameters(step=self.step)
+        self._logstep(pars)
+
+        with multiprocessing.Pool(processes=self.n_workers) as pool:
+            pool.starmap(self._estimate_plane, arglist)
+
+    def _estimate_plane(self, channel, plane):
+        """Estimate the x- and y-profiles for a channel in a czi/lif file."""
+
+        postfix_ch = self._suffix_formats['c'].format(channel)
+        postfix_st = self._suffix_formats['z'].format(plane)
+        basename = self.format_([self.dataset, self.suffix, postfix_ch, postfix_st])
+        outstem = os.path.join(self.directory, basename)
+
+        # Compute median values per plane for X and Y concatenation.
+        dstack = read_tiled_plane(self.image_in, channel, plane)
+        out = {}
+        for axis in [0, 1]:
+            dstacked = np.concatenate(dstack, axis=0)
+            ma_data = np.ma.masked_array(dstacked, dstacked < self.noise_threshold)
+            if self.metric == 'median':
+                out[axis] = np.ma.median(ma_data, axis=0)
+            else:
+                out[axis] = np.ma.mean(ma_data, axis=0)
+
+        np.savez('{}.npz'.format(outstem), X=out[1], Y=out[0])
+
+    def postprocess(self, **kwargs):
+        """Fit shading profiles for all channels.
+
+        channels=[],
+        quantile_threshold=0.8,
+        polynomial_order=3,
+        """
+
+        self.set_parameters('postprocess', kwargs)
+        arglist = self._get_arglist(['channels'])
+        self.set_n_workers(len(arglist))
+        pars = self.dump_parameters(step=self.step)
+        self._logstep(pars)
+
+        with multiprocessing.Pool(processes=self.n_workers) as pool:
+            pool.starmap(self._postprocess_channel, arglist)
+
+    def _postprocess_channel(self, channel):
+        """Fit shading profiles for a channel."""
+
+        postfix_ch = self._suffix_formats['c'].format(channel)
+        basename = self.format_([self.dataset, self.suffix, postfix_ch])
+        outstem = os.path.join(self.directory, basename)
+
+        iminfo = get_image_info(self.image_in)
+        img_fitted = np.ones(iminfo['tilesize'], dtype='float')
+
+        # Process the medians for the channel.
+        suffix_pat = self._suffix_formats['z'].format(0).replace('0', '?')
+        plane_pat = self.format_([basename, suffix_pat])
+        npzs = glob(os.path.join(self.directory, '{}.npz'.format(plane_pat)))
+        npzs.sort()
+
+        def process_medians(meds, q_thr, order, outstem, dim):
+            """Select, normalize and fit profiles; and save for report."""
+
+            sel, dm, z_sel = select_z_range(meds, q_thr)
+            m, n, nm = normalize_profile(sel)
+            f, fn = fit_profile(nm, order)
+            np.savez(
+                '{}_{}.npz'.format(outstem, dim),
+                sel=sel, dm=dm, z_sel=z_sel,
+                mean=m, norm=n, norm_mean=nm,
+                fitp=f, fitp_norm=fn,
+                )
+
+            return fn
+
+        for dim in 'XY':
+
+            meds = []
+            for npzfile in npzs:
+                medians = np.load(npzfile)
+                meds.append(medians[dim])
+                medians.close()
+
+            fitp_norm = process_medians(
+                np.stack(meds, axis=0),
+                self.quantile_threshold, self.polynomial_order,
+                outstem, dim,
+                )
+
+            if dim == 'X':
+                img_fitted *= fitp_norm
+            elif dim == 'Y':
+                img_fitted *= fitp_norm[:, np.newaxis]
+
+        # Save estimated shading image.  # FIXME: handle floats here
+        img = np.array(img_fitted * np.iinfo(iminfo['dtype']).max, dtype=iminfo['dtype'])
+        imsave('{}.tif'.format(outstem), img)
+
+        # Print a report page to pdf.
+        self.report(channel=channel)
+
+        # Delete planes
+        for npzfile in npzs:
+            os.remove(npzfile)
+
+    def apply(self, **kwargs):
+        """Apply zstack shading correction for all channels.
+
+        stacks=[],
+        clipping_mask=False,
+        correct=True,
+        shadingpat='',
+        write_to_tif=True,
+        """
+
+        self.set_parameters('apply', kwargs)
+        arglist = self._get_arglist(['stacks'])
+        self.set_n_workers(len(arglist))
+
+        # Set derived parameter defaults.  # TODO: move to method: derive_defaults
+        if not self.shadingpat:
+            stem = self.format_([self.dataset, self.suffix, self._suffix_formats['c']])
+            self.shadingpat = os.path.join(self.directory, '{}.tif'.format(stem))
+
+        pars = self.dump_parameters(step=self.step)
+        self._logstep(pars)
+
+        with multiprocessing.Pool(processes=self.n_workers) as pool:
+            pool.starmap(self._apply_stack, arglist)
+
+    def _apply_stack(self, stack=0):
+        """Apply zstack shading correction for a channel."""
+
+        postfix_st = self._suffix_formats['s'].format(stack)
+        basename = self.format_([self.dataset, self.suffix, postfix_st])
+        outstem = os.path.join(self.directory, basename)
+
+        iminfo = get_image_info(self.image_in)
+
+        out = create_output(None, iminfo['zstack_shape'], iminfo['dtype'])
+
+        # Get stack data (CZYX)  # TODO/FIXME: timepoint / assumes T is squeezed
+        c_axis = 0
+        data = np.squeeze(read_zstack(self.image_in, stack, out))
+
+        if self.clipping_mask:
+            clip_mask = create_clipping_mask(data, axis=c_axis)
+
+        if self.correct:
+            data = correct_zstack(data, c_axis, self.shadingpat)
+
+        if self.clipping_mask:
+            data = np.append(data, clip_mask.astype(data.dtype), axis=c_axis)
+
+        props = {
+            'axlab': 'zyxc',
+            'shape': iminfo['dims_zyxc'],
+            'elsize': iminfo['elsize_zyxc'],
+            'dtype': iminfo['dtype'],
+            }
+
+        if self.write_to_tif:
+
+            props['axlab'] = props['axlab'][:3]
+            props['shape'] = props['shape'][:3]
+            props['elsize'] = props['elsize'][:3]
+
+            for ch in range(0, data.shape[c_axis]):
+                postfix_ch = self._suffix_formats['c'].format(ch)
+                basename = self.format_([self.dataset, self.suffix, postfix_ch, postfix_st])
+                outputpath = os.path.join(self.directory, '{}.tif'.format(basename))
+
+                mo = Image(outputpath, **props)
+                mo.create()
+                slcs = [slc for slc in mo.slices]
+                slcs.insert(c_axis, slice(ch, ch+1))
+                mo.write(data[tuple(slcs)])
+                mo.close()
+
         else:
-            out.append(np.ma.mean(ma_data, axis=0))
 
-    with open('{}.pickle'.format(outputstem), 'wb') as f:
-        pickle.dump(out, f, pickle.HIGHEST_PROTOCOL)
+            idxs = [1, 2, 3, 0]  # czyx to zyxc
+            data = np.transpose(data, axes=idxs)
+            mo = Image("{}{}.h5/data".format(outstem, postfix_st), **props)
+            mo.create()
+            mo.write(data)
+            mo.close()
 
+    def _get_info_dict(self, filestem, info_dict={}, channel=None):
+
+        info_dict['parameters'] = self.load_dumped_pars()
+        info_dict['filestem'] = filestem
+        info_dict['clip_threshold'] = 0.75
+        info_dict['res'] = 10000
+
+        return info_dict
+
+    def _gen_subgrid(self, f, gs, channel=None):
+        """Generate the axes for printing the report."""
+
+        axdict, titles = {}, {}
+        gs0 = gs.subgridspec(2, 1, height_ratios=[1, 10])
+        axdict['p'] = self._report_axes_pars(f, gs0[0])
+
+        gs01 = gs0[1].subgridspec(3, 2)
+
+        dimdict = {
+            'X': {'row': 0, 'xlab': 'Y'},
+            'Y': {'row': 1, 'xlab': 'X'},
+            'Z': {'row': 2, 'xlab': 'Z'},
+            }
+        p = {'m': ({'title': '{m} over {d}', 'loc': 'lc'},
+                   {'col': 0, 'slc': slice(None, -2),
+                   'spines': ['top', 'left'],
+                   'ticks': [], 'ticks_position': 'right'}),
+             'n': ({'title': '{d} profile', 'loc': 'rc'},
+                   {'col': 1, 'slc': slice( 2, None),
+                    'spines': ['top', 'right'],
+                    'ticks': [0.6, 1.0, 1.4], 'ticks_position': 'left'})}
+
+        def gen_axes(f, sg, sg_width=9, row=0, col=0, xlab='', slc=None, spines=[], ticks=[], ticks_position='left'):
+            gs_sp = gs[row, col].subgridspec(1, sg_width)
+            ax = f.add_subplot(gs_sp[slc])
+            for l in spines:
+                ax.spines[l].set_visible(False)
+            if ticks:
+                ax.yaxis.set_ticks(ticks)
+            ax.yaxis.set_ticks_position(ticks_position)
+            ax.tick_params(axis='both', direction='in')
+            ax.set_xlabel('{} [px]'.format(xlab), loc='center', labelpad=-7)
+            return ax
+
+        # Profile axes.
+        sg_width = 9
+        for k, dd in dimdict.items():
+            for j, (td, pd) in p.items():
+                axname = j + k
+                t = td['title'].format(m=self.metric, d=k)
+                titles[axname] = (t, td['loc'], 0)
+                axdict[axname] = self._gen_axes(f, gs01, sg_width=sg_width, **dd, **pd)
+
+        titles['mZ'] = ('Z plane selections', 'lc', 0)
+
+        del titles['nZ']
+        axdict['nZ'].remove()
+
+        # Image axes.
+        titles['I'] = ('Shading image', 'rc', 0)
+        gs_sp = gs01[2, 1].subgridspec(2*sg_width, sg_width)
+        ax = f.add_subplot(gs_sp[p['n'][1]['slc']])
+        ax.set_xlabel('X', labelpad=-7)
+        ax.set_ylabel('Y', labelpad=-7)
+        ax.tick_params(axis='both', direction='in')
+        ax.invert_yaxis()
+        for l in ['top', 'right', 'bottom', 'left']:
+            ax.spines[l].set_visible(False)
+        axdict['I'] = ax
+        # colorbar axes
+        ax = f.add_subplot(gs_sp[-2:-1, 3:-1])
+        axdict['Ic'] = ax
+
+        self._add_titles(axdict, titles)
+
+        return axdict
+
+    def _plot_images(self, f, axdict, info_dict, clip_color=[1, 0, 0, 1], n_colors=100):
+        """Plot graph with shading image."""
+
+        ax = axdict['I']
+
+        clip_threshold = info_dict['clip_threshold']
+        clipped = self._clipped_colormap(clip_threshold, clip_color, n_colors)
+
+        img = imread('{}.tif'.format(info_dict['filestem']))
+        infun = np.iinfo if img.dtype.kind in 'ui' else np.finfo
+        img = img.transpose() / int(infun(img.dtype).max)  # TODO: img_as_float?
+
+        im = ax.imshow(img, cmap=clipped, vmin=0, vmax=1, origin='lower')
+        ax.xaxis.set_ticks([0, img.shape[0] - 1])
+        ax.yaxis.set_ticks([0, img.shape[1] - 1])
+
+        cbar = self._plot_colorbar(
+            f, ax, im, cax=axdict['Ic'],
+            orientation='horizontal', loc='left',
+            clip_threshold=clip_threshold,
+            )
+        cbar.ax.xaxis.set_ticks_position('top')
+        cbar.ax.xaxis.set_label_position('top')
+
+    def _plot_profiles(self, f, axdict, info_dict, clip_threshold=0.75, res=10000, fac=0.05):
+        """Plot graphs with profiles."""
+
+        for dim, c in {'X': 'g', 'Y': 'b'}.items():
+            npzfile = '{}_{}.npz'.format(info_dict['filestem'], dim)
+            ddict = np.load(npzfile)
+            self._plot_profile(ddict, axdict, dim, c, info_dict['clip_threshold'], fac)
+
+    def _plot_profile(self, ddict, axdict, dim='X', c='r', clip_threshold=0.75, fac=0.05):
+        """Plot graphs with profiles."""
+
+        # TODO: legends
+
+        data_sel = ddict['sel']
+        z_sel = ddict['z_sel']
+
+        x = np.linspace(0, data_sel.shape[1] - 1, data_sel.shape[1])
+
+        y_min = self._power_rounder(0)  # FIXME
+        y_max = self._power_rounder(np.amax(data_sel))
+        yticks = [y_min, y_min + 0.5 * y_max, y_max]
+
+        # Plot selected profiles.
+        ax = axdict['m'+dim]
+        colors = matplotlib.cm.jet(np.linspace(0, 1, data_sel.shape[0]))
+        # TODO: colorbar (legend)
+        for i in range(0, data_sel.shape[0]):
+            ax.plot(x, data_sel[i, :], color=colors[i], linewidth=0.5)
+        ax.set_ylim([y_min, y_max])
+        ax.xaxis.set_ticks([0, len(x) - 1])
+        ax.yaxis.set_ticks(yticks)
+
+        # Plot mean with confidence interval, normalized fit and threshold.
+        ax = axdict['n'+dim]
+        dn = ddict['norm']
+        dnm = ddict['norm_mean'].transpose()
+        df = ddict['fitp'].transpose()
+        dfn = ddict['fitp_norm'].transpose()
+        ax.plot(dnm, color='k', linewidth=1, linestyle='-')
+        ax.set_ylim([0.5, 1.5])
+        ax.xaxis.set_ticks([0, len(dnm) - 1])
+        ci = 1.96 * np.std(dn, axis=0) / np.mean(dn, axis=0)
+        ax.fill_between(x, dnm - ci, dnm + ci, color='b', alpha=.1)
+        ax.plot(df, color='k', linewidth=1, linestyle='--')
+        ax.plot(dfn, color=c, linewidth=2, linestyle='--')
+        ax.axhline(1, xmin=0, xmax=1, color='k', linewidth=0.5, linestyle=':')
+        ax.axhline(clip_threshold, xmin=0, xmax=1, color='r', linewidth=0.5, linestyle=':')
+
+        # Plot Z profile and and ticks to indicate selected planes.
+        ax = axdict['mZ']
+        dm_Z = ddict['dm']
+        ax.plot(dm_Z, color='k', linewidth=1, linestyle='-')
+        ax.set_ylim([y_min, y_max])
+        ax.xaxis.set_ticks([0, len(dm_Z) - 1])
+        ax.yaxis.set_ticks(yticks)
+        yd = {'X': [1-fac, 1], 'Y': [0, fac]}
+        for i in z_sel:
+            ax.axvline(i, ymin=yd[dim][0], ymax=yd[dim][1], color=c, linewidth=0.5, linestyle='-')
+        ax.axvspan(min(z_sel), max(z_sel), alpha=0.1, color='k')
 
 def read_tiled_plane(image_in, channel, plane):
+    """Read a plane of a tiled czi/lif file."""
 
     dstack = []
 
@@ -208,122 +548,8 @@ def read_tiled_plane(image_in, channel, plane):
     return dstack
 
 
-def postprocess(
-    image_in,
-    parameter_file,
-    step_id='shading_postproc',
-    outputdir='',
-    n_workers=0,
-    channels=[],
-    noise_threshold=None,
-    metric='median',
-    z_range=[],
-    quantile_threshold=0.8,
-    polynomial_order=3,
-    postfix='',
-    ):
-
-    outputdir = get_outputdir(image_in, parameter_file, outputdir, 'shading', 'shading')
-
-    params = get_params(locals().copy(), parameter_file, 'shading')
-    subparams = get_params(locals().copy(), parameter_file, step_id, 'submit')
-
-    iminfo = get_image_info(image_in)
-    subparams['channels'] = subparams['channels'] or iminfo['channels']
-
-    arglist = [
-        (
-            image_in,
-            ch,
-            params['noise_threshold'],
-            params['metric'],
-            params['z_range'],
-            params['quantile_threshold'],
-            params['polynomial_order'],
-            params['postfix'],
-            outputdir,
-        )
-        for ch in subparams['channels']]
-
-    n_workers = get_n_workers(len(subparams['channels']), subparams)
-    with multiprocessing.Pool(processes=n_workers) as pool:
-        pool.starmap(postprocess_channel, arglist)
-
-
-def postprocess_channel(
-    image_in,
-    channel,
-    noise_threshold=None,
-    metric='median',
-    z_range=[],
-    quantile_threshold=0.8,
-    polynomial_order=3,
-    postfix='',
-    step_id='shading_postproc',
-    outputdir='',
-    ):
-
-    postfix = postfix or '_{}'.format(step_id)
-    pf = postfix
-    postfix = 'ch{:02d}{}'.format(channel, postfix)
-
-    outputdir = get_outputdir(image_in, '', outputdir, 'shading', 'shading')
-
-    paths = get_paths(image_in, channel=channel)
-    datadir, filename = os.path.split(paths['base'])
-    dataset, ext = os.path.splitext(filename)
-
-    filestem = '{}_{}'.format(dataset, postfix)
-    outputstem = os.path.join(outputdir, filestem)
-    outputpat = '{}.h5/{}'.format(outputstem, '{}')
-
-    iminfo = get_image_info(image_in)
-
-    # Read all planes of a channel.
-    plane_pat = '{}_ch{:02d}_Z???{}'.format(dataset, channel, pf)
-    pickles = glob(os.path.join(outputdir, '{}.pickle'.format(plane_pat)))
-    pickles.sort()
-    meds_X, meds_Y = [], []
-    for pfile in pickles:
-        with open(pfile, 'rb') as f:
-            out = pickle.load(f)
-        meds_X.append(np.array(out[2]))
-        meds_Y.append(np.array(out[3]))
-
-    # Estimate the profiles from the medians.
-    img_fitted = np.ones(iminfo['tilesize'], dtype='float')
-    out = [metric, z_range, quantile_threshold, polynomial_order]
-
-    for dim, meds in {'X': meds_X, 'Y': meds_Y}.items():
-
-        out.append(np.stack(meds, axis=0))
-        data_sel, dm, z_sel = select_z_range(out[-1], z_range, quantile_threshold)
-        data_mean, data_norm, data_norm_mean = normalize_profile(data_sel)
-        data_fitted, data_fitted_norm = fit_profile(data_norm_mean, polynomial_order)
-
-        if dim == 'X':
-            img_fitted *= data_fitted_norm
-        elif dim == 'Y':
-            img_fitted *= data_fitted_norm[:, np.newaxis]
-
-    # Save estimated shading image.
-    img = np.array(img_fitted * np.iinfo(iminfo['dtype']).max, dtype=iminfo['dtype'])
-    imsave('{}.tif'.format(outputstem), img)
-
-    # Save parameters.
-    with open('{}.pickle'.format(outputstem), 'wb') as f:
-        pickle.dump(out, f, pickle.HIGHEST_PROTOCOL)
-
-    # Print a report page to pdf.
-    generate_report(outputdir, dataset, channel, pf, ioff=True)
-
-    # Delete plane pickles
-    for pfile in pickles:
-        os.remove(pfile)
-
-
-def select_z_range(data, z_range=[], quant_thr=0.8):
-    """Select planes of in a defined range or with the highest medians."""
+def select_z_range(data, quant_thr=0.8, z_range=[]):
+    """Select planes of a defined range or with the highest medians."""
 
     if not z_range:
         dm = np.median(data, axis=1)
@@ -358,107 +584,8 @@ def fit_profile(data, order=3):
     return data_fitted, data_fitted_norm
 
 
-def apply(
-    image_in,
-    parameter_file,
-    step_id='shading_apply',
-    outputdir='',
-    n_workers=0,
-    stacks=[],
-    clipping_mask=False,
-    correct=True,
-    shadingpat='',
-    write_to_tif=True,
-    postfix='',
-    ):
-
-    outputdir = get_outputdir(image_in, parameter_file, outputdir, 'stacks', 'stacks')
-
-    params = get_params(locals().copy(), parameter_file, 'shading')
-    subparams = get_params(locals().copy(), parameter_file, step_id, 'submit')
-
-    iminfo = get_image_info(image_in)
-    subparams['stacks'] = subparams['stacks'] or iminfo['stacks']
-
-    if correct and not shadingpat:
-        with open(parameter_file, 'r') as ymlfile:
-            cfg = yaml.safe_load(ymlfile)
-        shadingdir = get_outputdir(image_in, parameter_file, '', 'shading', 'shading')
-        shadingstem = os.path.join(shadingdir, cfg['dataset']['name'])
-        params['shadingpat'] = '{}{}{}.tif'.format(shadingstem, '_ch{:02d}', cfg['shading']['params']['postfix'])
-
-    arglist = [
-        (
-            image_in,
-            stack_idx,
-            params['clipping_mask'],
-            params['correct'],
-            params['shadingpat'],
-            params['write_to_tif'],
-            params['postfix'],
-            step_id,
-            outputdir,
-        )
-        for stack_idx in subparams['stacks']]
-
-    n_workers = get_n_workers(len(subparams['stacks']), subparams)
-    with multiprocessing.Pool(processes=n_workers) as pool:
-        pool.starmap(unshade_zstack, arglist)
-
-
-def unshade_zstack(
-    image_in,
-    stack_idx=0,
-    clipping_mask=False,
-    correct=True,
-    shadingpat='',
-    write_to_tif=True,
-    postfix='',
-    step_id='shading_apply',
-    outputdir='',
-    ):
-    """Correct zstack shading."""
-
-    filestem = os.path.splitext(image_in)[0]
-    datadir, fstem = os.path.split(filestem)
-
-    iminfo = get_image_info(image_in)
-    out = create_output(None, iminfo['zstack_shape'], iminfo['dtype'])
-
-    # Get stack data (CZYX)  # TODO: timepoint  # FIXME: assumes T is squeezed
-    c_axis = 0
-    data = np.squeeze(read_zstack(image_in, stack_idx, out))
-
-    if clipping_mask:
-        clip_mask = create_clipping_mask(data, axis=c_axis)
-
-    if correct:
-        fstem += postfix
-        data = correct_zstack(data, c_axis, shadingpat)
-
-    if clipping_mask:
-        data = np.append(data, clip_mask.astype(data.dtype), axis=c_axis)
-
-    basename = "{}_stack{:03d}".format(fstem, stack_idx)
-    outputstem = os.path.join(outputdir, basename)
-    props = {
-        'axlab': 'zyxc',
-        'shape': iminfo['dims_zyxc'],
-        'elsize': iminfo['elsize_zyxc'],
-        'dtype': iminfo['dtype'],
-        }
-    if write_to_tif:
-        stack2tifs(data, c_axis, outputstem, props)
-    else:
-        idxs = [1, 2, 3, 0]  # czyx to zyxc
-        data = np.transpose(data, axes=idxs)
-        mo = Image("{}.h5/data".format(outputstem), **props)
-        mo.create()
-        mo.write(data)
-        mo.close()
-
-
 def create_clipping_mask(data, axis=0):
+    """Create a mask of voxels at the ends of the datarange."""
 
     try:
         dmax = np.iinfo(data.dtype).max
@@ -467,10 +594,14 @@ def create_clipping_mask(data, axis=0):
 
     mask = np.any(data==dmax, axis=axis)
 
+    if data.ndim == 4:
+        mask = np.expand_dims(mask, axis=0)
+
     return mask
 
 
 def correct_zstack(data, c_axis=0, shadingpat=''):
+    """Divide each plane in a zstack by the shading image."""
 
     if not shadingpat:
         return data
@@ -494,23 +625,10 @@ def correct_zstack(data, c_axis=0, shadingpat=''):
     return data
 
 
-def stack2tifs(data, c_axis, outputstem, props):
-
-    props['axlab'] = props['axlab'][:3]
-    props['shape'] = props['shape'][:3]
-    props['elsize'] = props['elsize'][:3]
-
-    for ch in range(0, data.shape[c_axis]):
-        outputpath = "{}_ch{:02d}.tif".format(outputstem, ch)
-        mo = Image(outputpath, **props)
-        mo.create()
-        slcs = [slc for slc in mo.slices]
-        slcs.insert(c_axis, slice(ch, ch+1))
-        mo.write(data[tuple(slcs)])
-        mo.close()
-
-
 def get_image_info(image_in):
+    """Retrieve selected image metadata."""
+
+    # TODO: move to __init__.py function or Image class
 
     iminfo = {}
 
@@ -573,6 +691,17 @@ def get_image_info(image_in):
 
         iminfo['stack_offsets'] = v_offsets
 
+    elif image_in.endswith('.ims'):
+
+        from stapl3d import get_imageprops
+        props = get_imageprops(image_in)
+        iminfo = {
+            'nchannels': props['shape'][props['axlab'].index('c')],
+            'ntimepoints': props['shape'][props['axlab'].index('t')],
+            'nplanes': props['shape'][props['axlab'].index('z')],
+            'nstacks': 1,
+            }
+
     else:
 
         print('Sorry, only czi and lif implemented for now...')
@@ -594,14 +723,18 @@ def czi_get_elsize(czi):
     md = etree.fromstring(data.encode('utf-8'))
 
     # FIXME: use find() method on etree items
-    elsize_x = float(md[0][3][0][0][0].text) * 1e6
-    elsize_y = float(md[0][3][0][1][0].text) * 1e6
-    elsize_z = float(md[0][3][0][2][0].text) * 1e6
+    try:
+        elsize_x = float(md[0][3][0][0][0].text) * 1e6
+        elsize_y = float(md[0][3][0][1][0].text) * 1e6
+        elsize_z = float(md[0][3][0][2][0].text) * 1e6
+    except IndexError:
+        elsize_x, elsize_y, elsize_z = 1, 1, 1
 
     return [elsize_z, elsize_y, elsize_x]
 
 
 def czi_tile_offsets(czi, iminfo):
+    """Get the offset coordinates of a czi zstack."""
 
     # first dir of eacxh zstack: C[8]Z[84]M[286]
     stack_stride = iminfo['nchannels'] * iminfo['ntimepoints'] * iminfo['nplanes']
@@ -661,229 +794,6 @@ def read_zstack(image_in, zstack_idx, out=None):
         return
 
     return out
-
-
-def plot_profiles(f, axdict, filestem, clip_threshold=0.75, res=10000, fac=0.05):
-
-    with open('{}.pickle'.format(filestem), 'rb') as f:
-        metric, z_range, quant_thr, order, data_X, data_Y = pickle.load(f)
-
-    for dim, vals in {'X': [data_X, 'g'], 'Y': [data_Y, 'b']}.items():
-        plot_profile(vals[0], z_range, quant_thr, axdict, dim, vals[1], clip_threshold, res, fac)
-
-
-def plot_profile(data, z_range=[], quant_thr=0.8, axdict={}, ax='X', c='r', clip_threshold=0.75, res=10000, fac=0.05):
-    """Plot graphs with profiles."""
-
-    if not axdict:
-        fig, axs = plt.subplots(1, 3, figsize=(6, 3), constrained_layout=True)
-    else:
-        axs = axdict[ax] + [axdict['Z']]
-
-    data_sel, dm_Z, z_sel = select_z_range(data, z_range, quant_thr)
-    data_mean, data_norm, data_norm_mean = normalize_profile(data_sel)
-    data_fitted, data_fitted_norm = fit_profile(data_norm_mean)
-
-    x = np.linspace(0, data_sel.shape[1] - 1, data_sel.shape[1])
-
-    # Plot selected profiles.
-    colors = matplotlib.cm.jet(np.linspace(0, 1, data_sel.shape[0]))
-    for i in range(0, data_sel.shape[0]):
-        axs[0].plot(x, data_sel[i,:], color=colors[i], linewidth=0.5)
-
-    # Plot mean with confidence interval, normalized fit and threshold.
-    dm = data_norm_mean.transpose()
-    ci = 1.96 * np.std(data_norm, axis=0) / np.mean(data_norm, axis=0)
-    axs[1].plot(dm,
-                color='k', linewidth=1, linestyle=':')
-    axs[1].fill_between(x, dm - ci, dm + ci,
-                        color='b', alpha=.1)
-    axs[1].plot(data_fitted_norm.transpose(),
-                color=c, linewidth=1, linestyle='-')
-    axs[1].plot([0, len(x)], [clip_threshold] * 2,
-                color='r', linewidth=1, linestyle='--')
-
-    # Format axes.
-    y_min = np.floor(np.amin(data_sel) / res) * res
-    y_max = np.ceil(np.amax(data_sel) / res) * res
-    axs[0].set_ylim([y_min, y_max])
-    axs[0].yaxis.set_ticks([y_min, y_min + 0.5 * y_max, y_max])
-    axs[1].set_ylim([0.5, 1.5])
-
-    # Plot Z profile and and ticks to indicate selected planes.
-    axs[2].plot(dm_Z, color=c, linewidth=1, linestyle='-')
-
-    if ax == 'X':  # plot X-selection on bottom
-        y = [y_min, y_max * fac]
-    elif ax == 'Y':  # plot Y-selection on top
-        y = [y_min + (1 - fac) * (y_max - y_min), y_max]
-    for i in z_sel:
-        axs[2].plot([z_sel, z_sel], y,
-                    color=c, linewidth=0.5, linestyle='-')
-
-    # Format axes.
-    axs[2].set_ylim([y_min, y_max])
-    axs[2].yaxis.set_ticks([y_min, y_min + 0.5 * y_max, y_max])
-
-
-def clip_colormap(threshold, clip_color, n_colors=100):
-    """Create clipping colormap."""
-
-    colors = matplotlib.cm.viridis(np.linspace(0, 1, n_colors))
-    n = int(threshold * n_colors)
-    for i in range(n):
-        colors[i, :] = clip_color
-
-    return matplotlib.colors.ListedColormap(colors)
-
-
-def plot_images(f, ax, filestem, clip_threshold=0.75, clip_color=[1, 0, 0, 1], n_colors=100):
-    """Plot graph with shading image."""
-
-    clipped = clip_colormap(clip_threshold, clip_color, n_colors)
-
-    img = imread('{}.tif'.format(filestem))
-    img = img.transpose() / int(np.iinfo(img.dtype).max)
-    im = ax.imshow(img, cmap=clipped, vmin=0, vmax=1, origin='lower')
-
-    # PLot colorbar.
-    from mpl_toolkits.axes_grid1 import make_axes_locatable
-    divider = make_axes_locatable(ax)
-    cax = divider.append_axes('right', size='5%', pad=0.05)
-    cbar = f.colorbar(im, cax=cax, orientation='vertical')
-    cbar.set_ticks([0, clip_threshold, 1])
-
-
-def gen_subgrid(f, gs, fsize=7, channel=None, metric='median'):
-
-    fdict = {'fontsize': fsize,
-     'fontweight' : matplotlib.rcParams['axes.titleweight'],
-     'verticalalignment': 'baseline'}
-
-    # TODO
-    n_planes = 106
-    ts = [1024, 1024]
-
-    gs00 = gs.subgridspec(2, 2, width_ratios=[5, 1], height_ratios=[5, 1])
-    gs000 = gs00[0].subgridspec(3, 2)
-
-    ax1 = f.add_subplot(gs000[0, 0])
-    title = '{} over X'.format(metric)
-    ax1.set_title(title, fdict, fontweight='bold')
-    ax1.tick_params(axis='both', labelsize=fsize, direction='in')
-    ax1.xaxis.set_ticks([0, ts[1] - 1])
-    ax1.set_xlabel('Y [px]', fdict, labelpad=-3)
-
-    ax3 = f.add_subplot(gs000[1, 0])
-    title = '{} over Y'.format(metric)
-    ax3.set_title(title, fdict, fontweight='bold')
-    ax3.tick_params(axis='both', labelsize=fsize, direction='in')
-    ax3.xaxis.set_ticks([0, ts[0] - 1])
-    ax3.set_xlabel('X [px]', fdict, labelpad=-3)
-
-
-    ax2 = f.add_subplot(gs000[0, 1])
-    title = 'normalized X profile'
-    ax2.set_title(title, fdict, fontweight='bold')
-    ax2.tick_params(axis='both', labelsize=fsize, direction='in')
-    ax2.xaxis.set_ticks([0, ts[1] - 1])
-    ax2.set_xlabel('Y [px]', fdict, labelpad=-3)
-    ax2.yaxis.tick_right()
-    ax2.yaxis.set_ticks([0.6, 1.0, 1.4])
-
-    ax4 = f.add_subplot(gs000[1, 1])
-    title = 'normalized Y profile'
-    ax4.set_title(title, fdict, fontweight='bold')
-    ax4.tick_params(axis='both', labelsize=fsize, direction='in')
-    ax4.xaxis.set_ticks([0, ts[0] - 1])
-    ax4.set_xlabel('X [px]', fdict, labelpad=-3)
-    ax4.yaxis.tick_right()
-    ax4.yaxis.set_ticks([0.6, 1.0, 1.4])
-
-
-    ax5 = f.add_subplot(gs000[2, 0])
-    title = 'Z plane selections'
-    ax5.set_title(title, fdict, fontweight='bold')
-    ax5.tick_params(axis='both', labelsize=fsize, direction='in')
-    ax5.xaxis.set_ticks([0, n_planes - 1])
-    ax5.set_xlabel('Z [px]', fdict, labelpad=-3)
-    # ax5.tick_params(axis='x', which='both', bottom=False, top=False, labelbottom=False)
-
-
-    ax6 = f.add_subplot(gs000[2, 1])  # image
-    title = '2D shading profile'.format(channel)
-    ax6.set_title(title, fdict, fontweight='bold')
-    ax6.set_xlabel('X', fdict, labelpad=-3)
-    ax6.set_ylabel('Y', fdict, labelpad=-3)
-    ax6.xaxis.set_ticks([0, ts[0] - 1])
-    ax6.yaxis.set_ticks([0, ts[1] - 1])
-    ax6.tick_params(axis='both', labelsize=fsize, direction='in')
-    ax6.invert_yaxis()
-
-
-    ax3.set_ylabel('channel {}'.format(channel), fontsize=14, fontweight='bold')
-    ax3.yaxis.label.set_color('k')
-
-    return {'X': [ax1, ax2], 'Y': [ax3, ax4], 'Z': ax5, 'I': ax6}
-
-
-def old2new(datadir, dataset, metric='medians', z_range=[], quant_thr=0.8, order=3):
-    """Legacy format conversion."""
-
-    inputdir = os.path.join(datadir, 'bias')
-    outputdir = os.path.join(datadir, 'shading')
-    for ch in range(8):
-        chstem = os.path.join(inputdir, '{}_ch{:02d}'.format(dataset, ch))
-        data_X = np.load('{}_medians_axisX.npy'.format(chstem))
-        data_Y = np.load('{}_medians_axisY.npy'.format(chstem))
-        out = [metric, z_range, quant_thr, order, data_X, data_Y]
-
-        os.makedirs(outputdir, exist_ok=True)
-        outstem = os.path.join(outputdir, '{}_ch{:02d}'.format(dataset, ch))
-        with open('{}.pickle'.format(outstem), 'wb') as f:
-            pickle.dump(out, f, pickle.HIGHEST_PROTOCOL)
-
-        import shutil
-        inpath = '{}_medians_bias.tif'.format(chstem)
-        outpath = '{}_shading.tif'.format(outstem)
-        shutil.copy2(inpath, outpath)
-
-
-def generate_report(outputdir, dataset, channel=None, postfix='_shading',
-                    res=10000, clip_threshold=0.75, ioff=False):
-
-    chsize = (11.69, 8.27)  # A4 portrait
-    # chsize = [6, 6]
-    figtitle = 'STAPL-3D Z-stack shading report'
-    filestem = os.path.join(outputdir, dataset)
-    outputstem = filestem
-
-    if channel is None:  # plot all channels on a single page.
-        figtitle = '{}: {} \n'.format(figtitle, dataset)
-        n_channels = 8 # TODO: get n_channels from yml or glob -- or make channel argument a list of channels
-        subplots = [2, int(n_channels / 2)]
-        channels = list(range(n_channels))
-    else:  # plot a single channel
-        figtitle = '{} \n {}: channel {:02d} \n'.format(figtitle, dataset, channel)
-        n_channels = 1
-        subplots = [1, 1]
-        channels = [channel]
-        outputstem = '{}_ch{:02d}'.format(outputstem, channel)
-
-    figsize = (chsize[1]*subplots[1], chsize[0]*subplots[0])
-    f = plt.figure(figsize=figsize, constrained_layout=False)
-    gs = gridspec.GridSpec(subplots[0], subplots[1], figure=f)
-
-    for idx, ch in enumerate(channels):
-        chstem = '{}_ch{:02d}{}'.format(filestem, ch, postfix)
-        axdict = gen_subgrid(f, gs[idx], channel=ch)
-        plot_images(f, axdict['I'], chstem, clip_threshold)
-        plot_profiles(f, axdict, chstem, clip_threshold)
-
-    f.suptitle(figtitle, fontsize=14, fontweight='bold')
-    f.savefig('{}{}.pdf'.format(outputstem, postfix))
-    if ioff:
-        plt.close(f)
 
 
 if __name__ == "__main__":

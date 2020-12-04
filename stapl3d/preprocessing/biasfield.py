@@ -2,6 +2,8 @@
 
 """Perform N4 bias field correction.
 
+    # TODO: biasfield report is poorly scaled for many datasets => implement autoscaling
+
 """
 
 import os
@@ -17,6 +19,7 @@ import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 
 import yaml
+# from ruamel import yaml
 
 import numpy as np
 
@@ -25,240 +28,589 @@ from glob import glob
 from skimage.transform import resize, downscale_local_mean
 from skimage.measure import block_reduce
 
-from stapl3d import (
-    parse_args_common,
-    get_n_workers,
-    get_outputdir,
-    get_imageprops,
-    get_params,
-    get_paths,
-    Image,
-    wmeMPI,
-    )
+import SimpleITK as sitk
 
-from stapl3d.imarisfiles import (
-    find_downsample_factors,
-    find_resolution_level,
-    )
-from stapl3d.preprocessing.masking import (write_data)
+from stapl3d import parse_args, Stapl3r, Image, format_, wmeMPI
+from stapl3d.imarisfiles import find_downsample_factors, find_resolution_level
+from stapl3d.preprocessing.shading import get_image_info
 from stapl3d.reporting import (
-    gen_orthoplot,
     gen_orthoplot_with_profiles,
-    get_centreslice,
+    gen_orthoplot_with_colorbar,
     get_centreslices,
     get_zyx_medians,
     merge_reports,
-    zip_parameters,
     )
 
 logger = logging.getLogger(__name__)
 
 
 def main(argv):
-    """Perform N4 bias field correction.
-
-    """
-
-    step_ids = ['biasfield', 'biasfield_postproc', 'biasfield_apply']
-    fun_selector = {
-        'estimate': estimate,
-        'postprocess': postprocess,
-        'apply': apply,
-        }
-
-    args, mapper = parse_args_common(step_ids, fun_selector, *argv)
-
-    for step, step_id in mapper.items():
-        fun_selector[step](
-            args.image_in,
-            args.parameter_file,
-            step_id,
-            args.outputdir,
-            args.n_workers,
-            )
-
-
-def estimate(
-    image_in,
-    parameter_file,
-    step_id='biasfield',
-    outputdir='',
-    n_workers=0,
-    channels=[],
-    mask_in='',
-    resolution_level=-1,
-    downsample_factors=[],
-    n_iterations=50,
-    n_fitlevels=4,
-    n_bspline_cps={'z': 5, 'y': 5, 'x': 5},
-    postfix='',
-    ):
     """Perform N4 bias field correction."""
 
-    outputdir = get_outputdir(image_in, parameter_file, outputdir, 'biasfield', 'biasfield')
+    steps = ['estimate', 'postprocess', 'apply']
+    args = parse_args('biasfield', steps, *argv)
 
-    params = get_params(locals().copy(), parameter_file, step_id)
-    subparams = get_params(locals().copy(), parameter_file, step_id, 'submit')
+    homogenizer = Homogenizer(
+        args.image_in,
+        args.parameter_file,
+        step_id=args.step_id,
+        directory=args.outputdir,
+        dataset=args.dataset,
+        suffix=args.suffix,
+        n_workers=args.n_workers,
+    )
 
-    if not subparams['channels']:
-        props = get_imageprops(image_in)
-        n_channels = props['shape'][props['axlab'].index('c')]
-        subparams['channels'] = list(range(n_channels))
-
-    if isinstance(params['mask_in'], bool):
-        if params['mask_in']:
-            filestem = os.path.splitext(get_paths(image_in)['fname'])[0]
-            mpars = get_params(dict(), parameter_file, 'mask')
-            maskfile = '{}{}.h5/mask'.format(filestem, mpars['postfix'])
-            maskdir = get_outputdir(image_in, parameter_file, '', 'mask')
-            params['mask_in'] = os.path.join(maskdir, maskfile)
-
-    arglist = [
-        (
-            image_in,
-            ch,
-            subparams['tasks'],  # FIXME: must exist
-            params['mask_in'],
-            params['resolution_level'],
-            params['downsample_factors'],
-            params['n_iterations'],
-            params['n_fitlevels'],
-            params['n_bspline_cps'],
-            params['postfix'],
-            step_id,
-            outputdir,
-        )
-        for ch in subparams['channels']]
-
-    # NOTE: per-channel processing as ITK uses multithreading on each channel
-    n_workers = get_n_workers(len(subparams['channels']), subparams)
-    for idx, ch in enumerate(subparams['channels']):
-        with multiprocessing.Pool(processes=n_workers) as pool:
-            pool.starmap(estimate_channel, [arglist[idx]])
+    for step in args.steps:
+        homogenizer._fun_selector[step]()
 
 
-def estimate_channel(
-    image_in,
-    channel,
-    n_threads=1,
-    mask_in='',
-    resolution_level=-1,
-    downsample_factors=[],
-    n_iterations=50,
-    n_fitlevels=4,
-    n_bspline_cps={'z': 5, 'y': 5, 'x': 5},
-    postfix='',
-    step_id='biasfield',
-    outputdir='',
-    ):
-    """Estimate the x- and y-profiles for a channel in a czi file.
+class Homogenizer(Stapl3r):
+    """Perform N4 bias field correction."""
 
-    # TODO: biasfield report is poorly scaled for many datasets => implement autoscaling
-    """
+    def __init__(self, image_in='', parameter_file='', **kwargs):
 
-    if isinstance(downsample_factors, dict):
-        downsample_factors = [downsample_factors[dim] for dim in 'zyxct']
+        super(Homogenizer, self).__init__(
+            image_in, parameter_file,
+            module_id='biasfield',
+            **kwargs,
+            )
 
-    if isinstance(n_bspline_cps, dict):
-        n_bspline_cps = [n_bspline_cps[dim] for dim in 'zyx']
+        self._fun_selector = {
+            'estimate': self.estimate,
+            'postprocess': self.postprocess,
+            'apply': self.apply,
+            }
 
-    if not downsample_factors:
-        downsample_factors, _, resolution_level = calculate_downsample_factors(image_in, resolution_level)
+        default_attr = {
+            'step_id': 'biasfield',
+            'channels': [],
+            'inputpath': True,
+            'resolution_level': -1,
+            'mask_in': False,
+            'downsample_factors': {},
+            '_downsample_factors_reslev': {},
+            'tasks': 1,
+            'n_iterations': 50,
+            'n_fitlevels': 4,
+            'n_bspline_cps': {'z': 5, 'y': 5, 'x': 5},
+            'inputstem': True,
+            'blocksize_xy': 1280,
+            'bias_in': True,
+            'output_format': '.h5',
+            'n_threads': 1,
+        }
+        for k, v in default_attr.items():
+            setattr(self, k, v)
 
-    # Prepare the output.
-    postfix = postfix or '_{}'.format(step_id)
-    postfix = 'ch{:02d}{}'.format(channel, postfix)
+        for step in self._fun_selector.keys():
+            self.set_parameters(step)
 
-    outputdir = get_outputdir(image_in, '', outputdir, 'biasfield', 'biasfield')
+        self.inputpath = self._get_input(self.inputpath,
+            'stitching', 'postprocess', '{}.bdv', fallback=self.image_in,
+            )
+        self.mask_in = self._get_input(self.mask_in, 'mask', 'estimate', '{}.h5/mask')
 
-    paths = get_paths(image_in, resolution_level, channel)
-    datadir, filename = os.path.split(paths['base'])
-    dataset, ext = os.path.splitext(filename)
+        self._parsets = {
+            'estimate': {
+                'fpar': self._FPAR_NAMES + ('inputpath', 'resolution_level', 'mask_in'),
+                'ppar': ('downsample_factors',
+                         'n_iterations', 'n_fitlevels', 'n_bspline_cps'),
+                'spar': ('n_workers', 'channels', 'n_threads'),
+                },
+            'postprocess': {
+                'fpar': self._FPAR_NAMES + ('inputstem',),
+                'ppar': (),
+                'spar': ('n_workers',),
+                },
+            'apply': {
+                'fpar': self._FPAR_NAMES + ('inputstem', 'bias_in', 'resolution_level'),
+                'ppar': ('downsample_factors', 'blocksize_xy', 'output_format'),
+                'spar': ('n_workers', 'channels'),
+                },
+            }
 
-    filestem = '{}_{}'.format(dataset, postfix)
-    outputstem = os.path.join(outputdir, filestem)
-    outputpat = '{}.h5/{}'.format(outputstem, '{}')
+        # TODO: merge with parsets?
+        self._partable = {
+            'resolution_level': 'Resolution level image pyramid',
+            'downsample_factors': 'Downsample factors',
+            'n_iterations': 'N iterations',
+            'n_fitlevels': 'N fitlevels',
+            'n_bspline_cps': 'N b-spline components',
+            }
 
-    logging.basicConfig(filename='{}.log'.format(outputstem), level=logging.INFO)
-    report = {'parameters': locals()}
+    def estimate(self, **kwargs):
+        """Perform N4 bias field correction.
 
-    ds_im = downsample_channel(image_in, channel, resolution_level,
-                               downsample_factors, False, outputpat)
+        channels=[],
+        inputpath=True,
+        resolution_level=-1,
+        mask_in='',
+        downsample_factors=[],
+        n_iterations=50,
+        n_fitlevels=4,
+        n_bspline_cps={'z': 5, 'y': 5, 'x': 5},
+        """
 
-    ds_ma = downsample_channel(mask_in, channel, resolution_level,
-                               downsample_factors, True, outputpat)
+        self.set_parameters('estimate', kwargs)
+        arglist = self._get_arglist(['channels'])
+        self.set_n_workers(len(arglist))
+        pars = self.dump_parameters(step=self.step)
+        self._logstep(pars)
 
-    ds_bf = calculate_bias_field(ds_im, ds_ma,
-                                 n_iterations, n_fitlevels, n_bspline_cps,
-                                 n_threads, outputpat)
+        # NOTE: ITK is already multithreaded => n_workers = 1
+        self.n_threads = min(self.tasks, multiprocessing.cpu_count())
+        self.n_workers = 1
+        with multiprocessing.Pool(processes=self.n_workers) as pool:
+            pool.starmap(self._estimate_channel, arglist)
 
-    ds_cr = divide_bias_field(ds_im, ds_bf, outputpat)
+    def _estimate_channel(self, channel):
+        """Estimate the x- and y-profiles for a channel in a czi file.
 
-    # Save medians and parameters.
-    with open('{}.pickle'.format(outputstem), 'wb') as f:
-        pickle.dump(report['parameters'], f, pickle.HIGHEST_PROTOCOL)
+        channel
+        inputpath
+        - 3D/4D
+        - direct/derived[auto]/derived[specified]/image_in/...
+        [mask_in]
+        [downsample_factors]
+        """
 
-    # Print a report page to pdf.
-    generate_report(outputdir, dataset, channel=channel, ioff=True)
+        postfix_ch = self._suffix_formats['c'].format(channel)
+        basename = self.format_([self.dataset, self.suffix, postfix_ch])
+        outstem = os.path.join(self.directory, basename)
+        outputpat = '{}_ds.h5/{}'.format(outstem, '{}')
 
-    ds_im.close()
-    ds_bf.close()
-    ds_cr.close()
-    if mask_in:
-        ds_ma.close()
+        # Set derived parameter defaults.
+        self.inputpath = self._get_input(self.inputpath,
+            'stitching', 'postprocess', '{}.bdv', fallback=self.image_in)
+        self.mask_in = self._get_input(self.mask_in, 'mask', 'estimate', '{}.h5/mask')
+
+        self.set_downsample_factors()
+        self.set_directory()  # ???
+
+        ds_im = get_downsampled_channel(
+            self.inputpath, self.resolution_level, channel,
+            self.downsample_factors, False, outputpat.format('data'),
+            )
+        # FIXME: assuming here that mask is already created from resolution_level!
+        ds_ma = get_downsampled_channel(
+            self.mask_in, -1, channel,
+            self.downsample_factors, True, outputpat.format('mask'),
+            )
+        ds_bf = calculate_bias_field(
+            ds_im, ds_ma,
+            self.n_iterations, self.n_fitlevels,
+            [self.n_bspline_cps[dim] for dim in ds_im.axlab],
+            self.n_threads, outputpat.format('bias'),
+            )
+        ds_cr = divide_bias_field(ds_im, ds_bf, outputpat.format('corr'))
+
+        for im in [ds_im, ds_ma, ds_bf, ds_cr]:
+            try:
+                im.close()
+            except:
+                pass
+
+        self.dump_parameters(step=self.step, filestem=outstem)
+        self.report(channel=channel)
+
+    def set_downsample_factors(self, target_yx=20, inputpath='', resolution_level=-1):
+
+        if not inputpath:
+            inputpath = self.inputpath
+        if resolution_level == -1:
+            self.set_resolution_level()
+
+        dsfacs = find_downsample_factors(inputpath, 0, resolution_level)
+        self._downsample_factors_reslev = {dim: int(d) for dim, d in zip('zyxct', list(dsfacs) + [1, 1])}
+
+        if self.downsample_factors:
+            return
+
+        im = Image(inputpath, permission='r', reslev=resolution_level)
+        im.load(load_data=False)
+        im.close()
+        target = {'z': im.elsize[im.axlab.index('z')], 'y': target_yx, 'x': target_yx}
+        dsfacs = [target[dim] / im.elsize[im.axlab.index(dim)] for dim in 'zyx']
+        dsfacs = [np.round(dsfac).astype('int') for dsfac in dsfacs]
+        dsfacs[1] = dsfacs[2] = min(dsfacs[1], dsfacs[2])
+
+        self.downsample_factors = {dim: int(d) for dim, d in zip('zyxct', dsfacs + [1, 1])}
+
+    def set_resolution_level(self):
+
+        if self.resolution_level >= 0:
+            return
+
+        if '.ims' in self.inputpath or '.bdv' in self.inputpath:
+            if self.resolution_level == -1:
+                self.resolution_level = find_resolution_level(self.inputpath)
+
+    def postprocess(self, **kwargs):
+        """Merge bias field estimation files.
+
+        kwargs:
+        """
+
+        self.set_parameters('postprocess', kwargs)
+
+        outstem = os.path.join(self.directory, self.format_())
+        self.inputstem = self._get_input(self.inputstem, 'biasfield', 'estimate', '{}', fallback=self.image_in)
+        suffix_pat = self._suffix_formats['c'].format(0).replace('0', '?')
+        inputpat = '{}_{}'.format(self.inputstem, suffix_pat)
+
+        pars = self.dump_parameters(step=self.step)
+        self._logstep(pars)
+
+        # TODO: skip if inputfiles not found, throwing warning
+        inputfiles = glob('{}_ds.h5'.format(inputpat))
+        inputfiles.sort()
+        outputfile = '{}_ds.h5'.format(outstem)
+        self.stack_bias(inputfiles, outputfile)
+        for filepath in inputfiles:
+            os.remove(filepath)
+
+        pdfs = glob('{}.pdf'.format(inputpat))
+        pdfs.sort()
+        merge_reports(pdfs, '{}.pdf'.format(outstem))
+
+        # Replace fields.  # FIXME: assumed all the same: 4D inputfile
+        ymls = glob('{}.yml'.format(inputpat))
+        ymls.sort()
+        bname = self.format_([self.dataset, self._module_id, step])
+        ymlstem = os.path.join(self.directory, bname)
+        steps = {
+            'estimate': [
+                ['biasfield', 'estimate', 'files', 'inputpath'],
+                ['biasfield', 'estimate', 'files', 'resolution_level'],
+                ['biasfield', 'estimate', 'files', 'mask_in'],
+            ],
+        }
+        for step, trees in steps.items():
+            # will replace to the values from ymls[-1]
+            self._merge_parameters(ymls, trees, ymlstem, aggregate=False)
+        for yml in ymls:
+            os.remove(yml)
+
+    def stack_bias(self, inputfiles, outputfile, idss=['data', 'bias', 'corr']):
+        """Merge the downsampled biasfield images to 4D datasets."""
+
+        for ids in idss:
+            images_in = ['{}/{}'.format(filepath, ids) for filepath in inputfiles]
+            outputpath = '{}/{}'.format(outputfile, ids)
+            mo = stack_channels(images_in, outputpath=outputpath)
+
+    def apply(self, **kwargs):
+        """Apply N4 bias field correction.
+
+        channels=[],
+        inputpath=True,
+        bias_in=True,
+        output_format='.h5',
+        blocksize_xy=1280,
+        """
+
+        self.set_parameters('apply', kwargs)
+        arglist = self._get_arglist(['channels'])
+        self.set_n_workers(len(arglist))
+        pars = self.dump_parameters(step=self.step)
+        self._logstep(pars)
+
+        with multiprocessing.Pool(processes=self.n_workers) as pool:
+            pool.starmap(self._apply_channel, arglist)
+
+    def _apply_channel(self, channel=None):
+        """Correct inhomogeneity of a channel."""
+
+        postfix_ch = self._suffix_formats['c'].format(channel)
+        basename = self.format_([self.dataset, self.suffix, postfix_ch])
+        outstem = os.path.join(self.directory, basename)
+
+        # TODO: setters for these pars
+        self.image_out = '{}.h5/data'.format(outstem)
+        # Set derived parameter defaults.
+        self.inputpath = self._get_input(self.inputpath, 'stitching', 'fuse', '{}.bdv', fallback=self.image_in)
+        self.bias_in = self._get_input(self.bias_in, 'biasfield', 'postprocess', '{}_ds.h5/bias')
+        self.set_downsample_factors()
+
+        # Create the image objects.
+        in_place = self.inputpath == self.image_out
+        im = Image(self.inputpath, permission='r+' if in_place else 'r')
+        im.load(load_data=False)
+        bf = Image(self.bias_in, permission='r')
+        bf.load(load_data=False)
+
+        # Create the output image.
+        # if self.image_ref:
+        #     shutil.copy2(self.image_ref, self.image_out)
+        #     mo = Image(self.image_out)
+        #     mo.load()
+        #     # TODO: write to bdv pyramid
+        # else:
+        props = im.get_props()
+        if len(im.dims) > 4:
+            props = im.squeeze_props(props, dim=4)
+        if len(im.dims) > 3:
+            props = im.squeeze_props(props, dim=3)
+        mo = Image(self.image_out, **props)
+        mo.create()
+
+        # Get the downsampling between full and bias images.
+        p = self.load_dumped_step('estimate')
+        self.set_downsample_factors(inputpath=p['inputpath'],
+                                    resolution_level=p['resolution_level'])
+
+        downsample_factors = {}
+        for dim, dsfac in self._downsample_factors_reslev.items():
+            downsample_factors[dim] = dsfac * self.downsample_factors[dim]
+        downsample_factors = tuple([downsample_factors[dim] for dim in im.axlab])
+        print(downsample_factors)
+
+        # Channel selection for 4D inputs.
+        if channel is not None:
+            if 'c' in im.axlab:
+                im.slices[im.axlab.index('c')] = slice(channel, channel + 1)
+            if 'c' in bf.axlab:
+                bf.slices[bf.axlab.index('c')] = slice(channel, channel + 1)
+
+        # Set up the blocks
+        blocksize = im.dims
+        blockmargin = [0] * len(blocksize)
+        if self.blocksize_xy:
+            for dim in 'xy':
+                idx = im.axlab.index(dim)
+                blocksize[idx] = self.blocksize_xy
+                if im.chunks is not None:
+                    blockmargin[idx] = im.chunks[idx]
+                else:
+                    blockmargin[idx] = 128
+
+        mpi = wmeMPI(usempi=False)
+        mpi.set_blocks(im, blocksize, blockmargin)
+        mpi.scatter_series()
+        mpi_nm = wmeMPI(usempi=False)  # no margin
+        mpi_nm.set_blocks(im, blocksize)
 
 
-def downsample_channel(image_in, ch, resolution_level=-1,
-                       dsfacs=[1, 1, 1, 1, 1], ismask=False, output=''):
-    """Downsample an image."""
+        for i in mpi.series:
 
-    ods = 'data' if not ismask else 'mask'
+            block = mpi.blocks[i]
 
-    # return in case no mask provided
-    if not image_in:
-        return None
+            data_shape = list(im.slices2shape(block['slices']))
 
-    if resolution_level != -1 and not ismask:  # we should have an Imaris pyramid
-        image_in += '/DataSet/ResolutionLevel {}'.format(resolution_level)
+            block_nm = mpi_nm.blocks[i]
 
-    # load data
-    im = Image(image_in, permission='r', reslev=resolution_level)
+            it = zip(block['slices'], block_nm['slices'], blocksize, data_shape)
+
+            data_shape = list(im.slices2shape(block_nm['slices']))  # ??? this does nothing ???
+
+            data_slices = []
+            for b_slc, n_slc, bs, ds in it:
+                m_start = n_slc.start - b_slc.start
+                m_stop = m_start + bs
+                m_stop = min(m_stop, ds)
+                data_slices.append(slice(m_start, m_stop, None))
+
+            # Get the fullres image block.
+            im.slices = block['slices']
+            data = im.slice_dataset().astype('float')
+
+            # Get the upsampled bias field.
+            bias = get_bias_field_block(bf, im.slices, data.shape, downsample_factors)
+            data /= bias
+            data = np.nan_to_num(data, copy=False)
+
+            # Write the corrected data.
+            mo.slices = block_nm['slices']
+            if 'c' in im.axlab:
+                c_idx = im.axlab.index('c')
+                mo.slices[c_idx] = slice(0, 1, 1)  # FIXME: assumes writing to 3D
+                data_slices[c_idx] = block['slices'][c_idx]  # is this necessary?
+
+            mo.write(data[tuple(data_slices[:data.ndim])].astype(mo.dtype))
+
+        im.close()
+        bf.close()
+        mo.close()
+
+    def _get_info_dict(self, filestem, info_dict={}, channel=None):
+
+        from stapl3d import get_paths, get_imageprops  # TODO: into Image/Stapl3r
+
+        info_dict['parameters'] = self.load_dumped_pars()
+
+        filepath = '{}_ds.h5/data'.format(filestem)
+        info_dict['props'] = get_imageprops(filepath)
+        info_dict['paths'] = get_paths(filepath)
+        info_dict['centreslices'] = get_centreslices(info_dict)
+
+        info_dict['medians'], info_dict['means'], info_dict['stds'], info_dict['n_samples'] = get_means_and_stds(info_dict, channel, thr=1000)  # TODO thr flexible or informed
+
+        return info_dict
+
+    def _gen_subgrid(self, f, gs, channel=None):
+        """3rows-2 columns: 3 image-triplet left, three plots right"""
+
+        axdict, titles = {}, {}
+        gs0 = gs.subgridspec(2, 1, height_ratios=[1, 10])
+        axdict['p'] = self._report_axes_pars(f, gs0[0])
+
+        gs01 = gs0[1].subgridspec(3, 2, wspace=0.9)
+
+        pd = {'col': 1, 'slc': slice(None, None), 'spines': ['top', 'right'],
+              'ticks': [], 'ticks_position': 'left'}
+        dimdict = {'x': {'row': 2}, 'y': {'row': 1}, 'z': {'row': 0}}
+        voldict = {
+            'data': {'row': 0, 'title': 'downsampled'},
+            'corr': {'row': 1, 'title': 'corrected'},
+            'bias': {'row': 2, 'title': 'inhomogeneity field'},
+            }
+
+        sg_width = 9
+        for k, dd in dimdict.items():
+            titles[k] = ('{} profiles'.format(k.upper()), 'rc', 0)
+            axdict[k] = self._gen_axes(f, gs01, sg_width=sg_width, **dd, **pd)
+        for k, vd in voldict.items():
+            titles[k] = (vd['title'], 'lcm', 0)
+            axdict[k] = gen_orthoplot_with_colorbar(f, gs01[vd['row'], 0], idx=0, add_profile_insets=True)
+            # titles[k] = (vd['title'], 'lc', 4)
+            # axdict[k] = gen_orthoplot_with_profiles(f, gs01[vd['row'], 0])
+
+        self._add_titles(axdict, titles)
+
+        return axdict
+
+    def _plot_images(self, f, axdict, info_dict={}):
+        """Show images in report."""
+
+        meds = info_dict['medians']
+        cslcs = info_dict['centreslices']
+
+        for k, v in cslcs.items():
+            cslcs[k]['x'] = cslcs[k]['x'].transpose()
+
+        clim_data = self._get_clim(cslcs['data'])
+        clim_bias = self._get_clim(cslcs['bias'])
+        clim_bias[0] = min(0, clim_bias[0])
+        clim_bias[1] = max(2, clim_bias[1])
+        vol_dict = {
+            'data': ('right', 'gray', clim_data, 'r'),
+            'corr': ('right', 'gray', clim_data, 'g'),
+            'bias': ('right', 'rainbow', clim_bias, 'b'),
+            }
+
+        for k, (loc, cmap, clim, c) in vol_dict.items():
+
+            for d, aspect, ax_idx in zip('xyz', ['auto', 'auto', 'equal'], [2, 1, 0]):
+
+                ax = axdict[k][ax_idx]
+
+                extent = self._get_extent(cslcs['data'][d], info_dict['props']['elsize'])
+
+                im = ax.imshow(cslcs[k][d], cmap=cmap, extent=extent, aspect=aspect)
+
+                im.set_clim(clim[0], clim[1])
+                ax.axis('off')
+
+                if ax_idx == 0:
+                    self._plot_colorbar(f, ax, im, cax=axdict[k][3], loc=loc)
+                    if k == 'data':
+                        self._add_scalebar(ax, extent[1], color='r')
+
+                if len(axdict[k]) > 4:
+                    ax = axdict[k][ax_idx + 4]
+                    A = meds[k][d]
+                    B = list(range(len(meds['data'][d])))
+                    ls, lw = '-', 2.0
+                    if d == 'y':
+                        ax.plot(A, B, color=c, linewidth=lw, linestyle=ls)
+                        ax.set_xlim([np.amin(A), np.amax(A)])
+                        ax.set_ylim([np.amin(B), np.amax(B)])
+                    else:
+                        ax.plot(B, A, color=c, linewidth=lw, linestyle=ls)
+                        ax.set_xlim([np.amin(B), np.amax(B)])
+                        ax.set_ylim([np.amin(A), np.amax(A)])
+
+                    ax.axis('off')
+
+    def _plot_profiles(self, f, axdict, info_dict={}, res=10000):
+        """Show images in report."""
+
+        # meds = info_dict['medians']
+        means = info_dict['means']
+        stds = info_dict['stds']
+
+        data = {d: means['data'][d] + stds['data'][d] for d in 'xyz'}
+        clim_data = self._get_clim(data, q=[0,1], roundfuns=[np.floor, np.ceil])
+
+        for dim, ax_idx in zip('xyz', [2, 1, 0]):
+
+            ax = axdict[dim]
+
+            props = info_dict['props']
+            es = props['elsize'][props['axlab'].index(dim)]
+            sh = stds['data'][dim].shape[0]
+            x_max = sh * es
+            if dim != 'z':
+                x_max /= 1000  # from um to mm
+            x = np.linspace(0, x_max, sh)
+
+            dm = means['data'][dim]
+            ci = stds['data'][dim]
+            ax.plot(x, dm, color='r', linewidth=1, linestyle='-')
+            ax.fill_between(x, dm, dm + ci, color='r', alpha=.1)
+
+            dm = means['corr'][dim]
+            ci = stds['corr'][dim]
+            ax.plot(x, dm, color='g', linewidth=1, linestyle='-')
+            ax.fill_between(x, dm, dm + ci, color='g', alpha=.1)
+
+            ax.set_xlim([0, x_max])
+            ax.set_xticks([0, x_max])
+
+            x_fmtr = matplotlib.ticker.StrMethodFormatter("{x:.1f}")
+            ax.xaxis.set_major_formatter(x_fmtr)
+            if dim != 'z':
+                ax.set_xlabel('{} [mm]'.format(dim), labelpad=-7)
+            else:
+                ax.set_xlabel(r'{} [$\mu m]$'.format(dim), labelpad=-7)
+
+            ax.set_ylim(clim_data)
+            ax.set_yticks([
+                clim_data[0],
+                clim_data[0] + (clim_data[1] - clim_data[0]) / 2,
+                clim_data[1],
+                ])
+
+            if dim == 'z':
+                ax.legend(['original', 'corrected'], fontsize=7,
+                          loc='lower center', frameon=False)
+
+    def view_with_napari(self, filepath='', idss=['data', 'bias', 'corr'], ldss=[]):
+
+        if not filepath:
+            outstem = os.path.join(self.directory, self.format_())
+            filepath = '{}_ds.h5'.format(outstem)
+
+        super().view_with_napari(filepath, idss, ldss=[])
+
+
+def get_downsampled_channel(inputpath, resolution_level, channel, downsample_factors, ismask, outputpath):
+
+    if not inputpath:
+        return
+
+    im = Image(inputpath, permission='r', reslev=resolution_level)
     im.load(load_data=False)
-    props = im.get_props()
-    if len(im.dims) > 4:
-        im.slices[im.axlab.index('t')] = slice(0, 1, 1)
-        props = im.squeeze_props(props, dim=4)
-    if len(im.dims) > 3:
-        im.slices[im.axlab.index('c')] = slice(ch, ch+1, 1)
-        props = im.squeeze_props(props, dim=3)
-    data = im.slice_dataset()
+    im_ch = im.extract_channel(channel)
     im.close()
+    ds_im = im_ch.downsampled(downsample_factors, ismask, outputpath)
+    im_ch.close()
 
-    # downsample
-    dsfac = tuple(dsfacs[:len(data.shape)])
-    if not ismask:
-        data = downscale_local_mean(data, dsfac).astype('float32')
-    else:
-        data = block_reduce(data, dsfac, np.max)
-
-    # generate output
-    props['axlab'] = 'zyx'  # FIXME: axlab returns as string-list
-    props['shape'] = data.shape
-    props['elsize'] = [es*ds for es, ds in zip(im.elsize[:3], dsfac)]
-    props['slices'] = None
-    mo = write_data(data, props, output, ods)
-
-    return mo
+    return ds_im
 
 
-def calculate_bias_field(im, mask=None,
-                         n_iter=50, n_fitlev=4, n_cps=[5, 5, 5],
-                         n_threads=1, output=''):
+def calculate_bias_field(im, mask=None, n_iter=50, n_fitlev=4, n_cps=[5, 5, 5], n_threads=1, outputpath=''):
     """Calculate the bias field."""
-
-    import SimpleITK as sitk
-
-    ods = 'bias'
 
     # wmem images to sitk images
     dsImage = sitk.GetImageFromArray(im.ds)
@@ -279,317 +631,86 @@ def calculate_bias_field(im, mask=None,
     corrector.SetConvergenceThreshold(0.001)
     corrector.SetBiasFieldFullWidthAtHalfMaximum(0.15)
     corrector.SetNumberOfHistogramBins(200)
-    print(corrector)
     if mask is None:
         dsOut = corrector.Execute(dsImage)
     else:
         dsOut = corrector.Execute(dsImage, dsMask)
 
-    # get the bias field at lowres (3D)  # TODO: itkBSplineControlPointImageFilter
+    # get the bias field at lowres (3D)
+    # TODO: itkBSplineControlPointImageFilter
     data = np.stack(sitk.GetArrayFromImage(dsImage))
     data /= np.stack(sitk.GetArrayFromImage(dsOut))
     data = np.nan_to_num(data, copy=False).astype('float32')
 
-    # generate output
-    props = im.get_props()
-    mo = write_data(data, props, output, ods)
+    mo = write_image(im, outputpath, data)
 
     return mo
 
 
-def divide_bias_field(im, bf, output=''):
+def divide_bias_field(im, bf, outputpath=''):
     """Apply bias field correction."""
-
-    ods = 'corr'
 
     data = np.copy(im.ds[:]).astype('float32')
     data /= bf.ds[:]
     data = np.nan_to_num(data, copy=False)
 
-    props = im.get_props()
-    mo = write_data(data, props, output, ods)
+    mo = write_image(im, outputpath, data)
 
     return mo
 
 
-def apply_bias_field(filestem, channels=[], outputpath=''):
-
-    def apply_field(image_in, bias_in, outputpath):
-
-        im = Image(image_in, permission='r+')
-        im.load(load_data=True)
-        bf = Image(bias_in, permission='r+')
-        bf.load(load_data=True)
-
-        corr = divide_bias_field(im, bf, outputpath)
-
-        im.close()
-        bf.close()
-        corr.close()
-
-    if channels:
-        for ch in channels:
-            image_in = '{}_bfc_ch{:02d}.h5/data'.format(filestem, ch)
-            bias_in = '{}_bfc_ch{:02d}.h5/bias'.format(filestem, ch)
-            outputpath = outputpath or '{}_bfc_ch{:02d}.h5/corr'.format(filestem, ch)
-            apply_field(image_in, bias_in, outputpath)
-    else:
-        image_in = '{}_bfc.h5/data'.format(filestem)
-        bias_in = '{}_bfc.h5/bias'.format(filestem)
-        outputpath = outputpath or '{}_bfc.h5/corr'.format(filestem)
-        apply_field(image_in, bias_in, outputpath)
+def write_image(im, outputpath, data):
+    props = im.get_props2()
+    props['path'] = outputpath
+    props['permission'] = 'r+'
+    props['dtype'] = data.dtype
+    mo = Image(**props)
+    mo.create()
+    mo.write(data)
+    return mo
 
 
-def stack_channels(images_in, outputpath=''):
+def stack_channels(images_in, axis=-1, outputpath=''):
+    """Write a series of 3D images to a 4D stack."""
 
-    channels =[]
-    for image_in in images_in:
+    im = Image(images_in[0], permission='r')
+    im.load(load_data=True)
+    props = im.get_props2()
+    props['path'] = outputpath
+    props['permission'] = 'r+'
+    props['slices'] = None
+    im.close()
+
+    mo = Image(**props)
+
+    # insert channel axis
+    if axis == -1:
+        axis = len(im.dims)
+    C = len(images_in)
+    mo.shape = mo.dims
+    props = {'dims': C, 'shape': C, 'elsize': 1, 'chunks': 1, 'axlab': 'c'}
+    for k, v in props.items():
+        val = list(mo.__getattribute__(k))
+        val.insert(axis, v)
+        mo.__setattr__(k, val)
+
+    mo.axlab = ''.join(mo.axlab)
+    mo.create()
+
+    for i, image_in in enumerate(images_in):
         im = Image(image_in, permission='r')
         im.load(load_data=True)
-        channels.append(im.ds[:])
-    data = np.stack(channels, axis=3)
+        mo.slices[mo.axlab.index('c')] = slice(i, i + 1, 1)
+        mo.write(np.expand_dims(im.slice_dataset(), axis))
+        im.close()
 
-    mo = Image(outputpath)
-    mo.elsize = list(im.elsize) + [1]
-    mo.axlab = im.axlab + 'c'
-    mo.dims = data.shape
-    mo.chunks = list(im.chunks) + [1]
-    mo.dtype = im.dtype
-    mo.set_slices()
-    if outputpath:
-        mo.create()
-        mo.write(data)
-        mo.close()
+    mo.close()
 
     return mo
-
-
-def stack_bias(inputfiles, outputfile, idss=['data', 'bias', 'corr']):
-
-    for ids in idss:
-        images_in = ['{}/{}'.format(filepath, ids) for filepath in inputfiles]
-        outputpath = '{}/{}'.format(outputfile, ids)
-        stack_channels(images_in, outputpath)
-
-
-def postprocess(
-    image_in,
-    parameter_file,
-    step_id='biasfield_postproc',
-    outputdir='',
-    n_workers=0,
-    ):
-
-    outputdir = get_outputdir(image_in, parameter_file, outputdir, 'biasfield', 'biasfield')
-
-    params = get_params(locals().copy(), parameter_file, 'biasfield')
-
-    paths = get_paths(image_in, 0, 0)
-    datadir, _ = os.path.split(paths['base'])
-
-    with open(parameter_file, 'r') as ymlfile:
-        cfg = yaml.safe_load(ymlfile)
-
-    fstem = cfg['dataset']['name']
-    fstem += cfg['shading']['params']['postfix']
-    fstem += cfg['stitching']['params']['postfix']
-    inputstem = os.path.join(outputdir, fstem)
-    fstem += cfg['biasfield']['params']['postfix']
-    outputstem = os.path.join(datadir, fstem)
-
-    postprocess_biasfield(inputstem, outputstem, params['postfix'])
-
-
-def postprocess_biasfield(inputstem, outputstem, biasfield_postfix):
-
-    inputpat = '{}_ch??{}'.format(inputstem, biasfield_postfix)
-
-    inputfiles = glob('{}.h5'.format(inputpat))
-    inputfiles.sort()
-
-    outputfile = '{}.h5'.format(outputstem)
-    stack_bias(inputfiles, outputfile)
-
-    pdfs = glob('{}.pdf'.format(inputpat))
-    pdfs.sort()
-    pdf_out = '{}.pdf'.format(outputstem)
-    merge_reports(pdfs, pdf_out)
-
-    pickles = glob('{}.pickle'.format(inputpat))
-    pickles.sort()
-    zip_out = '{}.zip'.format(outputstem)
-    zip_parameters(pickles, zip_out)
-
-
-def apply(
-    image_in,
-    parameter_file,
-    step_id='biasfield_apply',
-    outputdir='',
-    n_workers=0,
-    image_ref='',
-    channels=[],
-    resolution_level=-1,
-    downsample_factors=[],
-    blocksize_xy=1280,
-    postfix=''
-    ):
-    """Perform N4 bias field correction."""
-
-    channeldir = get_outputdir(image_in, parameter_file, '', 'channels', 'channels')
-    outputdir = get_outputdir(image_in, parameter_file, outputdir, 'biasfield', 'biasfield')
-
-    params = get_params(locals().copy(), parameter_file, step_id)
-    subparams = get_params(locals().copy(), parameter_file, step_id, 'submit')
-
-    if not subparams['channels']:
-        props = get_imageprops(image_in)
-        n_channels = props['shape'][props['axlab'].index('c')]
-        subparams['channels'] = list(range(n_channels))
-
-    with open(parameter_file, 'r') as ymlfile:
-        cfg = yaml.safe_load(ymlfile)
-
-    paths = get_paths(image_in)
-    if '.ims' in image_in:
-        ch_pat = '{}{}{}.ims'.format(paths['fname'], '_ch{:02d}', cfg['biasfield']['params']['postfix'])
-    elif '.bdv' in image_in:
-        #ch_pat = '{}{}{}.h5/data'.format(paths['fname'], '_ch{:02d}', cfg['biasfield']['params']['postfix'])
-        ch_pat = '{}{}{}.bdv'.format(paths['fname'], '_ch{:02d}', cfg['biasfield']['params']['postfix'])
-
-    if params['copy_from_ref'] and not params['image_ref']:
-        if '.ims' in image_in:
-            filename = '{}{}.ims'.format(paths['fname'], cfg['dataset']['ims_ref_postfix'])
-        elif '.bdv' in image_in:
-            filename = '{}{}.bdv'.format(paths['fname'], cfg['dataset']['ch_ref_postfix'])
-        params['image_ref'] = os.path.join(paths['dir'], filename)
-
-    arglist = []
-    for ch in subparams['channels']:
-        bias_fname = '{}_ch{:02d}{}.h5/bias'.format(paths['fname'], ch, cfg['biasfield']['params']['postfix'])
-        bias_in = os.path.join(outputdir, bias_fname)
-        image_out = os.path.join(channeldir, ch_pat.format(ch))
-        arglist.append(
-            (
-                image_in,
-                bias_in,
-                image_out,
-                params['image_ref'],
-                ch,
-                params['resolution_level'],
-                params['downsample_factors'],
-                params['blocksize_xy'],
-                params['postfix'],
-            )
-        )
-
-    n_workers = get_n_workers(len(subparams['channels']), params)
-    with multiprocessing.Pool(processes=n_workers) as pool:
-        pool.starmap(apply_channel, arglist)
-
-
-def apply_channel(
-    image_in,
-    bias_in,
-    image_out,
-    image_ref='',
-    channel=None,
-    resolution_level=-1,
-    downsample_factors=[],
-    blocksize_xy=1280,
-    postfix=''
-    ):
-    """Correct inhomogeneity of a channel."""
-
-    if isinstance(downsample_factors, dict):
-        downsample_factors = [downsample_factors[dim] for dim in 'zyxct']
-
-    if not downsample_factors:
-        dsfacs_bf, dsfacs_rl, _ = calculate_downsample_factors(image_in, resolution_level)
-        downsample_factors = list(np.array(dsfacs_bf) * np.array(dsfacs_rl))
-
-    if image_ref:
-        perm = 'r'
-    else:
-        perm = 'r+'
-
-    im = Image(image_in, permission=perm)
-    im.load(load_data=False)
-
-    bf = Image(bias_in, permission='r')
-    bf.load(load_data=False)
-
-    if image_ref:
-        shutil.copy2(image_ref, image_out)
-        mo = Image(image_out)
-        mo.load()
-        # TODO: write to bdv pyramid
-    else:
-        # TODO: squeeze channel properly
-        props = im.get_props()
-        if len(im.dims) > 4:
-            props = im.squeeze_props(props, dim=4)
-        if len(im.dims) > 3:
-            props = im.squeeze_props(props, dim=3)
-        mo = Image(image_out, **props)
-        mo.create()
-
-    if channel is not None:
-        if len(im.dims) > 3:
-            im.slices[3] = slice(channel, channel + 1)
-        if len(bf.dims) > 3:
-            bf.slices[3] = slice(channel, channel + 1)
-
-    mpi = wmeMPI(usempi=False)
-    mpi_nm = wmeMPI(usempi=False)
-    if blocksize_xy:
-        blocksize = [im.dims[0], blocksize_xy, blocksize_xy, 1, 1]
-        blockmargin = [0, im.chunks[1], im.chunks[2], 0, 0]
-    else:
-        blocksize = im.dims[:3] +  [1, 1]
-        blockmargin = [0] * len(im.dims)
-    mpi.set_blocks(im, blocksize, blockmargin)
-    mpi_nm.set_blocks(im, blocksize)
-    mpi.scatter_series()
-
-    for i in mpi.series:
-        print(i)
-        block = mpi.blocks[i]
-        data_shape = list(im.slices2shape(block['slices']))
-        block_nm = mpi_nm.blocks[i]
-        it = zip(block['slices'], block_nm['slices'], blocksize, data_shape)
-        data_shape = list(im.slices2shape(block_nm['slices']))
-        data_slices = []
-        for b_slc, n_slc, bs, ds in it:
-            m_start = n_slc.start - b_slc.start
-            m_stop = m_start + bs
-            m_stop = min(m_stop, ds)
-            data_slices.append(slice(m_start, m_stop, None))
-        if len(data_slices) > 3:
-            data_slices[3] = block['slices'][3]
-        data_shape = list(im.slices2shape(data_slices))
-
-        # get the fullres image block
-        im.slices = block['slices']
-        data = im.slice_dataset().astype('float')
-
-        # get the upsampled bias field
-        bias = get_bias_field_block(bf, im.slices, data.shape, downsample_factors)
-        data /= bias
-        data = np.nan_to_num(data, copy=False)
-
-        mo.slices = block_nm['slices']
-        if len(data_slices) > 3:
-            mo.slices[3] = slice(0, 1, 1)
-        data = data[tuple(data_slices[:3])].astype(mo.dtype)
-        mo.write(data)
-
-    im.close()
-    bf.close()
-    mo.close()
 
 
 def get_bias_field_block(bf, slices, outdims, dsfacs):
+    """Retrieve and upsample the biasfield for a datablock."""
 
     bf.slices = [slice(int(slc.start / ds), int(slc.stop / ds), 1)
                  for slc, ds in zip(slices, dsfacs)]
@@ -597,32 +718,6 @@ def get_bias_field_block(bf, slices, outdims, dsfacs):
     bias = resize(bf_block, outdims, preserve_range=True)
 
     return bias
-
-
-def calculate_downsample_factors(image_in, resolution_level=-1):
-
-    rl_path = image_in
-    downsample_factors_reslev = None
-    if '.ims' in image_in or '.bdv' in image_in:
-        if resolution_level == -1:
-            resolution_level = find_resolution_level(image_in)
-        dsfacs = find_downsample_factors(image_in, 0, resolution_level)
-        downsample_factors_reslev = list(dsfacs) + [1, 1]
-        if '.ims' in image_in:
-            rl_path += '/DataSet/ResolutionLevel {}'.format(resolution_level)
-
-    im = Image(rl_path, permission='r', reslev=resolution_level)
-    im.load(load_data=False)
-
-    target = {'z': im.elsize[im.axlab.index('z')], 'x': 20, 'y': 20}
-    dsfacs = [target[dim] / im.elsize[im.axlab.index(dim)] for dim in 'zyx']
-    dsfacs = [np.round(dsfac).astype('int') for dsfac in dsfacs]
-    dsfacs[1] = dsfacs[2] = min(dsfacs[1], dsfacs[2])
-    downsample_factors = dsfacs + [1, 1]
-
-    im.close()
-
-    return downsample_factors, downsample_factors_reslev, resolution_level
 
 
 def get_data(h5_path, ids, ch=0, dim=''):
@@ -676,315 +771,6 @@ def get_means_and_stds(info_dict, ch=0, thr=1000):
         stds[k] = get_zyx_medians(data, mask, metric='std')
 
     return meds, means, stds, n_samples
-
-
-def plot_params(f, axdict, info_dict={}):
-    """Show images in report."""
-
-    pars = {'downsample_factors': 'Downsample factors',
-            'n_iterations': 'N iterations',
-            'n_fitlevels': 'N fitlevels',
-            'n_bspline_cps': 'N b-spline components'}
-
-    cellText = []
-    for par, name in pars.items():
-        v = info_dict['parameters'][par]
-        if not isinstance(v, list):
-            v = [v]
-        cellText.append([name, ', '.join(str(x) for x in v)])
-
-    axdict['p'].table(cellText, loc='bottom')
-    axdict['p'].axis('off')
-
-
-def plot_profiles(f, axdict, info_dict={}, res=10000):
-    """Show images in report."""
-
-    meds = info_dict['medians']
-    means = info_dict['means']
-    stds = info_dict['stds']
-
-    y_min, y_max = 0, 20000  # FIXME
-
-    for dim, ax_idx in zip('xyz', [2, 1, 0]):
-
-        es = info_dict['elsize'][dim]
-        sh = stds['data'][dim].shape[0]
-
-        x_max = sh * es
-        if dim != 'z':
-            x_max /= 1000
-
-        x = np.linspace(0, x_max, sh)
-
-        n_samples = sh  # FIXME: this is not correct
-        dm = means['data'][dim]
-        ci = stds['data'][dim]
-        # ci = 1.96 * stds['data'][dim] / np.sqrt(n_samples)
-        axdict[dim].plot(x, dm, color='r', linewidth=1, linestyle='-')
-        axdict[dim].fill_between(x, dm, dm + ci, color='r', alpha=.1)
-
-        dm = means['corr'][dim]
-        ci = stds['corr'][dim]
-        # ci = 1.96 * stds['corr'][dim] / np.sqrt(n_samples)
-        axdict[dim].plot(x, dm, color='g', linewidth=1, linestyle='-')
-        axdict[dim].fill_between(x, dm, dm + ci, color='g', alpha=.1)
-
-        axdict[dim].set_ylim([y_min, y_max])
-        axdict[dim].set_yticks([y_min, y_max])
-        axdict[dim].ticklabel_format(axis='y', style='sci', scilimits=(-2, 2))
-        # y_fmtr = matplotlib.ticker.ScalarFormatter()  # FIXME
-        # y_fmtr.set_scientific(True)
-        # axdict[dim].yaxis.set_major_formatter(y_fmtr)
-
-        axdict[dim].set_xlim([0, x_max])
-        axdict[dim].set_xticks([0, x_max])
-        x_fmtr = matplotlib.ticker.StrMethodFormatter("{x:.1f}")
-        axdict[dim].xaxis.set_major_formatter(x_fmtr)
-        if dim != 'z':
-            axdict[dim].set_xlabel('{} [mm]'.format(dim), labelpad=10)
-        else:
-            axdict[dim].set_xlabel(r'{} [$\mu m]$'.format(dim), labelpad=10)
-
-
-def plot_images(f, axdict, info_dict={}, res=10000, add_profiles=True):
-    """Show images in report."""
-
-    def get_img(cslsc, ax_idx, dims):
-        img = cslsc
-        if ax_idx == 2:  # zy-image
-            dims[0] = img.shape[0]
-            img = img.transpose()
-        if ax_idx == 0:  # yx-image
-            dims[1:] = img.shape
-        return img, dims
-
-    centreslices = info_dict['centreslices']
-    meds = info_dict['medians']
-
-    y_min, y_max = 0, 0
-    dims = [0, 0, 0]
-
-    bf_dict = {'data': (0, 'r'), 'corr': (1, 'g'), 'bias': (2, 'b')}
-
-    aspects = ['auto', 'auto', 'auto']
-    for dim, aspect, ax_idx in zip('xyz', aspects, [2, 1, 0]):
-        for k, v in bf_dict.items():
-
-            img, dims = get_img(centreslices[k][dim], ax_idx, dims)
-            im = axdict[k][ax_idx].imshow(img, cmap='gray', aspect=aspect)
-
-            axdict[k][ax_idx].axis('off')
-            y_min = min(y_min, np.floor(np.amin(img) / res) * res)
-            y_max = max(y_max, np.ceil(np.amax(img) / res) * res)
-
-            if add_profiles:
-                ax = axdict[k][ax_idx+3]
-                X = list(range(len(meds['data'][dim])))
-                ls, lw = '-', 1
-                if dim == 'y':
-                    ax.plot(meds[k][dim], X, color=v[1], linewidth=lw, linestyle=ls)
-                else:
-                    ax.plot(X, meds[k][dim], color=v[1], linewidth=lw, linestyle=ls)
-                ax.axis('off')
-
-        #img, dims = get_img(centreslices['mask'][dim], ax_idx, dims)
-        #axdict['bias'][ax_idx].imshow(img, cmap='inferno', vmin=0, vmax=5, aspect=aspect, alpha=0.6)
-
-            # old = False
-            # if old:
-            #     if dim == 'y':
-            #         if k != 'corr':
-            #             ax.plot(meds['data'][dim], X, color=bfdict['data'][1], linewidth=lw, linestyle=ls)
-            #         if k != 'data':
-            #             ax.plot(meds['corr'][dim], X, color=bfdict['corr'][1], linewidth=lw, linestyle=ls)
-            #     else:
-            #         if k != 'corr':
-            #             ax.plot(X, meds['data'][dim], color=bfdict['data'][1], linewidth=lw, linestyle=ls)
-            #         if k != 'data':
-            #             ax.plot(X, meds['corr'][dim], color=bfdict['corr'][1], linewidth=lw, linestyle=ls)
-            # else:
-
-
-    y_min, y_max = 0, 10000  # FIXME
-
-    # set brightness [data and corr equal]
-    for i in [0, 1, 2]:
-        for k in ['data', 'corr']:
-            for im in axdict[k][i].get_images():
-                im.set_clim(y_min, y_max)
-        for im in axdict['bias'][i].get_images():
-            im.set_clim(0, 3)
-
-
-def add_titles(axs, info_dict):
-    """Add plot titles to upper row of plot grid."""
-
-    try:
-        params = info_dict['parameters']
-    except KeyError:
-        params = {'channel': '???',
-                  'downsample_factors': '???',
-                  'n_iterations': '???',
-                  'n_fitlevels': '???',
-                  'n_bspline_cps': '???',
-                  }
-
-    ch = params['channel']
-    titles = []
-
-    l1 = 'uncorrected: ch{}'.format(ch)
-    # l2 = 'downsampling: {}'.format(params['downsample_factors'])
-    titles.append('{} \n {}'.format(l1, l2))
-
-    l1 = 'corrected: ch{}'.format(ch)
-    # l2 = ''
-    titles.append('{} \n {}'.format(l1, l2))
-
-    l1 = 'bias field: ch{}'.format(ch)
-    # l2 = 'ni = {}; nf = {}; nb = {}'.format(
-    #     params['n_iterations'],
-    #     params['n_fitlevels'],
-    #     params['n_bspline_cps'],
-    #     )
-    titles.append('{} \n {}'.format(l1, l2))
-
-    # l1 = 'profiles: ch{}'.format(ch)
-    # l2 = ''
-    # titles.append('{} \n {}'.format(l1, l2))
-
-    for j, title in enumerate(titles):
-        axs[j][0].set_title(title)
-
-
-def gen_subgrid_with_profiles(f, gs, fsize=7, channel=None, metric='median'):
-    """3rows-2 columns: 3 image-triplet left, three plots right"""
-
-    fdict = {'fontsize': fsize,
-     'fontweight' : matplotlib.rcParams['axes.titleweight'],
-     'verticalalignment': 'baseline'}
-
-    gs0 = gs.subgridspec(2, 1, height_ratios=[1, 10])
-
-    gs00 = gs0[0].subgridspec(10, 1)
-    gs01 = gs0[1].subgridspec(3, 2)
-
-    axdict = {k: gen_orthoplot_with_profiles(f, gs01[i, 0])
-              for i, k in enumerate(['data', 'corr', 'bias'])}
-
-    axdict['p'] = f.add_subplot(gs00[0, 0])
-    axdict['p'].set_title('parameters', fdict, fontweight='bold')
-    axdict['p'].tick_params(axis='both', labelsize=fsize, direction='in')
-    # axdict['p'].imshow(np.zeros([100, 100]))  # test dummy for constrained layout
-
-    axdict['z'] = f.add_subplot(gs01[0, 1])
-    axdict['z'].set_title('Z profiles', fdict, fontweight='bold', loc='right')
-    axdict['z'].tick_params(axis='both', labelsize=fsize, direction='in')
-
-    axdict['y'] = f.add_subplot(gs01[1, 1])
-    axdict['y'].set_title('Y profiles', fdict, fontweight='bold', loc='right')
-    axdict['y'].tick_params(axis='both', labelsize=fsize, direction='in')
-
-    axdict['x'] = f.add_subplot(gs01[2, 1])
-    axdict['x'].set_title('X profiles', fdict, fontweight='bold', loc='right')
-    axdict['x'].tick_params(axis='both', labelsize=fsize, direction='in')
-
-    return axdict
-
-
-def gen_subgrid(f, gs, fsize=7, channel=None, metric='median'):
-    """3rows-2 columns: 3 image-triplet left, three plots right"""
-
-    fdict = {'fontsize': fsize,
-     'fontweight' : matplotlib.rcParams['axes.titleweight'],
-     'verticalalignment': 'baseline'}
-
-    gs00 = gs.subgridspec(3, 2)
-
-    axdict = {k: gen_orthoplot(f, gs00[i, 0])
-              for i, k in enumerate(['data', 'corr', 'bias'])}
-
-    ax1 = f.add_subplot(gs00[0, 1])
-    title = 'Z'
-    ax1.set_title(title, fdict, fontweight='bold')
-    ax1.tick_params(axis='both', labelsize=fsize, direction='in')
-    ax2 = f.add_subplot(gs00[1, 1])
-    title = 'Y'
-    ax2.set_title(title, fdict, fontweight='bold')
-    ax2.tick_params(axis='both', labelsize=fsize, direction='in')
-    ax3 = f.add_subplot(gs00[2, 1])
-    title = 'X'
-    ax3.set_title(title, fdict, fontweight='bold')
-    ax3.tick_params(axis='both', labelsize=fsize, direction='in')
-
-    axdict['z'] = ax1
-    axdict['y'] = ax2
-    axdict['x'] = ax3
-
-    return axdict
-
-
-def get_info_dict(image_in, info_dict={}, report_type='bfc', channel=0):
-
-    im = Image(image_in)
-    im.load(load_data=False)
-    info_dict['elsize'] = {dim: im.elsize[i] for i, dim in enumerate(im.axlab)}
-    info_dict['paths'] = im.split_path()  # FIXME: out_base
-    info_dict['paths']['out_base'] = info_dict['paths']['base']
-    im.close()
-
-    ppath = '{}.pickle'.format(info_dict['paths']['base'])
-    with open(ppath, 'rb') as f:
-        info_dict['parameters'] = pickle.load(f)
-    info_dict['centreslices'] = get_centreslices(info_dict)
-
-    # info_dict['medians'] = get_medians(info_dict)
-    info_dict['medians'], info_dict['means'], info_dict['stds'], info_dict['n_samples'] = get_means_and_stds(info_dict, ch=channel, thr=1000)
-
-    return info_dict
-
-
-def generate_report(outputdir, dataset, channel=None, ioff=False):
-    """Generate a QC report of the bias field correction process."""
-
-    # chsize = [12, 7]  # FIXME:affect aspect of images
-    chsize = (11.69, 8.27)  # A4 portrait
-    figtitle = 'STAPL-3D bias field correction report'
-    filestem = os.path.join(outputdir, dataset)
-    outputstem = filestem
-    if channel is None:  # plot all channels on a single page.
-        figtitle = '{}: {} \n'.format(figtitle, dataset)
-        n_channels = 8 # TODO: get n_channels from yml or glob -- or make channel argument a list of channels
-        subplots = [2, int(n_channels / 2)]
-        channels = list(range(n_channels))
-    else:  # plot a single channel
-        figtitle = '{} \n {}: channel {:02d} \n'.format(figtitle, dataset, channel)
-        n_channels = 1
-        subplots = [1, 1]
-        channels = [channel]
-        outputstem = '{}_ch{:02d}'.format(outputstem, channel)
-
-    figsize = (chsize[1]*subplots[1], chsize[0]*subplots[0])
-    f = plt.figure(figsize=figsize, constrained_layout=False)
-    gs = gridspec.GridSpec(subplots[0], subplots[1], figure=f)
-
-    for idx, ch in enumerate(channels):
-        chstem = '{}_ch{:02d}'.format(filestem, ch)
-        # axdict = gen_subgrid(f, gs[idx], channel=ch)
-        axdict = gen_subgrid_with_profiles(f, gs[idx], fsize=10, channel=ch)
-        # image_in = '{}_bfc.h5/data'.format(filestem)  # TODO use chstem, get it from the non-merged bfc's
-        image_in = '{}_biasfield.h5/data'.format(chstem)
-        info_dict = get_info_dict(image_in, channel=ch)
-        info_dict['parameters']['channel'] = ch
-        plot_params(f, axdict, info_dict)
-        plot_images(f, axdict, info_dict)
-        plot_profiles(f, axdict, info_dict)
-        info_dict.clear()
-
-    f.suptitle(figtitle, fontsize=14, fontweight='bold')
-    f.savefig('{}_biasfield.pdf'.format(outputstem))
-    if ioff:
-        plt.close(f)
 
 
 if __name__ == "__main__":

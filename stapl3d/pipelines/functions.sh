@@ -361,6 +361,7 @@ function find_dim_from_h5 {
 
 function set_blockdims {
 
+    # FIXME: evaluates to 0 on dataset smaller than blocksize
     nx=`python -c "from math import ceil; print(int(ceil($X/$bs)))"`
     ny=`python -c "from math import ceil; print(int(ceil($Y/$bs)))"`
     nb=$((nx*ny))
@@ -851,9 +852,11 @@ function base_cmds {
     echo filestem="\${datadir}/\${dataset}"
     echo shading_stem="\${filestem}${shading__params__postfix}"
     echo stitching_stem="\${shading_stem}${stitching__params__postfix}"
-    echo biasfield_stem="\${stitching_stem}${biasfield__params__postfix}"
+    # echo biasfield_stem="\${stitching_stem}${biasfield__params__postfix}"
+    echo biasfield_stem="\${filestem}"
     echo block_id="\${block_ids[idx]}"
-    echo blockstem="\${blockdir}/\${dataset_preproc}_\${block_id}"
+    #echo blockstem="\${blockdir}/\${dataset_preproc}_\${block_id}"
+    echo blockstem="\${blockdir}/\${dataset}_\${block_id}"
 
 }
 
@@ -1403,6 +1406,7 @@ function get_cmd_biasfield {
 }
 
 
+# TODO: change to biasfield.postprocess function
 function get_py_biasfield_stack {
 
     echo '#!/usr/bin/env python'
@@ -2123,20 +2127,22 @@ function get_cmd_unet3d_nucl_train {
 }
 
 
-# function get_cmd_unet3d_nucl_predict {
-#     # FIXME: kidney model gives error on load via predict3dunet => needs DataParallel wrapping
-#
-#     # copy config file with replacements
-#     sed "s?UNETDIR?$unet3d_nucl_predict__params__unetdir?;\
-#          s?MODELNAME?$unet3d_nucl_predict__params__modelname?;\
-#          s?IDS_NUCLEUS?$unet3d_nucl_predict__params__ids_nucleus?;\
-#          s?PATH_TO_THE_TEST_SET?${blockdir}?g" \
-#          "${STAPL3D}/pipelines/unet3d_nucl_predict.yml" \
-#          > "${datadir}/${dataset}_unet3d_nucl_predict.yml"
-#
-#     echo predict3dunet --config "${datadir}/${dataset}_unet3d_nucl_predict.yml"
-#
-# }
+function get_cmd_unet3d_nucl_predict {
+    # FIXME: kidney model gives error on load via predict3dunet => needs DataParallel wrapping
+
+    # copy config file with replacements
+    sed "s?UNETDIR?$unet3d_nucl_predict__params__unetdir?;\
+         s?MODELNAME?$unet3d_nucl_predict__params__modelname?;\
+         s?IDS_IMAGE?$unet3d_nucl_predict__params__ids_image?;\
+         s?PATH_TO_THE_TEST_SET?${blockdir}?g" \
+         "${STAPL3D}/pipelines/unet3d_nucl_predict.yml" \
+         > "${datadir}/${dataset}_unet3d_nucl_predict_$unet3d_nucl_predict__params__modelname.yml"
+
+    echo predict3dunet --config "${datadir}/${dataset}_unet3d_nucl_predict_$unet3d_nucl_predict__params__modelname.yml"
+
+}
+
+
 function get_py_unet3d_nucl_predict { get_py_plantseg_predict ; }
 function get_cmd_unet3d_nucl_predict {
 

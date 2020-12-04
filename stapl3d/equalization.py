@@ -1,6 +1,8 @@
 #!/usr/bin/env python
 
-"""Calculate contrast to noise.
+"""Calculate metrics for mLSR-3D equalization assay.
+
+# TODO: implement other than czi (e.g. make tif a possibility here)
 
 """
 
@@ -32,652 +34,612 @@ from skimage.morphology import remove_small_objects
 
 from sklearn.mixture import GaussianMixture
 
+from stapl3d import parse_args, Stapl3r, Image, transpose_props, get_imageprops, get_paths
 from stapl3d.preprocessing import shading
-from stapl3d.reporting import (
-    merge_reports,
-    zip_parameters,
-    )
-from stapl3d import (
-    parse_args_common,
-    get_n_workers,
-    get_outputdir,
-    get_params,
-    Image,
-    )
+from stapl3d.reporting import merge_reports, get_centreslices
 
-
+# from stapl3d import mplog
 logger = logging.getLogger(__name__)
 
 
 def main(argv):
-    """Calculate contrast to noise.
+    """Calculate metrics for mLSR-3D equalization assay."""
 
-    """
+    steps = ['smooth', 'segment', 'metrics', 'postprocess']
+    args = parse_args('equalization', steps, *argv)
 
-    step_ids = ['equalization'] * 4
-    fun_selector = {
-        'smooth': export_and_smooth,
-        'segment': tissue_mask,
-        'metrics': calculate_cnr,
-        'postprocess': postprocess,
-        }
+    equalizer = Equalizer(
+        args.image_in,
+        args.parameter_file,
+        step_id=args.step_id,
+        directory=args.outputdir,
+        dataset=args.dataset,
+        suffix=args.suffix,
+        n_workers=args.n_workers,
+    )
 
-    args, mapper = parse_args_common(step_ids, fun_selector, *argv)
+    for step in args.steps:
+        equalizer._fun_selector[step]()
 
-    for step, step_id in mapper.items():
-        fun_selector[step](
-            args.image_in,
-            args.parameter_file,
-            step_id,
-            args.outputdir,
-            args.n_workers,
+
+class Equalizer(Stapl3r):
+    """Calculate metrics for mLSR-3D equalization assay."""
+
+    def __init__(self, image_in='', parameter_file='', **kwargs):
+
+        super(Equalizer, self).__init__(
+            image_in, parameter_file,
+            module_id='equalization',
+            **kwargs,
             )
 
+        self._fun_selector = {
+            'smooth': self.smooth,
+            'segment': self.segment_regions,
+            'metrics': self.calculate_metrics,
+            'postprocess': self.postprocess,
+            }
 
-def export_and_smooth(
-    image_in,
-    parameter_file,
-    step_id='smooth',
-    outputdir='',
-    n_workers=0,
-    sigma=60,
-    ):
+        default_attr = {
+            'step_id': 'equalization',
+            'sigma': 60,
+            'filepat': '*.czi',  # TODO
+            'filepaths': [],
+            'otsu_factor_noise': 0.1,
+            'otsu_factor_tissue': 1.1,
+            'thresholds': {},
+            'threshold_noise': 0,
+            'threshold_tissue': 0,
+            '_otsus': {},
+            'segment_quantile': 0.99,
+            'segment_min_size': 3,
+            'methods': ['seg'],
+            'quantiles': [0.50, 0.99],
+            '_metrics': {},
+            'outputformat': '.h5',
+        }
+        for k, v in default_attr.items():
+            setattr(self, k, v)
 
-    outputdir = get_outputdir(image_in, parameter_file, outputdir,
-                              'equalization', 'equalization')
+        for step in self._fun_selector.keys():
+            self.set_parameters(step)
 
-    params = get_params(locals().copy(), parameter_file, step_id)
-    subparams = get_params(locals().copy(), parameter_file, step_id, 'submit')
+        self.set_filepaths()
 
-    datadir = os.path.dirname(image_in)
-    filepaths = glob(os.path.join(datadir, '*.czi'))
+        self._parsets = {
+            'smooth': {
+                'fpar': self._FPAR_NAMES,
+                'ppar': ('sigma',),
+                'spar': ('n_workers', 'filepaths'),
+                },
+            'segment': {
+                'fpar': self._FPAR_NAMES,
+                'ppar': ('otsu_factor_noise', 'otsu_factor_tissue',
+                         'threshold_noise', 'threshold_tissue',
+                         'thresholds', '_otsus',
+                         'segment_quantile', 'segment_min_size'),
+                'spar': ('filepaths',),
+                },
+            'metrics': {
+                'fpar': self._FPAR_NAMES,
+                'ppar': ('methods', 'quantiles', '_metrics'),
+                'spar': ('filepaths',),
+                },
+            'postprocess': {
+                'fpar': self._FPAR_NAMES,
+                'ppar': (),
+                'spar': (),
+                },
+            }
 
-    arglist = [
-        (
-            filepath,
-            params['sigma'],
-            step_id,
-            outputdir,
-        )
-        for filepath in filepaths]
+        # TODO: merge with parsets
+        self._partable = {
+            'sigma': 'Smoothing sigma',
+            'otsu_factor_noise': 'Multiplication factor for noise threshold',
+            'otsu_factor_tissue': 'Multiplication factor for tissue threshold',
+            # 'threshold_noise': 'Noise threshold',
+            # 'threshold_tissue': 'Tissue threshold',
+            'segment_quantile': 'Quantile used for segmentation',
+            'segment_min_size': 'Minimal connected component size',
+            'quantiles': 'Quantiles separating signal and tissue background',
+            }
 
-    n_workers = get_n_workers(len(filepaths), subparams)
-    with multiprocessing.Pool(processes=n_workers) as pool:
-        pool.starmap(run_export_and_smooth, arglist)
+    def smooth(self, **kwargs):
+        """Smooth images with a gaussian kernel."""
 
+        self.set_parameters('smooth', kwargs)
+        arglist = self._get_arglist(['filepaths'])
+        self.set_n_workers(len(arglist))
+        pars = self.dump_parameters(step=self.step)
+        self._logstep(pars)
 
-def run_export_and_smooth(
-    filepath,
-    sigma=60,
-    step_id='smooth',
-    outputdir='',
-    ):
+        with multiprocessing.Pool(processes=self.n_workers) as pool:
+            pool.starmap(self._smooth_image, arglist)
 
-    filename = os.path.basename(filepath)
-    filestem = filename.split('.czi')[0]
+    def _smooth_image(self, filepath):
+        """Smooth an image with a gaussian kernel."""
 
-    # Load image => czi (/ lif?)
-    iminfo = shading.get_image_info(filepath)
-    data = np.transpose(shading.read_tiled_plane(filepath, 0, 0)[0])
-    data_smooth = gaussian_filter(data.astype('float'), sigma)
+        filestem, ext, outputpat = self._get_outputpat(filepath)
 
-    # Export as nifti file
-    props = {}
-    props['axlab'] = 'xyz'
-    props['shape'] = iminfo['dims_zyxc'][:3][::-1]
-    props['elsize'] = iminfo['elsize_zyxc'][:3][::-1]
-    props['elsize'][2] = 1.0  # FIXME
+        # self._logmp(filestem)
 
-    outputpath = os.path.join(outputdir, '{}.nii.gz'.format(filestem))
-    data = np.reshape(data, props['shape'])
-    output_nifti(outputpath, data, props)
+        # Load image => czi (/ lif?)
+        data = np.transpose(shading.read_tiled_plane(filepath, 0, 0)[0])
+        data_smooth = gaussian_filter(data.astype('float'), self.sigma)
 
-    outputpath = os.path.join(outputdir, '{}_smooth.nii.gz'.format(filestem))
-    data_smooth = np.reshape(data_smooth, props['shape'])
-    output_nifti(outputpath, data_smooth, props)
+        iminfo = shading.get_image_info(filepath)
+        # TODO: integrate iminfo and Image attributes
+        props = {}
+        props['path'] = ''
+        props['permission'] = 'r+'
+        props['axlab'] = 'zyx'
+        props['shape'] = iminfo['dims_zyxc'][:3]
+        props['elsize'] = iminfo['elsize_zyxc'][:3]
+        props['elsize'] = [es if es else 1.0 for es in props['elsize']]
+        # FIXME: for 2D the z-axis is returned 0.0
+        if 'nii' in self.outputformat:
+            props = transpose_props(props)
 
-    # Dump parameters.
-    params = {'sigma': sigma}
-    outputpath = os.path.join(outputdir, '{}.pickle'.format(filestem))
-    with open(outputpath,'wb') as f:
-        pickle.dump(params, f)
+        for ids, out in {'data': data, 'smooth': data_smooth}.items():
+            props['path'] = outputpat.format(ids)
+            write_image(out, props)
 
+    def segment_regions(self, **kwargs):
+        """Segment the noise and tissue region in the image."""
 
-def tissue_mask(
-    image_in,
-    parameter_file,
-    step_id='smooth',
-    outputdir='',
-    n_workers=0,
-    otsu_lower=0.5,
-    otsu_upper=0.1,
-    threshold_lower=0,
-    threshold_upper=0,
-    ):
+        self.set_parameters('segment', kwargs)
+        arglist = self._get_arglist(['filepaths'])
+        self.set_n_workers(len(self.filepaths))
+        pars = self.dump_parameters(step=self.step)
+        self._logstep(pars)
 
-    outputdir = get_outputdir(image_in, parameter_file, outputdir,
-                              'equalization', 'equalization')
+        with multiprocessing.Pool(processes=self.n_workers) as pool:
+            pool.starmap(self._segment_regions_image, arglist)
 
-    params = get_params(locals().copy(), parameter_file, step_id)
-    subparams = get_params(locals().copy(), parameter_file, step_id, 'submit')
+    def _segment_regions_image(self, filepath):
 
-    datadir = os.path.dirname(image_in)
-    filepaths = glob(os.path.join(datadir, '*.czi'))
+        filestem, ext, outputpat = self._get_outputpat(filepath)
 
-    with open(parameter_file, 'r') as ymlfile:
-        cfg = yaml.safe_load(ymlfile)
+        data, props = load_image(outputpat.format('data'))
+        smooth, props = load_image(outputpat.format('smooth'))
 
-    thresholds = []
-    for filepath in filepaths:
-        try:
-            filestem = os.path.basename(filepath).split('.czi')[0]
-            thrs = params['thresholds'][filestem]
-        except KeyError:
-            thrs = [0, 0]
-        thresholds.append(thrs)
+        masks, otsu, thrs = self._region_masks(smooth, filestem)
+        masks = self._tissue_segmentation(data, masks)
 
-    arglist = [
-        (
-            filepath,
-            params['otsu_lower'],
-            params['otsu_upper'],
-            thrs[0],
-            thrs[1],
-            step_id,
-            outputdir,
-        )
-        for filepath, thrs in zip(filepaths, thresholds)]
+        for ids, out in masks.items():
+            props['path'] = outputpat.format(ids)
+            write_image(out, props)
 
-    n_workers = get_n_workers(len(filepaths), subparams)
-    with multiprocessing.Pool(processes=n_workers) as pool:
-        pool.starmap(run_tissue_mask, arglist)
+        self.thresholds = {filestem: thrs}
+        self._otsus = {filestem: otsu}
+        basename = self.format_([filestem, self._module_id, self.step])
+        outstem = os.path.join(self.directory, basename)
+        self.dump_parameters(step=self.step, filestem=outstem)
 
+    def _region_masks(self, data, filestem):
 
-def run_tissue_mask(
-    filepath,
-    otsu_lower=0.1,
-    otsu_upper=1.1,
-    threshold_lower=0,
-    threshold_upper=0,
-    step_id='tissue_mask',
-    outputdir='',
-    ):
+        if filestem in self.thresholds.keys():
+            thresholds = self.thresholds[filestem]
+        else:
+            thresholds = [self.threshold_noise, self.threshold_tissue]
 
-    filename = os.path.basename(filepath)
-    filestem = filename.split('.czi')[0]
+        otsu = None
+        if not any(thresholds):
+            otsu = float(threshold_otsu(data))
+            mi, ma = np.amin(data), np.amax(data)
+            thresholds[0] = float(thresholds[0] or mi + otsu * self.otsu_factor_noise)
+            thresholds[1] = float(thresholds[1] or otsu * self.otsu_factor_tissue)
 
-    data, _ = load_nifti(outputdir, filestem, '')
-    smooth, props = load_nifti(outputdir, filestem, '_smooth')
+        noise_mask = data < thresholds[0]
+        tissue_mask = data > thresholds[1]
+        tissue_mask = np.logical_and(tissue_mask, ~noise_mask)
 
-    if not threshold_lower:
-        otsu = threshold_otsu(smooth)
-        threshold_lower = otsu * otsu_lower
-        threshold_upper = otsu * otsu_upper
+        masks = {'noise_mask': noise_mask, 'tissue_mask': tissue_mask}
 
-    noise_mask = smooth < threshold_lower
-    tissue_mask = smooth > threshold_upper
-    tissue_mask = np.logical_and(tissue_mask, ~noise_mask)
+        return masks, otsu, thresholds
 
-    outputpath = os.path.join(outputdir, '{}_noise_mask.nii.gz'.format(filestem))
-    output_nifti(outputpath, noise_mask.astype('uint8'), props)
+    def _tissue_segmentation(self, data, masks):
 
-    outputpath = os.path.join(outputdir, '{}_tissue_mask.nii.gz'.format(filestem))
-    output_nifti(outputpath, tissue_mask.astype('uint8'), props)
+        noise_mask = masks['noise_mask']
+        tissue_mask = masks['tissue_mask']
 
-    # Dump parameters.
-    outputpath = os.path.join(outputdir, '{}.pickle'.format(filestem))
-    with open(outputpath,'rb') as f:
-        params = pickle.load(f)
-    pars = {
-        'threshold_lower': threshold_lower,
-        'threshold_upper': threshold_upper,
-        'otsu_lower': otsu_lower,
-        'otsu_upper': otsu_upper,
-        'otsu': otsu,
-    }
-    params.update(pars)
-    with open(outputpath,'wb') as f:
-        pickle.dump(params, f)
+        # clipper
+        infun = np.iinfo if data.dtype.kind in 'ui' else np.finfo
+        clipping_mask = data == infun(data.dtype).max
+        tissue_mask &= ~clipping_mask
 
-
-def calculate_cnr(
-    image_in,
-    parameter_file,
-    step_id='smooth',
-    outputdir='',
-    n_workers=0,
-    methods=['seg'],
-    quantiles=[0.5, 0.99],
-    ):
-
-    outputdir = get_outputdir(image_in, parameter_file, outputdir,
-                              'equalization', 'equalization')
-
-    params = get_params(locals().copy(), parameter_file, step_id)
-    subparams = get_params(locals().copy(), parameter_file, step_id, 'submit')
-
-    datadir = os.path.dirname(image_in)
-    filepaths = glob(os.path.join(datadir, '*.czi'))
-
-    arglist = [
-        (
-            filepath,
-            params['methods'],
-            params['quantiles'],
-            step_id,
-            outputdir,
-        )
-        for filepath in filepaths]
-
-    n_workers = get_n_workers(len(filepaths), subparams)
-    with multiprocessing.Pool(processes=n_workers) as pool:
-        pool.starmap(run_calculate_cnr, arglist)
-
-
-def run_calculate_cnr(
-    filepath,
-    methods=['seg'],
-    quantiles=[0.5, 0.99],
-    step_id='tissue_mask',
-    outputdir='',
-    ):
-
-    filename = os.path.basename(filepath)
-    filestem = filename.split('.czi')[0]
-
-    image, props = load_nifti(outputdir, filestem, '')
-    smooth, props = load_nifti(outputdir, filestem, '_smooth')
-
-    # FIXME
-    # if isinstance(image.dtype, int):
-    #     infun = np.iinfo
-    # elif isinstance(image.dtype, float):
-    #     infun = np.finfo
-    infun = np.iinfo
-
-    def q_base(image, quantiles, outputdir, dataset, infun=np.iinfo):
-        """First approximation: simple quantiles."""
-        data = np.ravel(image)
-        vals, score = get_measures(data, quantiles)
-        cnr = None
-        return pd.DataFrame([vals[0], vals[1], score, cnr]).T
-
-    def q_clip(image, quantiles, outputdir, dataset, infun=np.iinfo):
-        """Second approximation: simple quantiles of non-clipping."""
-        mask = np.logical_and(image > infun(image.dtype).min,
-                              image < infun(image.dtype).max)
-        data = np.ravel(image[mask])
-        vals, score = get_measures(data, quantiles)
-        cnr = None
-        return pd.DataFrame([vals[0], vals[1], score, cnr]).T
-
-    def q_mask(image, quantiles, outputdir, dataset, infun=np.iinfo):
-        """Third approximation: simple quantiles of image[tissue_mask]."""
-        tissue_mask, _ = load_nifti(outputdir, dataset, '_tissue_mask')
-        tissue_mask = tissue_mask.astype('bool')
-        mask = np.logical_and(tissue_mask, image < infun(image.dtype).max)
-        data = np.ravel(image[mask])
-        mode = stats.mode(data)[0][0]
-        vals, score = get_measures(data, quantiles)
-        # noise_mask = ~tissue_mask
-        noise_mask, _ = load_nifti(outputdir, dataset, '_noise_mask')
-        noise_mask = noise_mask.astype('bool')
-        cnr = get_cnr(image, noise_mask, vals[1], vals[0])
-        return pd.DataFrame([vals[0], vals[1], score, cnr]).T
-
-    def gmm(image, quantiles, outputdir, dataset, infun=np.iinfo):
-        """Fourth approximation: 2-comp GMM of segmentation image[tissue_mask]."""
-        tissue_mask, _ = load_nifti(outputdir, dataset, '_tissue_mask')
-        tissue_mask = tissue_mask.astype('bool')
-        X_train = np.ravel(image[tissue_mask])
-        X_train = X_train.reshape(-1, 1)
-        gmm = GaussianMixture(n_components=2, max_iter=100, verbose=0, covariance_type="full")
-        gmm.fit(X_train)
-        means = [gmm.means_[0][0], gmm.means_[1][0]]
-        vals = np.sort(means)
-        score = vals[1] / vals[0]
-        cnr = get_cnr(image, noise_mask, vals[1], vals[0])
-        return pd.DataFrame([vals[0], vals[1], score, cnr]).T
-
-    def seg(image, quantiles, outputdir, dataset, infun=np.iinfo):
-        """Fifth approximation: 3-comp segmentation image[tissue_mask]."""
-
-        tissue_mask, _ = load_nifti(outputdir, dataset, '_tissue_mask')
-        tissue_mask = tissue_mask.astype('bool')
-        noise_mask, _ = load_nifti(outputdir, dataset, '_noise_mask')
-        noise_mask = noise_mask.astype('bool')
-
-        df = q_mask(image, quantiles, outputdir, dataset, infun=np.iinfo)
-        signal_mask = image > df.iloc[0, 1]
-        remove_small_objects(signal_mask, min_size=3, connectivity=1, in_place=True)
+        signal_mask = data > np.quantile(data[tissue_mask], self.segment_quantile)
+        signal_mask &= ~clipping_mask
+        remove_small_objects(signal_mask, min_size=self.segment_min_size,
+                             in_place=True)
 
         segmentation = np.zeros_like(tissue_mask, dtype='uint8')
-        segmentation[tissue_mask] = 1
-        segmentation[signal_mask] = 2
+        segmentation[noise_mask]  = 1
+        segmentation[tissue_mask] = 2
+        segmentation[signal_mask] = 3
+        segmentation[clipping_mask] = 0
 
-        outputpath = os.path.join(outputdir, '{}_segmentation.nii.gz'.format(filestem))
-        output_nifti(outputpath, segmentation, props)
+        masks['segmentation'] = segmentation
 
-        vals = [np.median(np.ravel(image[segmentation==1])),
-                np.median(np.ravel(image[segmentation==2]))]
-        score = vals[1] / vals[0]
-        cnr = get_cnr(image, noise_mask, vals[1], vals[0])
-        return pd.DataFrame([vals[0], vals[1], score, cnr]).T
+        return masks
 
-    df = pd.DataFrame()
-    metrics = ['q1', 'q2', 'contrast', 'cnr']
-    meths = {'q_base': q_base, 'q_clip': q_base, 'q_mask': q_base, 'gmm': gmm, 'seg': seg}
-    for method, fun in meths.items():
-        if method in methods:
-            df0 = fun(image, quantiles, outputdir, filestem, infun=infun)
-            df0.columns=['{}-{}'.format(method, metric) for metric in metrics]
-            df = pd.concat([df, df0], axis=1)
+    def calculate_metrics(self, **kwargs):
 
-    df.index = [filestem]
-    outputpath = os.path.join(outputdir, '{}.csv'.format(filestem))
-    df.to_csv(outputpath, index_label='sample_id')
+        self.set_parameters('metrics', kwargs)
+        arglist = self._get_arglist(['filepaths'])
+        self.set_n_workers(len(self.filepaths))
+        pars = self.dump_parameters(step=self.step)
+        self._logstep(pars)
 
-    # Dump parameters.
-    outputpath = os.path.join(outputdir, '{}.pickle'.format(filestem))
-    with open(outputpath,'rb') as f:
-        params = pickle.load(f)
-    pars = {
-        'quantiles': quantiles,
+        with multiprocessing.Pool(processes=self.n_workers) as pool:
+            pool.starmap(self._calculate_metrics_image, arglist)
+
+    def _calculate_metrics_image(self, filepath):
+
+        def get_measures(data, quantiles=[0.5, 0.9]):
+            quantiles = np.quantile(data, quantiles)
+            score = quantiles[1] / quantiles[0]
+            return quantiles, score
+
+        def get_cnr(image, noise_mask, sigval, bgval):
+            noise = np.ravel(image[noise_mask])
+            if noise.size > 0:
+                cnr = (sigval - bgval) / np.std(noise)
+            else:
+                cnr = 0
+            return cnr
+
+        def q_base(image, quantiles, outputdir, dataset):
+            """Simple quantiles."""
+            data = np.ravel(image)
+            vals, score = get_measures(data, quantiles)
+            cnr = None
+            return pd.DataFrame([vals[0], vals[1], score, cnr]).T
+
+        def q_clip(image, quantiles, outputdir, dataset):
+            """Simple quantiles of non-clipping."""
+            infun = np.iinfo if image.dtype.kind in 'ui' else np.finfo
+            mask = np.logical_and(image > infun(image.dtype).min,
+                                  image < infun(image.dtype).max)
+            data = np.ravel(image[mask])
+            vals, score = get_measures(data, quantiles)
+            cnr = None
+            return pd.DataFrame([vals[0], vals[1], score, cnr]).T
+
+        def q_mask(image, quantiles, outputdir, dataset):
+            """Simple quantiles of image[tissue_mask]."""
+            tissue_mask, _ = load_image(outputpat.format('tissue_mask'))
+            tissue_mask = tissue_mask.astype('bool')
+            infun = np.iinfo if image.dtype.kind in 'ui' else np.finfo
+            mask = np.logical_and(tissue_mask, image < infun(image.dtype).max)
+            data = np.ravel(image[mask])
+            mode = stats.mode(data)[0][0]
+            vals, score = get_measures(data, quantiles)
+            # noise_mask = ~tissue_mask
+            noise_mask, _ = load_image(outputpat.format('noise_mask'))
+            noise_mask = noise_mask.astype('bool')
+            cnr = get_cnr(image, noise_mask, vals[1], vals[0])
+            return pd.DataFrame([vals[0], vals[1], score, cnr]).T
+
+        def gmm(image, quantiles, outputdir, dataset):
+            """Two-comp GMM of segmentation image[tissue_mask]."""
+            tissue_mask, _ = load_image(outputpat.format('tissue_mask'))
+            tissue_mask = tissue_mask.astype('bool')
+            X_train = np.ravel(image[tissue_mask])
+            X_train = X_train.reshape(-1, 1)
+            gmm = GaussianMixture(n_components=2, max_iter=100, verbose=0,
+                                  covariance_type="full")
+            gmm.fit(X_train)
+            means = [gmm.means_[0][0], gmm.means_[1][0]]
+            vals = np.sort(means)
+            score = vals[1] / vals[0]
+            cnr = get_cnr(image, noise_mask, vals[1], vals[0])
+            return pd.DataFrame([vals[0], vals[1], score, cnr]).T
+
+        def seg(image, quantiles, outputdir, dataset):
+            """Three-comp segmentation."""
+            segmentation, _ = load_image(outputpat.format('segmentation'))
+            vals = [np.median(np.ravel(image[segmentation==2])),
+                    np.median(np.ravel(image[segmentation==3]))]
+            score = vals[1] / vals[0]
+            cnr = get_cnr(image, segmentation==3, vals[1], vals[0])
+            return pd.DataFrame([vals[0], vals[1], score, cnr]).T
+
+        filestem, ext, outputpat = self._get_outputpat(filepath)
+
+        image, _ = load_image(outputpat.format('data'))
+        smooth, props = load_image(outputpat.format('smooth'))
+
+        df = pd.DataFrame()
+        metrics = ['q1', 'q2', 'contrast', 'cnr']
+        meths = {'q_base': q_base, 'q_clip': q_base, 'q_mask': q_base,
+                 'gmm': gmm, 'seg': seg}
+        for method, fun in meths.items():
+            if method in self.methods:
+                df0 = fun(image, self.quantiles, self.directory, filestem)
+                df0.columns=['{}-{}'.format(method, metric) for metric in metrics]
+                df = pd.concat([df, df0], axis=1)
+
+        df.index = [filestem]
+
+        # NB: need single-file output for HCP distributed system
+        outputpath = os.path.join(self.directory, '{}.csv'.format(filestem))
+        df.to_csv(outputpath, index_label='sample_id')
+
+        self._metrics = {filestem: df.to_dict(orient='list')}
+        basename = self.format_([filestem, self._module_id, self.step])
+        outstem = os.path.join(self.directory, basename)
+        self.dump_parameters(step=self.step, filestem=outstem)
+
+    def postprocess(self, **kwargs):
+
+        self.set_parameters('postprocess', kwargs)
+        arglist = self._get_arglist(['filepaths'])
+        self.set_n_workers(len(self.filepaths))
+        pars = self.dump_parameters(step=self.step)
+        self._logstep(pars)
+
+        self._postprocess()
+
+    def _postprocess(self, basename='equalization_assay'):
+
+        self._postprocess_merge(basename)
+
+        if self._compute_env == 'SLURM' or self._compute_env == 'SGE':
+            self.n_workers = 1
+        else:
+            self.set_n_workers(len(self.filepaths))
+
+        arglist = [(filepath,) for filepath in self.filepaths]
+        with multiprocessing.Pool(processes=self.n_workers) as pool:
+            pool.starmap(self._postprocess_report, arglist)
+
+        outputstem = os.path.join(self.directory, basename)
+        ext = os.path.splitext(self.filepaths[0])[1]
+
+        # Merge csv's.
+        pdfs = []
+        for filepath in self.filepaths:
+            basename = os.path.basename(os.path.splitext(filepath)[0])
+            filename = '{}.pdf'.format(basename)
+            pdfs.append(os.path.join(self.directory, filename))
+        pdfs.sort()
+        merge_reports(pdfs, '{}.pdf'.format(outputstem))
+
+        self.summary_report(basename=basename)
+
+    def _postprocess_merge(self, basename='equalization_assay'):
+
+        outputstem = os.path.join(self.directory, basename)
+        ext = os.path.splitext(self.filepaths[0])[1]
+
+        # Merge csv's.
+        # csvs = [filepath.replace(ext, '.csv') for filepath in self.filepaths]
+        csvs = []
+        for filepath in self.filepaths:
+            basename = os.path.basename(os.path.splitext(filepath)[0])
+            filename = '{}.csv'.format(basename)
+            csvs.append(os.path.join(self.directory, filename))
+        csvs.sort()
+        merge_csvs(csvs, '{}.csv'.format(outputstem))
+        for csv in csvs:
+            os.remove(csv)
+
+        # Aggregate thresholds/metrics from ymls.
+        steps = {
+            'segment': [
+                ['equalization', 'segment', 'params', 'thresholds'],
+                ['equalization', 'segment', 'params', '_otsus'],
+                ],
+            'metrics': [
+                ['equalization', 'metrics', 'params', '_metrics'],
+                ],
         }
-    params.update(pars)
-    with open(outputpath,'wb') as f:
-        pickle.dump(params, f)
+        for step, trees in steps.items():
+            ymls = []
+            for filepath in self.filepaths:
+                filestem = os.path.splitext(os.path.basename(filepath))[0]
+                basename = self.format_([filestem, self._module_id, step])
+                ymlpath = os.path.join(self.directory, '{}.yml'.format(basename))
+                ymls.append(ymlpath)
+            ymls.sort()
+            bname = self.format_([self.dataset, self._module_id, step])
+            ymlstem = os.path.join(self.directory, bname)
+            self._merge_parameters(ymls, trees, ymlstem)
+            for yml in ymls:
+                os.remove(yml)
 
-    generate_report(outputdir, filestem)
+    def _postprocess_report(self, filepath):
+        """Generate reports."""
+
+        filestem, ext = os.path.splitext(os.path.basename(filepath))
+        self.report(basename=filestem)
+
+    def set_filepaths(self):
+        """Set the filepaths by globbing the directory."""
+
+        # directory = os.path.abspath(self.directory)
+        directory = os.path.abspath(os.path.dirname(self.image_in))
+        self.filepaths = sorted(glob(os.path.join(directory, self.filepat)))
+
+    def _get_outputpat(self, filepath, ext='.czi'):
+        """Get io-info from filepath."""
+
+        filestem = os.path.basename(filepath).split(ext)[0]
+
+        if 'h5' in self.outputformat:
+            filepat = '{}.h5/{}'.format(filestem, '{}')
+        elif 'nii' in self.outputformat:
+            filepat = '{}_{}.nii.gz'.format(filestem, '{}')
+
+        outputpat = os.path.join(self.directory, filepat)
+
+        return filestem, ext, outputpat
+
+    def _get_info_dict(self, filestem, info_dict={}, channel=None):
+
+        basename = os.path.basename(filestem)
+        info_dict['filestem'] = basename
+
+        p = self.load_dumped_pars()
+        p['threshold_noise']  = p['thresholds'][basename][0]
+        p['threshold_tissue'] = p['thresholds'][basename][1]
+        p['threshold_otsu']   = p['_otsus'][basename]
+        # NOTE: doing this for 'seg' method first => TODO
+        p['cnr'] = p['_metrics'][basename]['seg-cnr'][0]
+        p['contrast'] = p['_metrics'][basename]['seg-contrast'][0]
+        p['median_bg'] = p['_metrics'][basename]['seg-q1'][0]
+        p['median_fg'] = p['_metrics'][basename]['seg-q2'][0]
+        info_dict['parameters'] = p
+
+        filepath = '{}.h5/data'.format(filestem)
+        info_dict['props'] = get_imageprops(filepath)
+        info_dict['paths'] = get_paths(filepath)
+        info_dict['centreslices'] = get_centreslices(info_dict)
+
+        return info_dict
+
+    def _gen_subgrid(self, f, gs, channel=None):
+        """4rows-2 columns: 4 images left, 4 plots right"""
+
+        axdict, titles = {}, {}
+        gs0 = gs.subgridspec(2, 1, height_ratios=[1, 10])
+        axdict['p'] = self._report_axes_pars(f, gs0[0])
+
+        gs01 = gs0[1].subgridspec(3, 2)
+
+        tk = {0: 'lc', 1: 'rc'}
+        d = {0: ['image', 'tissue / noise regions', 'segmentation'],
+             1: ['histogram', 'histogram smoothed image', 'histogram tissue']}
+
+        for j, val in d.items():
+            for i, k in enumerate(val):
+                axdict[k] = f.add_subplot(gs01[i, j])
+                axdict[k].tick_params(axis='both', direction='in')
+                titles[k] = (k, tk[j], 0)
+                if j:
+                    for l in ['top', 'right']:
+                        axdict[k].spines[l].set_visible(False)
+
+        self._add_titles(axdict, titles)
+
+        return axdict
+
+    def _plot_images(self, f, axdict, info_dict, logscale=True):
+
+        # images
+        image = info_dict['centreslices']['data']['z']
+        image_smooth = info_dict['centreslices']['smooth']['z']
+        segmentation = info_dict['centreslices']['segmentation']['z']
+
+        thrcolors = ['r', 'b', 'g']
+        segcolors = [[0, 1, 0], [1, 0, 1], [0, 1, 1]]
+        infun = np.iinfo if image.dtype.kind in 'ui' else np.finfo
+        dmax = infun(image.dtype).max
+
+        # thresholds
+        p = info_dict['parameters']
+        t = ['noise', 'tissue', 'otsu']
+        thresholds = [p['threshold_{}'.format(k)] for k in t]
+
+        # image with scalebar
+        x_idx = 2; y_idx = 1;  # FIXME
+        w = info_dict['props']['elsize'][x_idx] * image.shape[1]  # note xyz nifti
+        h = info_dict['props']['elsize'][y_idx] * image.shape[0]
+        extent = [0, w, 0, h]
+
+        ax = axdict['image']
+        ax.imshow(image, cmap="gray", extent=extent)
+        ax.set_axis_off()
+        self._add_scalebar(ax, w)
+
+        # smoothed image with contours at thresholds
+        ax = axdict['tissue / noise regions']
+        ax.imshow(image_smooth, cmap="gray")
+        thrs = [thresholds[0], thresholds[2]]
+        cs = ax.contour(image_smooth, thrs, colors=thrcolors[:2], linestyles='dashed')
+        ax.clabel(cs, inline=1, fontsize=5)
+        labels = ['thr={:.5}'.format(thr) for thr in thrs]
+        for i in range(len(labels)):
+            cs.collections[i].set_label(labels[i])
+        ax.set_axis_off()
+
+        # segmentation image
+        ax = axdict['segmentation']
+        from skimage import img_as_float
+        img = img_as_float(image)
+        clabels = label2rgb(segmentation, image=img, alpha=1.0, bg_label=0, colors=segcolors)
+        ax.imshow(clabels)
+        ax.set_axis_off()
+
+        # full histogram
+        ax = axdict['histogram']
+        ax.hist(np.ravel(image), bins=256, log=logscale, color=[0, 0, 0])
+        ax.set_xlim([0, dmax])
+
+        # smoothed image histogram with thresholds
+        ax = axdict['histogram smoothed image']
+        ax.hist(np.ravel(image_smooth), bins=256, log=logscale, color=[0, 0, 0])
+        linestyles = '--:'
+        labels = ['{:.5}'.format(thr) for thr in thresholds]
+        self._draw_thresholds(ax, thresholds, thrcolors, linestyles, labels)
+
+        # image histogram from background and signal-of-interest regions
+        ax = axdict['histogram tissue']
+        data = [np.ravel(image[segmentation == 2]), np.ravel(image[segmentation == 3])]
+        ax.hist(data, bins=256, log=logscale, histtype='bar', stacked=True, color=segcolors[1:])
+        ax.set_xlim([0, dmax])
+
+        mets = ['cnr', 'contrast', 'median_fg', 'median_bg']
+        labs = ['{} = {}'.format(k, '{0: >8.2f}'.format(p[k])) for k in mets]
+        lab = '\n'.join(labs)
+        ax.annotate(
+            text=lab, xy=(1.01, 1.01), c='k',
+            xycoords='axes fraction', va='top', ha='right',
+            rotation=0, fontsize=7, fontfamily='monospace',
+            )
+
+    def _summary_report(self, f, axdict, info_dict):
+        """Plot summary report."""
+
+        ax = axdict['graph']
+        df = info_dict['df']
+        df = df.sort_values('seg-cnr')
+        c = plt.cm.rainbow(np.linspace(0, 1, df.shape[0]))
+        df['seg-cnr'].plot(ax=ax, kind='barh', color=c)
+        ax.set_title("contrast-to-noise", fontsize=12)
+
+    def _get_info_dict_summary(self, filestem, info_dict={}, channel=None):
+
+        info_dict['df'] = pd.read_csv('{}.csv'.format(filestem), index_col='sample_id')
+
+        return info_dict
 
 
-def postprocess(
-    image_in,
-    parameter_file,
-    step_id='postprocess',
-    outputdir='',
-    n_workers=0,
-    ):
-
-    outputdir = get_outputdir(image_in, parameter_file, outputdir, 'equalization', 'equalization')
-    inputpat = '{}/*'.format(outputdir)
-    outputstem = os.path.join(outputdir, 'equalization_assay')
-
-    pdfs = glob('{}_equalization_assay.pdf'.format(inputpat))
-    pdfs.sort()
-    pdf_out = '{}.pdf'.format(outputstem)
-    merge_reports(pdfs, pdf_out)
-
-    pickles = glob('{}.pickle'.format(inputpat))
-    pickles.sort()
-    zip_out = '{}.zip'.format(outputstem)
-    zip_parameters(pickles, zip_out)
-
-    csvs = glob('{}.csv'.format(inputpat))
-    csvs.sort()
-    df = pd.DataFrame()
-    for csvfile in csvs:
-        df0 = pd.read_csv(csvfile)
-        df = pd.concat([df, df0], axis=0)
-    df = df.set_index('sample_id')
-    outputpath = os.path.join(outputdir, 'equalization_assay.csv')
-    df.to_csv(outputpath, index_label='sample_id')
-
-    # Plot results.
-    step_id = 'equalization_assay'
-    dataset = 'summary'
-
-    chsize = (11.69, 8.27)  # A4 portrait
-    figtitle = 'STAPL-3D {} report \n {}'.format(step_id, dataset)
-    filestem = os.path.join(outputdir, dataset)
-    subplots = [1, 1]
-    figsize = (chsize[1]*subplots[1], chsize[0]*subplots[0])
-    f, ax = plt.subplots(1, 1, figsize=figsize, constrained_layout=True)
-
-    df = df.sort_values('seg-cnr')
-    df['seg-cnr'].plot(ax=ax, kind='barh')
-    ax.set_title("contrast-to-noise", fontsize=12)
-
-    f.suptitle(figtitle, fontsize=14, fontweight='bold')
-    f.savefig('{}_summary.pdf'.format(outputstem))
-
-
-def output_nifti(outputpath, data, props):
-
-    if len(data.shape) == 4:
-        props['axlab'] += 'c'
-        props['elsize'] += [1]
-    mo = Image(outputpath, **props)
-    mo.dtype = data.dtype
-    mo.dims = data.shape
-    mo.slices = None
-    mo.create()
-    mo.write(data)
-    mat = mo.get_transmat()
-    mo.nii_write_mat(data, mo.slices, mat)
-    mo.close()
-
-
-def load_nifti(datadir, filestem, postfix):
-
-    inputpath = os.path.join(datadir, '{}{}.nii.gz'.format(filestem, postfix))
+def load_image(inputpath):
     im = Image(inputpath)
     im.load()
     data = im.ds[:]
     props = im.get_props()
     im.close()
-
     return data, props
 
 
-def get_measures(data, quantiles=[0.5, 0.9]):
-
-    quantiles = np.quantile(data, quantiles)
-
-    score = quantiles[1] / quantiles[0]
-
-    return quantiles, score
-
-
-def get_cnr(image, noise_mask, sigval, bgval):
-
-    noise = np.ravel(image[noise_mask])
-    if noise.size > 0:
-        cnr = (sigval - bgval) / np.std(noise)
-    else:
-        cnr = 0
-
-    return cnr
+def write_image(data, props):
+    props['dtype'] = data.dtype
+    mo = Image(**props)
+    mo.create()
+    mo.write(data)
+    mo.close()
 
 
-def plot_params(f, axdict, info_dict={}):
-    """Show images in report."""
-
-    pars = {'sigma': 'smoothing sigma',
-            'otsu_upper': 'otsu factor: noise',
-            'otsu_lower': 'otsu factor: tissue',
-            'otsu': 'otsu threshold',
-            'threshold_lower': 'threshold_lower',
-            'threshold_upper': 'threshold_lower',
-            'quantiles': 'quantiles'}
-
-    cellText = []
-    for par, name in pars.items():
-        v = info_dict['parameters'][par]
-        if not isinstance(v, list):
-            v = [v]
-        try:
-            fs = '{:.2f}' if np.issubdtype(v[0].dtype, np.float) else '{}'
-        except AttributeError:
-            fs = '{:.2f}' if isinstance(v[0], float) else '{}'
-        cellText.append([name, ', '.join(fs.format(x) for x in v)])
-
-    axdict['p'].table(cellText, loc='bottom')
-    axdict['p'].axis('off')
-
-
-def plot_images(f, axdict, info_dict):
-
-    image = info_dict['centreslices']['image']['z']
-    image_smooth = info_dict['centreslices']['smooth']['z']
-    noise_mask = info_dict['centreslices']['noise_mask']['z']
-
-    segmentation = info_dict['centreslices']['seg']['z']
-    tissue_mask = segmentation > 0
-    background_mask = segmentation == 1
-    signal_mask = segmentation == 2
-
-    w = info_dict['elsize']['x'] * image.shape[0]  # note xyz nifti
-    h = info_dict['elsize']['y'] * image.shape[1]
-    extent = [0, w, 0, h]
-    ax = axdict['i0']
-    ax.imshow(image, cmap="gray", extent=extent)
-    ax.set_axis_off()
-
-    from mpl_toolkits.axes_grid1.anchored_artists import AnchoredSizeBar
-    import matplotlib.font_manager as fm
-    fontprops = fm.FontProperties(size=12)
-    scalebar = AnchoredSizeBar(ax.transData,
-                               int(w/5), r'{} $\mu$m'.format(int(w/5)), 'lower right',
-                               pad=0.1,
-                               color='white',
-                               frameon=False,
-                               size_vertical=1,
-                               fontproperties=fontprops)
-    ax.add_artist(scalebar)
-
-    ax = axdict['i1']
-    ax.imshow(image_smooth, cmap="gray")
-    if noise_mask is not None:
-        ax.contour(noise_mask, [0.5], colors='r', linestyles='dashed')
-    if tissue_mask is not None:
-        ax.contour(segmentation > 0, [0.5], colors='b', linestyles='dashed')
-    ax.set_axis_off()
-
-    ax = axdict['i2']
-    clabels = label2rgb(segmentation, image=image, alpha=0.5, bg_label=0, colors=[[1, 0, 0], [0, 1, 0]])
-    ax.imshow(clabels)
-    ax.set_axis_off()
-
-    # Plot histograms
-    def draw_thresholds(ax, thresholds, colors, linestyles):
-        for t, c, l in zip(thresholds, colors, linestyles):
-            if t is not None:
-                ax.axvline(t, color=c, linestyle=l)
-
-    thresholds = (
-        info_dict['parameters']['threshold_lower'],
-        info_dict['parameters']['otsu'],
-        info_dict['parameters']['threshold_upper'],
-        )
-
-    ax = axdict['h0']
-    ax.hist(np.ravel(image), bins=256)
-
-    ax = axdict['h1']
-    ax.hist(np.ravel(image_smooth), bins=256)
-    draw_thresholds(ax, thresholds, 'rkb', '---')
-
-    ax = axdict['h2']
-    data = [np.ravel(image[background_mask]), np.ravel(image[signal_mask])]
-    ax.hist(data, bins=256, histtype='bar', stacked=True)
-
-
-def gen_subgrid(f, gs, fsize=7):
-    """4rows-2 columns: 4 images left, 4 plots right"""
-
-    fdict = {'fontsize': fsize,
-     'fontweight' : matplotlib.rcParams['axes.titleweight'],
-     'verticalalignment': 'baseline'}
-
-    gs0 = gs.subgridspec(2, 1, height_ratios=[1, 10])
-
-    gs00 = gs0[0].subgridspec(10, 1)
-    gs01 = gs0[1].subgridspec(3, 2)
-
-    axdict = {}
-
-    # parameter table
-    axdict['p'] = f.add_subplot(gs00[0, 0])
-    axdict['p'].set_title('parameters', fdict, fontweight='bold')
-    axdict['p'].tick_params(axis='both', labelsize=fsize, direction='in')
-
-    # images
-    titles = {'i0': 'image', 'i1': 'tissue / noise regions', 'i2': 'segmentation'}
-    for i, (a, t) in enumerate(titles.items()):
-        axdict[a] = f.add_subplot(gs01[i, 0])
-        axdict[a].set_title(t, fdict, fontweight='bold', loc='left')
-        axdict[a].tick_params(axis='both', labelsize=fsize, direction='in')
-
-    # histograms
-    titles = {'h0': 'histogram', 'h1': 'histogram smoothed image', 'h2': 'histogram tissue'}
-    for i, (a, t) in enumerate(titles.items()):
-        axdict[a] = f.add_subplot(gs01[i, 1])
-        axdict[a].set_title(t, fdict, fontweight='bold', loc='right')
-        axdict[a].tick_params(axis='both', labelsize=fsize, direction='in')
-
-    return axdict
-
-
-def get_info_dict(image_in, info_dict={}):
-
-    im = Image(image_in)
-    im.load(load_data=False)
-    info_dict['elsize'] = {dim: im.elsize[i] for i, dim in enumerate(im.axlab)}
-    info_dict['paths'] = im.split_path()  # FIXME: out_base
-    info_dict['paths']['out_base'] = info_dict['paths']['base']
-    im.close()
-
-    ppath = '{}.pickle'.format(info_dict['paths']['base'])
-    with open(ppath, 'rb') as f:
-        info_dict['parameters'] = pickle.load(f)
-
-    # TODO: generalize 3D?
-    # TODO: integrate with get_centreslices() => nii or make it h5
-    image, _ = load_nifti(info_dict['paths']['dir'], info_dict['paths']['fname'], '')
-    smooth, _ = load_nifti(info_dict['paths']['dir'], info_dict['paths']['fname'], '_smooth')
-    seg, _ = load_nifti(info_dict['paths']['dir'], info_dict['paths']['fname'], '_segmentation')
-    noise_mask, _ = load_nifti(info_dict['paths']['dir'], info_dict['paths']['fname'], '_noise_mask')
-
-    info_dict['centreslices'] = {
-        'image': {'z': np.squeeze(image)},
-        'smooth': {'z': np.squeeze(smooth)},
-        'seg': {'z': np.squeeze(seg)},
-        'noise_mask': {'z': np.squeeze(noise_mask)},
-        }
-
-    return info_dict
-
-
-def generate_report(outputdir, dataset, channel=None, ioff=False):
-    """Generate a QC report of the equalization."""
-
-    step_id = 'equalization_assay'
-
-    chsize = (11.69, 8.27)  # A4 portrait
-    figtitle = 'STAPL-3D {} report \n {}'.format(step_id, dataset)
-    filestem = os.path.join(outputdir, dataset)
-    subplots = [1, 1]
-    figsize = (chsize[1]*subplots[1], chsize[0]*subplots[0])
-    f = plt.figure(figsize=figsize, constrained_layout=False)
-    gs = gridspec.GridSpec(subplots[0], subplots[1], figure=f)
-
-    outputstem = filestem
-
-    axdict = gen_subgrid(f, gs[0], fsize=10)
-
-    image_in = os.path.join(outputdir, '{}.nii.gz'.format(dataset))
-    info_dict = get_info_dict(image_in)
-
-    plot_params(f, axdict, info_dict)
-    plot_images(f, axdict, info_dict)
-    # plot_profiles(f, axdict, info_dict)
-    info_dict.clear()
-
-    f.suptitle(figtitle, fontsize=14, fontweight='bold')
-    f.savefig('{}_{}.pdf'.format(outputstem, step_id))
-    if ioff:
-        plt.close(f)
+def merge_csvs(csvs, outputpath):
+    df = pd.DataFrame()
+    for csvfile in csvs:
+        df0 = pd.read_csv(csvfile)
+        df = pd.concat([df, df0], axis=0)
+    df = df.set_index('sample_id')
+    df.to_csv(outputpath, index_label='sample_id')
 
 
 if __name__ == "__main__":

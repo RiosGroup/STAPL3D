@@ -110,6 +110,28 @@ def get_trainsets():
             'trainblock_list': [0, 1, 2, 3, 4, 5, 6, 7],
             'ind_val': [1, 6],
         },
+        'ID11': {
+            'filestem_train': '200929_RL68A_HFK',
+            'ids_dapi': 'raw_nucl',
+            'ids_memb': 'raw_memb',
+            'ids_label': 'label_nucl',
+            'h5_path_pat': '{}.h5/zstack{}',
+            'axis_norm': (0, 1, 2),
+            'z_range': [],
+            'trainblock_list': [1, 2, 3, 4, 5, 6, 7],
+            'ind_val': [2, 6],
+        },
+        'ID12': {
+            'filestem_train': '200929_RL68A_HFK_63x',
+            'ids_dapi': 'raw_nucl',
+            'ids_memb': 'raw_memb',
+            'ids_label': 'label_nucl',
+            'h5_path_pat': '{}.h5/zstack{}',
+            'axis_norm': (0, 1, 2),
+            'z_range': [],
+            'trainblock_list': [1, 2, 3, 4, 5, 6, 7],
+            'ind_val': [2, 6],
+        },
     }
 
     return trainsets
@@ -207,7 +229,7 @@ def get_runs():
             'augmenter': {'rotflip_axis': (1, 2), 'int_fac': [0.8, 1.2], 'int_add': [-0.1, 0.1], 'scale_axis': (), 'scale_fac': []},
             'normalizer': [],
         },
-        'stapl3d_to_stardist': {
+        'stapl3d': {
             'trainsets': ['ID06'],
             'train_patch_size': (64, 96, 96),
             'grid': (),
@@ -216,7 +238,7 @@ def get_runs():
             'augmenter': {'rotflip_axis': (1, 2), 'int_fac': [0.8, 1.2], 'int_add': [-0.1, 0.1], 'scale_axis': (), 'scale_fac': []},
             'normalizer': [0, 24645],
         },
-        'stardist_GT004_0': {
+        'GT004_0': {
             'trainsets': ['ID07'],
             'train_patch_size': (20, 96, 96),
             'grid': (),
@@ -225,7 +247,7 @@ def get_runs():
             'augmenter': {'rotflip_axis': (1, 2), 'int_fac': [0.8, 1.2], 'int_add': [-0.1, 0.1], 'scale_axis': (), 'scale_fac': []},
             'normalizer': [0, 24645],
         },
-        'stardist_GT004_1': {
+        'GT004_1': {
             'trainsets': ['ID08'],
             'train_patch_size': (70, 96, 96),
             'grid': (),
@@ -234,7 +256,7 @@ def get_runs():
             'augmenter': {'rotflip_axis': (1, 2), 'int_fac': [0.8, 1.2], 'int_add': [-0.1, 0.1], 'scale_axis': (), 'scale_fac': []},
             'normalizer': [0, 24645],
         },
-        'stardist_GT004_2': {
+        'GT004_2': {
             'trainsets': ['ID09'],
             'train_patch_size': (70, 96, 96),
             'grid': (),
@@ -243,9 +265,27 @@ def get_runs():
             'augmenter': {'rotflip_axis': (1, 2), 'int_fac': [0.8, 1.2], 'int_add': [-0.1, 0.1], 'scale_axis': (), 'scale_fac': []},
             'normalizer': [0, 24645],
         },
-        'stardist_multiresGT': {
+        'multiresGT': {
             'trainsets': ['ID10'],
             'train_patch_size': (24, 96, 96),
+            'grid': (),
+            'n_rays': 96,
+            'use_memb': False,
+            'augmenter': {'rotflip_axis': (1, 2), 'int_fac': [0.8, 1.2], 'int_add': [-0.1, 0.1], 'scale_axis': (), 'scale_fac': []},
+            'normalizer': [],
+        },
+        '200929_RL68A_HFK': {
+            'trainsets': ['ID11'],
+            'train_patch_size': (40, 96, 96),
+            'grid': (),
+            'n_rays': 96,
+            'use_memb': False,
+            'augmenter': {'rotflip_axis': (1, 2), 'int_fac': [0.8, 1.2], 'int_add': [-0.1, 0.1], 'scale_axis': (), 'scale_fac': []},
+            'normalizer': [],
+        },
+        '200929_RL68A_HFK_63x': {
+            'trainsets': ['ID12'],
+            'train_patch_size': (40, 288, 288),
             'grid': (),
             'n_rays': 96,
             'use_memb': False,

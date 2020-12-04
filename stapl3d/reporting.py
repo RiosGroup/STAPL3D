@@ -168,7 +168,7 @@ def get_centreslices(info_dict, idss=[], ch=0):
 
     h5_path = info_dict['paths']['file']
     image_in = h5_path + info_dict['paths']['int']
-    im = Image(image_in)
+    im = Image(image_in, permission='r')
     im.load(load_data=False)
     if not idss:
         idss = [k for k in im.file.keys()]
@@ -187,7 +187,7 @@ def get_centreslice(image_in, ids, dim='z', ch=0):
     if isinstance(image_in, Image):
         im = image_in
     else:
-        im = Image('{}/{}'.format(image_in, ids))
+        im = Image('{}/{}'.format(image_in, ids), permission='r')
         try:
             im.load(load_data=False)
         except KeyError:
@@ -260,27 +260,46 @@ def gen_orthoplot(f, gs):
     return axs
 
 
-def gen_orthoplot_with_colorbar(f, gs):
+def gen_orthoplot_with_colorbar(f, gs, cbar='vertical', idx=0, add_profile_insets=False):
     """Create axes on a subgrid to fit three orthogonal projections."""
 
     axs = []
-    size_xy = 10
-    size_z = 2
-    size_c = 1
+    size_xy = 20
+    size_z = 4
+    size_c = 2
     size_t = size_xy + size_z + size_c
 
-    gs_sub = gs.subgridspec(size_xy + size_z + size_c, size_xy + size_z)
+    # gs_sub = gs.subgridspec(size_xy + size_z + size_c, size_xy + size_z + size_c)
 
-    # central: yx-image
-    axs.append(f.add_subplot(gs_sub[:size_xy, :size_xy]))
-    # middle-bottom: zx-image
-    axs.append(f.add_subplot(gs_sub[size_xy:, :size_xy], sharex=axs[0]))
-    # right-middle: zy-image
-    axs.append(f.add_subplot(gs_sub[:size_xy, size_xy:], sharey=axs[0]))
-    # right colorbar
-    #axs.append(f.add_subplot(gs_sub[:, -size_c:]))
-    # bottom colorbar
-    axs.append(f.add_subplot(gs_sub[-size_c:, :]))
+    if cbar == 'horizontal':
+        gs_sub = gs.subgridspec(size_xy + size_z + size_c, size_xy + size_z)
+        # central: yx-image
+        axs.append(f.add_subplot(gs_sub[:size_xy, :size_xy], aspect='equal'))
+        # bottom: zx-image
+        axs.append(f.add_subplot(gs_sub[size_xy:-size_c, :size_xy], sharex=axs[0], aspect='auto'))
+        # right: zy-image
+        axs.append(f.add_subplot(gs_sub[:size_xy, size_xy:-size_c], sharey=axs[0], aspect='auto'))
+        # bottom colorbar
+        axs.append(f.add_subplot(gs_sub[-size_c:, :size_xy]))
+    else:
+        if not idx % 2:  # left side plots
+            gs_sub = gs.subgridspec(size_t, size_t)
+            axs.append(f.add_subplot(gs_sub[:size_xy, :size_xy]))  # central: yx-image
+            axs.append(f.add_subplot(gs_sub[size_xy:-size_c, :size_xy]))  # bottom: zx-image
+            axs.append(f.add_subplot(gs_sub[:size_xy, size_xy:-size_c]))  # right: zy-image
+            axs.append(f.add_subplot(gs_sub[2:size_xy, -size_c+1:]))  # right colorbar
+            # axs.append(f.add_subplot(gs_sub[-size_c+1:, 2:size_xy]))  # bottom colorbar
+            if add_profile_insets:
+                axs.append(f.add_subplot(gs_sub[:size_c+1, size_xy:size_xy+size_c+2])) # z
+                axs.append(f.add_subplot(gs_sub[:size_xy, :size_c+1])) # y
+                axs.append(f.add_subplot(gs_sub[:size_c+1, :size_xy])) # x
+        else:  # right side plots
+            gs_sub = gs.subgridspec(size_t, size_t)
+            axs.append(f.add_subplot(gs_sub[:size_xy, size_c:size_xy+size_c]))  # central: yx-image
+            axs.append(f.add_subplot(gs_sub[size_xy:-size_c, size_c:size_xy+size_c]))  # bottom: zx-image
+            axs.append(f.add_subplot(gs_sub[:size_xy, -size_z:]))  # right: zy-image
+            axs.append(f.add_subplot(gs_sub[2:size_xy, :size_c-1]))  # right colorbar
+            # axs.append(f.add_subplot(gs_sub[-size_c+1:, size_c:size_xy]))  # bottom colorbar
 
     return axs
 
@@ -289,25 +308,44 @@ def gen_orthoplot_with_profiles(f, gs):
     """Create axes on a subgrid to fit three orthogonal projections."""
 
     axs = []
-    size_p = 2
-    size_xy = 5
-    size_z = 2
-    size_t = size_p + size_xy + size_z
+    size_xy = 20
+    size_z = 4
+    size_c = 2
+
+    size_t = size_xy + size_z + size_c
 
     gs_sub = gs.subgridspec(size_t, size_t)
 
-    # central: yx-image
-    axs.append(f.add_subplot(gs_sub[size_p:size_p+size_xy, size_p:size_p+size_xy]))
-    # middle-bottom: zx-image
-    axs.append(f.add_subplot(gs_sub[size_p+size_xy:, size_p:size_p+size_xy], sharex=axs[0]))
-    # right-middle: zy-image
-    axs.append(f.add_subplot(gs_sub[size_p:size_p+size_xy, size_p+size_xy:], sharey=axs[0]))
-    # right-top: z-profiles
-    axs.append(f.add_subplot(gs_sub[:size_p, size_p+size_xy:], sharex=axs[2]))
-    # left-middle: y-profiles
-    axs.append(f.add_subplot(gs_sub[size_p:size_p+size_xy, :size_p], sharey=axs[0]))
-    # middle-top: x-profiles
-    axs.append(f.add_subplot(gs_sub[:size_p, size_p:size_p+size_xy], sharex=axs[0]))
+    # if not idx % 2:  # left side plots
+    axs.append(f.add_subplot(gs_sub[:size_xy, :size_xy]))  # central: yx-image
+    axs.append(f.add_subplot(gs_sub[size_xy:-size_c, :size_xy]))  # bottom: zx-image
+    axs.append(f.add_subplot(gs_sub[:size_xy, size_xy:-size_c]))  # right: zy-image
+    axs.append(f.add_subplot(gs_sub[2:size_xy, -size_c+1:]))  # right colorbar
+
+    axs.append(f.add_subplot(gs_sub[:size_xy, :size_c]))
+    axs.append(f.add_subplot(gs_sub[:size_c, :size_xy]))
+    axs.append(f.add_subplot(gs_sub[:size_xy, size_xy:size_xy + size_c]))
+
+    # size_p = 2
+    # size_xy = 5
+    # size_z = 2
+    # size_t = size_p + size_xy + size_z
+
+    # gs_sub = gs.subgridspec(size_t, size_t)
+
+    # # central: yx-image
+    # axs.append(f.add_subplot(gs_sub[size_p:size_p+size_xy, size_p:size_p+size_xy]))
+    # # middle-bottom: zx-image
+    # axs.append(f.add_subplot(gs_sub[size_p+size_xy:, size_p:size_p+size_xy], sharex=axs[0]))
+    # # right-middle: zy-image
+    # axs.append(f.add_subplot(gs_sub[size_p:size_p+size_xy, size_p+size_xy:], sharey=axs[0]))
+
+    # # right-top: z-profiles
+    # axs.append(f.add_subplot(gs_sub[:size_p, size_p+size_xy:], sharex=axs[2]))
+    # # left-middle: y-profiles
+    # axs.append(f.add_subplot(gs_sub[size_p:size_p+size_xy, :size_p], sharey=axs[0]))
+    # # middle-top: x-profiles
+    # axs.append(f.add_subplot(gs_sub[:size_p, size_p:size_p+size_xy], sharex=axs[0]))
 
     return axs
 

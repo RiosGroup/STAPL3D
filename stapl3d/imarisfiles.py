@@ -1,3 +1,9 @@
+#!/usr/bin/env python
+
+"""Perform planarity estimation.
+
+"""
+
 import os
 import sys
 import argparse
@@ -17,6 +23,7 @@ import yaml
 import xml.etree.ElementTree as ET
 
 from stapl3d import (
+    parse_args_common,
     get_n_workers,
     get_outputdir,
     get_imageprops,
@@ -25,10 +32,35 @@ from stapl3d import (
     Image,
     )
 
+
+def main(argv):
+    """"Enhance the membrane with ACME.
+
+    """
+
+    # TODO: aggregate channels
+    step_ids = ['split_channels', 'aggregate_channels']
+    fun_selector = {
+        'split': split_channels,
+        'aggregate': aggregate_channels,
+        }
+
+    args, mapper = parse_args_common(step_ids, fun_selector, *argv)
+
+    for step, step_id in mapper.items():
+        fun_selector[step](
+            args.image_in,
+            args.parameter_file,
+            step_id,
+            args.outputdir,
+            args.n_workers,
+            )
+
+
 def split_channels(
     image_in,
     parameter_file,
-    step_id='splitchannels',
+    step_id='split_channels',
     outputdir='',
     n_workers=0,
     channels=[],
@@ -212,6 +244,36 @@ def correct_histogram(infile):
     f.close()
 
 
+def aggregate_channels(
+    image_in,
+    parameter_file,
+    step_id='aggregate_channels',
+    outputdir='',
+    n_workers=0,
+    channel_pat='_ch??',
+    postfix='',
+    color=[1, 1, 1],
+    crange=[0, 20000],
+    ):
+
+    # TODO make option to get params from yml
+    # split image_in on channel_pat to get inputstem [and postfix if doesn't exist]
+
+    paths = get_paths(image_in)
+
+    # outputfile =
+    # ref_path =
+    # inputstem = paths['base']
+    # make_aggregate(
+    #     outputfile,
+    #     ref_path,
+    #     inputstem,
+    #     channel_pat,
+    #     postfix,
+    #     color,
+    #     crange,
+    #     )
+
 def make_aggregate(outputfile, ref_path,
                    inputstem, channel_pat='_ch??', postfix='',
                    color=[1, 1, 1], crange=[0, 20000]):
@@ -323,6 +385,7 @@ def find_downsample_factors(image_in, rl0_idx, rl1_idx):
     if im.format == '.ims':
         dims0 = find_dims(im, rl0_idx)
         dims1 = find_dims(im, rl1_idx)
+        print(dims0, dims1)
         dsfacs = np.around(np.array(dims0) / np.array(dims1)).astype('int')
     elif im.format == '.bdv':
         dsfacs = im.file['s00/resolutions'][rl1_idx, :][::-1]
@@ -337,11 +400,12 @@ def aggregate_h5(outputfile, inputstem, channel_pat='_ch??', postfix='', xml_ref
 
     inputfiles = glob('{}{}{}.h5'.format(inputstem, channel_pat, postfix))
     inputfiles.sort()
+    print(inputfiles)
 
     channels = [
         {
          'filepath': inputfile,
-         'Name': 'data',
+         'Name': 'data',  # TODO flexibilolize in argument
          'xml_ref': xml_ref,
          } for i, inputfile in enumerate(inputfiles)]
 
@@ -452,7 +516,6 @@ def aggregate_bigstitcher_channels(tgt_file, channels, ch_offset=0, ext='.h5'):
         ext_loc = '/t00000/s00'
         create_ext_link(f, tgt_loc, ext_file, ext_loc)
 
-        """
         for k, rl in f[tgt_loc].items():
             ds = rl['cells'.format(tgt_loc)]
             res = f[ch_dict['Name']]['resolutions'][int(k), :]
@@ -460,7 +523,7 @@ def aggregate_bigstitcher_channels(tgt_file, channels, ch_offset=0, ext='.h5'):
             ds.attrs['element_size_um'] = elsize_xyz_rl[::-1]
             for i, label in enumerate('zyx'):
                 ds.dims[i].label = label
-        """
+
 
 def bdv_to_virtual(outputfile, inputfile, reslev=0):
 
@@ -503,3 +566,6 @@ def h5chs_to_virtual(outputfile, inputstem, channel_pat='_ch??', postfix=''):
         outputfile = '{}{}{}'.format(filestem, '_virt', ext)
     with h5py.File(outputfile, 'w', libver='latest') as f:
         f.create_virtual_dataset('data', layout, fillvalue=0)
+
+if __name__ == "__main__":
+    main(sys.argv[1:])

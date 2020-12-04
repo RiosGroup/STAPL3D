@@ -284,13 +284,16 @@ def stardist_predict(basedir, modelname, image_in, idx, normalization=[],
     # Load data
     im = Image(image_in, permission='r')
     im.load(load_data=False)
+    comps = im.split_path()
     if image_in.endswith('.ims'):
         h5ds = im.file['/DataSet/ResolutionLevel 0/TimePoint 0/Channel 0/Data']
         props = im.squeeze_props(im.squeeze_props(dim=4), dim=3)
+    else:
+        h5ds = im.file[comps['int']]
+        props = im.get_props()
 
     # Outputdir
-    comps = im.split_path()
-    blockdir = os.path.join(comps['dir'], 'blocks_stardist')
+    blockdir = os.path.join(comps['dir'], 'blocks_stardist')  # FIXME
     os.makedirs(blockdir, exist_ok=True)
     outputstem = outputstem or os.path.join(blockdir, comps['fname'])
 

@@ -2,6 +2,15 @@
 
 """Generate a mask that covers the tissue.
 
+    # TODO: logging
+    # logging.basicConfig(filename='{}.log'.format(outputstem), level=logging.INFO)
+
+    # TODO: calculated parameters (thresholds) to yml instead of pickle
+    # TODO: report: thresholds to values, not indices.
+    # TODO: plot thresholds as contours
+    # TODO: plot gradient image as background?
+    # TODO: add otsu auto-threshold; as in equalization
+
 """
 
 import os
@@ -15,31 +24,19 @@ import multiprocessing
 import matplotlib
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
+import matplotlib.colors as colors
 
 import numpy as np
+
+from copy import copy
 
 from scipy.ndimage.filters import gaussian_filter
 from scipy.ndimage.morphology import binary_fill_holes
 from scipy.ndimage import distance_transform_edt
 
-from stapl3d import (
-    parse_args_common,
-    get_outputdir,
-    get_imageprops,
-    get_params,
-    get_paths,
-    Image,
-    MaskImage,
-    )
-
-from stapl3d.imarisfiles import (
-    find_resolution_level,
-    )
-
-from stapl3d.reporting import (
-    gen_orthoplot_with_colorbar,
-    get_centreslices,
-    )
+from stapl3d import parse_args, Stapl3r, Image, MaskImage, get_paths, get_imageprops
+from stapl3d.imarisfiles import find_resolution_level
+from stapl3d.reporting import gen_orthoplot_with_colorbar, get_centreslices
 
 logger = logging.getLogger(__name__)
 
@@ -47,144 +44,291 @@ logger = logging.getLogger(__name__)
 def main(argv):
     """Generate a mask that covers the tissue."""
 
-    step_ids = ['mask']
-    fun_selector = {
-        'estimate': estimate,
-        }
+    steps = ['estimate']
+    args = parse_args('mask', steps, *argv)
 
-    args, mapper = parse_args_common(step_ids, fun_selector, *argv)
+    masker = Masker(
+        args.image_in,
+        args.parameter_file,
+        step_id=args.step_id,
+        directory=args.outputdir,
+        dataset=args.dataset,
+        suffix=args.suffix,
+        n_workers=args.n_workers,
+    )
 
-    outputdir = get_outputdir(args.image_in, args.parameter_file, args.outputdir, step_ids[0])  # FIXME
+    for step in args.steps:
+        masker._fun_selector[step]()
 
-    for step, step_id in mapper.items():
-        fun_selector[step](
-            args.image_in,
-            args.parameter_file,
-            step_id,
-            outputdir,
-            args.n_workers,
+
+class Masker(Stapl3r):
+    """Generate a mask that covers the tissue."""
+
+    def __init__(self, image_in='', parameter_file='', **kwargs):
+
+        super(Masker, self).__init__(
+            image_in, parameter_file,
+            module_id='mask',
+            **kwargs,
             )
 
-def estimate(
-    image_in,
-    parameter_file,
-    step_id='mask',
-    outputdir='',
-    resolution_level=-1,
-    sigma=48.0,
-    use_median_thresholds=False,
-    median_factor=1,
-    abs_threshold=1000,
-    thresholds=[500, 1000, 2000, 3000, 4000, 5000],
-    postfix='',
-    ):
-    """Generate a mask that covers the tissue."""
+        self._fun_selector = {
+            'estimate': self.estimate,
+            }
 
-    outputdir = get_outputdir(image_in, parameter_file, outputdir, step_id)
+        default_attr = {
+            'step_id': 'mask',
+            'inputpath': True,
+            'resolution_level': -1,
+            'sigma': 48.0,
+            'use_median_thresholds': True,
+            'median_factor': 3,
+            'abs_threshold': 0,
+            'thresholds': [],
+            'thresholds_slicewise': [],
+            'distance_to_edge': True,
+        }
+        for k, v in default_attr.items():
+            setattr(self, k, v)
 
-    params = get_params(locals().copy(), parameter_file, step_id)
+        for step in self._fun_selector.keys():
+            self.set_parameters(step)
 
-    generate_dataset_mask(
-        image_in,
-        params['resolution_level'],
-        params['sigma'],
-        params['use_median_thresholds'],
-        params['median_factor'],
-        params['abs_threshold'],
-        params['thresholds'],
-        params['distance_to_edge'],
-        params['postfix'],
-        step_id,
-        outputdir,
-        )
+        # TODO?
+        # self._image_rl = None
+        # self._image_mean = None
+        # self._image_smooth = None
+        # self._image_mask = None
+        # self._image_dist = None
+
+        self._parsets = {'estimate': {
+            'fpar': self._FPAR_NAMES + ('inputpath', 'resolution_level'),
+            'ppar': ('sigma', 'use_median_thresholds', 'median_factor',
+                     'abs_threshold', 'thresholds', 'thresholds_slicewise',
+                     'distance_to_edge'),
+            'spar': ('n_workers',),
+        }}
+
+        # TODO: merge with parsets
+        self._partable = {
+            'resolution_level': 'Image pyramid resolution level',
+            'sigma': 'Smoothing sigma',
+            'use_median_thresholds': 'Use median threshold method',
+            'abs_threshold': 'Absolute threshold',
+            }
+
+    def estimate(self, **kwargs):
+        """Generate a mask that covers the tissue.
+
+        # resolution_level=-1,
+        # sigma=48.0,
+        # use_median_thresholds=True,
+        # median_factor=3,
+        # abs_threshold=0,
+        # thresholds=[],
+        # distance_to_edge=True,
+        # inputpath=True,
+        """
+
+        self.set_parameters('estimate', kwargs)
+        self._set_inputpath('stitching', 'fuse', '{}.bdv', fallback=self.image_in)
+        self.dump_parameters(step=self.step)
+        self._generate_dataset_mask()
+
+    def _generate_dataset_mask(self):
+        """Generate a mask that covers the tissue."""
+
+        outstem = os.path.join(self.directory, self.format_())
+        outputpat = '{}.h5/{}'.format(outstem, '{}')
+
+        if ('.ims' in self.inputpath or '.bdv' in self.inputpath) and self.resolution_level == -1:
+            self.resolution_level = find_resolution_level(self.inputpath)
+            print('Using resolution level {}'.format(self.resolution_level))
+
+        im_data = extract_resolution_level(self.inputpath, self.resolution_level)
+
+        im_mean, meds = extract_mean(im_data, 'c', True, outputpat)
+
+        im_smooth = extract_smooth(im_mean, self.sigma, True, outputpat)
+
+        self.set_thresholds(self.thresholds, meds, im_data.dims[im_data.axlab.index('z')], im_data.dtype)
+
+        im_mask = postproc_masks(im_smooth, self.thresholds_slicewise, True, outputpat)
+
+        if self.distance_to_edge:
+            im_edt = calculate_distance_to_edge(im_mask, outputpat)
+            im_edt.close()
+
+        im_data.close()
+        im_mean.close()
+        im_smooth.close()
+        im_mask.close()
+
+        self.dump_parameters(step=self.step)
+        self.report()
+
+    def set_thresholds(self, thrs, meds, n_planes, dtype, facs=[0.01, 0.1, 0.2, 0.5, 1.0, 2.0]):
+
+        # TODO: otsu?
+
+        if not thrs:
+            thrs = [max(meds) * fac for fac in facs]
+        if self.abs_threshold:
+            thrs = sorted(list(set(thrs) | set([self.abs_threshold])))
+
+        self.thresholds = [float(t) for t in thrs]
+
+        if self.use_median_thresholds:
+            self.thresholds_slicewise = [max(self.abs_threshold, m / self.median_factor) for m in meds]
+        else:
+            self.thresholds_slicewise = [self.abs_threshold for _ in range(0, n_planes)]
+
+        self.thresholds_slicewise = [float(t) for t in self.thresholds_slicewise]
+
+    def _get_info_dict(self, filestem, info_dict={}, channel=None):
+
+        info_dict['parameters'] = self.load_dumped_pars()
+
+        filepath = '{}.h5/mean'.format(filestem)
+        info_dict['props'] = get_imageprops(filepath)
+        info_dict['paths'] = get_paths(filepath)
+        info_dict['centreslices'] = get_centreslices(info_dict)
+
+        return info_dict
+
+    def _gen_subgrid(self, f, gs, channel=None):
+        """3rows-2 columns: 3 image-triplet left, three plots right"""
+
+        axdict, titles = {}, {}
+        gs0 = gs.subgridspec(2, 1, height_ratios=[1, 10])
+        axdict['p'] = self._report_axes_pars(f, gs0[0])
+
+        gs01 = gs0[1].subgridspec(3, 2, wspace=0.9)
+        # FIXME: this wspace=0.9 is because the axis sharing isnt working properly
+
+        idss = ['mean', 'smooth', 'contours', 'z', 'mask', 'dist2edge']
+        axdict.update({k: gen_orthoplot_with_colorbar(f, gs01[i], idx=i)
+                       for i, k in enumerate(idss)})
+
+        for ax in axdict['z']: ax.axis('off')
+        axdict['z'] = f.add_subplot(gs01[1, 1])
+        axdict['z'].tick_params(axis='both', direction='in')
+        for l in ['top', 'right']:
+            axdict['z'].spines[l].set_visible(False)
+
+        # Axes titles
+        titles = {
+            'mean': ('Mean over channels', 'lcm', 0),
+            'smooth': ('Smoothed mean', 'rcm', 2),
+            'contours': ('Thresholds', 'lcm', 0),
+            'z': ('Z thresholds', 'rc', 0),
+            'mask': ('Mask', 'lcm', 0),
+            'dist2edge': ('Distance to mask', 'rcm', 2),
+            }
+        self._add_titles(axdict, titles)
+
+        return axdict
+
+    def _plot_images(self, f, axdict, info_dict={}):
+        """Show images in report."""
+
+        # def plot_colorbar(ax, im, cax=None, loc='right'):
+        #     cbar = f.colorbar(im, cax=cax, extend='both', shrink=0.9, ax=ax)
+        #     cbar.ax.tick_params(labelsize=7)
+        #     cax.yaxis.set_ticks_position(loc)
+        #     return cbar
+
+        # def get_extent(img, elsize, x_idx=2, y_idx=1):
+        #     w = elsize[x_idx] * img.shape[1]
+        #     h = elsize[y_idx] * img.shape[0]
+        #     extent = [0, w, 0, h]
+        #     return extent
+
+        # def get_clim(cslc):
+        #     c_min = np.amin([np.quantile(cslc[d], 0.05) for d in 'xyz'])
+        #     c_max = np.amax([np.quantile(cslc[d], 0.95) for d in 'xyz'])
+        #     c_min = self._power_rounder(c_min)
+        #     c_max = self._power_rounder(c_max)
+        #     # TODO: c_min should never be c_max
+        #     return [c_min, c_max]
+
+        cslcs = info_dict['centreslices']
+        clim_mean = self._get_clim(cslcs['mean'])
+        if 'dist2edge' in cslcs.keys():
+            clim_d2e = self._get_clim(cslcs['dist2edge'])
+        # print([clim_mean, clim_d2e])
+
+        for k, v in cslcs.items():
+            cslcs[k]['x'] = cslcs[k]['x'].transpose()
+
+        palette = copy(plt.cm.gray)
+        palette.set_bad('g', 1.0)
+        vol_dict = {
+            'mean':      ('right', 'gray',  clim_mean),
+            'smooth':    ('left',  'jet',   clim_mean),
+            'contours':  ('right', 'gray',  clim_mean),
+            'mask':      ('right', palette, clim_mean),
+            }
+        if 'dist2edge' in cslcs.keys():
+            vol_dict['dist2edge'] = ('left',  'rainbow', clim_d2e)
+
+        for k, (loc, cmap, clim) in vol_dict.items():
+
+            for d, aspect, ax_idx in zip('xyz', ['auto', 'auto', 'equal'], [2, 1, 0]):
+
+                ax = axdict[k][ax_idx]
+
+                extent = self._get_extent(cslcs['mean'][d], info_dict['props']['elsize'])
+
+                if k == 'contours':
+                    thrs = info_dict['parameters']['thresholds']
+                    im = ax.imshow(cslcs['mean'][d], cmap=cmap, aspect=aspect)
+                    cs = ax.contour(cslcs['smooth'][d], thrs, cmap=plt.cm.rainbow)
+                    if d == 'z':  # add labels to xy-slice
+                        ax.clabel(cs, inline=1, fontsize=7)
+                        labels = ['thr={}'.format(thr) for thr in thrs]
+                        for i in range(len(labels)):
+                            cs.collections[i].set_label(labels[i])
+                elif k == 'mask':
+                    # clipped = self._clipped_colormap(clip_threshold, clip_color, n_colors)
+                    im = ax.imshow(
+                        np.ma.masked_where(~cslcs['mask'][d].astype('bool'), cslcs['mean'][d]),
+                        interpolation='bilinear', cmap=cmap,
+                        norm=colors.Normalize(vmin=-1.0, vmax=1.0),
+                        aspect=aspect, extent=extent,
+                        )
+                else:
+                    im = ax.imshow(cslcs[k][d], cmap=cmap, extent=extent, aspect=aspect)
+
+                im.set_clim(clim[0], clim[1])
+                ax.axis('off')
+
+                if ax_idx == 0:
+                    self._plot_colorbar(f, ax, im, cax=axdict[k][3], loc=loc)
+                    if k == 'mean':
+                        self._add_scalebar(ax, extent[1])
+
+    def _plot_profiles(self, f, axdict, info_dict={}):
+        """Show profiles in report."""
+
+        ax = axdict['z']
+        ax.plot(info_dict['parameters']['thresholds_slicewise'],
+                color='k', linewidth=1, linestyle='-')
+        ax.set_xlabel('section index', fontsize=7, loc='right')
 
 
-def generate_dataset_mask(
-    image_in,
-    resolution_level=-1,
-    sigma=48.0,
-    use_median_thresholds=False,
-    median_factor=1,
-    abs_threshold=1000,
-    thresholds=[500, 1000, 2000, 3000, 4000, 5000],
-    distance_to_edge=True,
-    postfix='',
-    step_id='mask',
-    outputdir='',
-    ):
-    """Generate a mask that covers the tissue."""
-
-    # Prepare the output.
-    postfix = postfix or '_{}'.format(step_id)
-
-    outputdir = get_outputdir(image_in, '', outputdir, step_id, step_id)
-
-    paths = get_paths(image_in, resolution_level)
-    datadir, filename = os.path.split(paths['base'])
-    dataset, ext = os.path.splitext(filename)
-
-    filestem = '{}{}'.format(dataset, postfix)
-    outputstem = os.path.join(outputdir, filestem)
-    outputpat = '{}.h5/{}'.format(outputstem, '{}')
-
-    logging.basicConfig(filename='{}.log'.format(outputstem), level=logging.INFO)
-    report = {'parameters': locals()}
-
-    if ('.ims' in image_in or '.bdv' in image_in) and resolution_level == -1:
-        resolution_level = find_resolution_level(image_in)
-    im_data = extract_resolution_level(image_in, resolution_level)
-
-    im_mean, slc_thrs = extract_mean(im_data, 'c', True, outputpat)
-
-    im_smooth = extract_smooth(im_mean, sigma, True, outputpat)
-
-    if abs_threshold not in thresholds:
-        thresholds.append(abs_threshold)
-        thresholds.sort()
-
-    im_thr = extract_masks(im_smooth, thresholds, outputpat)
-
-    if use_median_thresholds:
-        slc_thrs = [max(abs_threshold, m / median_factor) for m in slc_thrs]
-    else:
-        n_planes = im_smooth.dims[im_smooth.axlab.index('z')]
-        slc_thrs = [abs_threshold for _ in range(0, n_planes)]
-
-    report['parameters']['simple_thresholds'] = thresholds
-    report['parameters']['slicewise_thresholds'] = slc_thrs
-
-    im_mask = postproc_masks(im_smooth, slc_thrs, True, outputpat)
-
-    if distance_to_edge:
-        im_edt = calculate_distance_to_edge(im_mask, outputpat)
-
-    # Save parameters.
-    with open('{}.pickle'.format(outputstem), 'wb') as f:
-        pickle.dump(report['parameters'], f, pickle.HIGHEST_PROTOCOL)
-
-    # Print a report page to pdf.
-    generate_report(outputdir, dataset, ioff=True)
-
-    im_data.close()
-    im_mean.close()
-    im_smooth.close()
-    im_mask.close()
-    if distance_to_edge:
-        im_edt.close()
-    for im in im_thr:
-        im.close()
-
-
-def extract_resolution_level(image_in, resolution_level):
+def extract_resolution_level(image_in, resolution_level=-1):
     """Extract data from a 5D Imaris image pyramid and create 4D image."""
 
+    # TODO: handle this in Image class when providing reslev as __init__ argument
     if resolution_level != -1:
+        # FIXME: this is only ims, TODO bdv etc
         image_in = '{}/DataSet/ResolutionLevel {}'.format(image_in, resolution_level)
 
-    mo = Image(image_in, permission='r', reslev=resolution_level)
-    mo.load(load_data=False)
+    im = Image(image_in, permission='r', reslev=resolution_level)
+    im.load(load_data=False)
 
-    return mo
+    return im
 
 
 def extract_mean(im, dim='c', keep_dtype=True, output=''):
@@ -262,37 +406,6 @@ def extract_smooth(im, sigma=48.0, keep_dtype=True, output=''):
     return mo
 
 
-def extract_masks(im, thresholds=[1000], output=''):
-    """Generate a series masks at different thresholds."""
-
-    data = im.slice_dataset()
-
-    if np.issubdtype(data.dtype, np.integer):
-        fstring = 'mask_thr{:05d}'
-    else:
-        fstring = 'mask_thr{:.5f}'
-
-    mos = []
-    c_slcs = {}
-    for thr in thresholds:
-
-        ods = fstring.format(thr)
-
-        outputpath = ''
-        if output:
-            outputpath = output.format(ods)
-
-        props = im.get_props(dtype='bool', squeeze=True)
-        mo = MaskImage(outputpath, **props)
-        mo.create()
-        mask = data > thr
-        mo.write(mask)
-
-        mos.append(mo)
-
-    return mos
-
-
 def postproc_masks(im, thrs=[], fill_holes=True, output=''):
     """Apply slicewise thresholds to data and fill holes.
 
@@ -352,224 +465,6 @@ def write_data(data, props, out_template='', ods=''):
     # mo.close()
 
     return mo
-
-
-def plot_params(f, axdict, info_dict={}):
-    """Show images in report."""
-
-    pars = {'resolution_level': 'Image pyramid resolution level',
-            'sigma': 'Smoothing sigma',
-            'use_median_thresholds': 'Use median threshold method',
-            'abs_threshold': 'Absolute threshold',
-            'thresholds': 'Thresholds visualized',
-            'distance_to_edge': 'Distance to edge calculated',
-            'postfix': 'Mask postfix'}
-
-    cellText = []
-    for par, name in pars.items():
-        v = info_dict['parameters'][par]
-        if not isinstance(v, list):
-            v = [v]
-        cellText.append([name, ', '.join(str(x) for x in v)])
-
-    axdict['p'].table(cellText, loc='bottom')
-    axdict['p'].axis('off')
-
-
-def plot_images(f, axdict, info_dict={}, res=10000, add_profiles=True):
-    """Show images in report."""
-
-    def plot_colorbar(ax, im, cax=None):
-        from mpl_toolkits.axes_grid1 import make_axes_locatable
-        divider = make_axes_locatable(ax)
-        if cax is None:
-            cax = divider.append_axes('top', size='5%', pad=0.05)
-        cbar = f.colorbar(im, cax=cax, orientation='horizontal')
-        return cbar
-
-    def get_img(cslsc, ax_idx, dims):
-        img = cslsc
-        if ax_idx == 2:  # zy-image
-            dims[0] = img.shape[0]
-            img = img.transpose()
-        if ax_idx == 0:  # yx-image
-            dims[1:] = img.shape
-        return img, dims
-
-    centreslices = info_dict['centreslices']
-    #meds = info_dict['medians']
-
-    y_min, y_max = 0, 0
-    dims = [0, 0, 0]
-
-    bf_dict = {'mean': (0, 'r'), 'smooth': (1, 'g'), 'masks': (2, 'b'),
-               'mask': (3, 'c'), 'dist2edge': (3, 'c')}
-
-    aspects = ['auto', 'auto', 'auto']
-    for dim, aspect, ax_idx in zip('xyz', aspects, [2, 1, 0]):
-        for k, v in bf_dict.items():
-
-            if k == 'masks':
-                img, dims = get_img(centreslices['mean'][dim], ax_idx, dims)
-                img = np.zeros_like(img, dtype='uint8')
-                for ids in centreslices.keys():
-                    if ids.startswith('mask'):
-                        img += get_img(centreslices[ids][dim], ax_idx, dims)[0]
-                axdict[k][ax_idx].imshow(img, cmap='gist_rainbow', aspect=aspect)
-            elif k == 'mask':
-                img, dims = get_img(centreslices['mean'][dim], ax_idx, dims)
-                limg, dims = get_img(centreslices[k][dim], ax_idx, dims)
-                from skimage.segmentation import find_boundaries
-                b = find_boundaries(limg)
-                bg = np.zeros_like(img)
-                bg[~limg] = 8
-                #bg[b] = 0
-                axdict[k][ax_idx].imshow(bg, cmap='gist_rainbow', aspect=aspect)
-                img = np.ma.masked_where(~limg, img)
-                axdict[k][ax_idx].imshow(img, cmap='gray', aspect=aspect)
-            elif k == 'dist2edge':
-                if 'dist2edge' not in centreslices.keys():
-                    continue
-                img, dims = get_img(centreslices[k][dim], ax_idx, dims)
-                im = axdict[k][ax_idx].imshow(img, cmap='rainbow', aspect=aspect)
-            elif k == 'smooth':
-                img, dims = get_img(centreslices[k][dim], ax_idx, dims)
-                im = axdict[k][ax_idx].imshow(img, cmap='jet', aspect=aspect)
-            else:
-                img, dims = get_img(centreslices[k][dim], ax_idx, dims)
-                im = axdict[k][ax_idx].imshow(img, cmap='gray', aspect=aspect)
-
-            axdict[k][ax_idx].axis('off')
-            y_min = min(y_min, np.floor(np.amin(img) / res) * res)
-            y_max = max(y_max, np.ceil(np.amax(img) / res) * res)
-
-    y_min, y_max = 0, 10000  # FIXME
-    clim_dict = {'gray': [0, 10000], 'Greys': [0, 10000], 'jet': [0, 10000],
-                 'rainbow': [0, 2000],
-                 'gist_rainbow': [0, 10], 'inferno': [0, 5]}
-
-    vols = ['mean', 'smooth', 'masks', 'mask']
-    if 'dist2edge' in centreslices.keys():
-        vols += ['dist2edge']
-    for i in [0, 1, 2]:
-        for k in vols:
-            for im in axdict[k][i].get_images():
-                cld = clim_dict[im.cmap.name]
-                im.set_clim(cld[0], cld[1])
-            if i == 0:
-                plot_colorbar(axdict[k][i], im, axdict[k][3])
-
-
-def plot_profiles(f, axdict, info_dict={}):
-    """Show images in report."""
-
-    axdict['z'].plot(info_dict['parameters']['slicewise_thresholds'], color='r', linewidth=1, linestyle='-')
-
-
-def gen_subgrid(f, gs, fsize=7, channel=None, metric='median'):
-    """3rows-2 columns: 3 image-triplet left, three plots right"""
-
-    fdict = {'fontsize': fsize,
-     'fontweight' : matplotlib.rcParams['axes.titleweight'],
-     'verticalalignment': 'baseline'}
-
-    gs0 = gs.subgridspec(2, 1, height_ratios=[1, 10])
-
-    gs00 = gs0[0].subgridspec(10, 1)
-    gs01 = gs0[1].subgridspec(3, 2)
-
-    axdict = {k: gen_orthoplot_with_colorbar(f, gs01[i])
-              for i, k in enumerate(['mean', 'smooth', 'masks', 'mask', 'dist2edge'])}
-
-    axdict['p'] = f.add_subplot(gs00[0, 0])
-    axdict['p'].set_title('parameters', fdict, fontweight='bold')
-    axdict['p'].tick_params(axis='both', labelsize=fsize, direction='in')
-
-    axdict['z'] = f.add_subplot(gs01[2, 1])
-    axdict['z'].set_title('Z thresholds', fdict, fontweight='bold', loc='right')
-    axdict['z'].tick_params(axis='both', labelsize=fsize, direction='in')
-
-    return axdict
-
-
-def add_titles(axs, info_dict):
-    """Add plot titles to upper row of plot grid."""
-
-    try:
-        params = info_dict['parameters']
-    except KeyError:
-        params = {
-            'n_channels': '???',
-            'sigma': '???',
-            'simple_thresholds': '???',
-            'use_median_thresholds': '???',
-            'abs_threshold': '???',
-            }
-
-    titles = []
-
-    l1 = '{}-channel mean'.format(params['n_channels'])
-    l2 = ''
-    titles.append('{} \n {}'.format(l1, l2))
-
-    l1 = 'smoothed (in-plane)'
-    l2 = 'sigma = {}'.format(params['sigma'])
-    titles.append('{} \n {}'.format(l1, l2))
-
-    l1 = 'some masks'
-    l2 = 'thrs = {}'.format(params['simple_thresholds'])
-    titles.append('{} \n {}'.format(l1, l2))
-
-    l1 = 'final mask'
-    l0 = 'median' if params['use_median_thresholds'] else 'absolute'
-    l2 = 'using {} threshold: thr = {}'.format(l0, params['abs_threshold'])
-    titles.append('{} \n {}'.format(l1, l2))
-
-    for j, title in enumerate(titles):
-        axs[j][0].set_title(title)
-
-
-def get_info_dict(image_in, info_dict={}, report_type='bfc', channel=0):
-
-    im = Image(image_in)
-    im.load(load_data=False)
-    info_dict['elsize'] = {dim: im.elsize[i] for i, dim in enumerate(im.axlab)}
-    info_dict['paths'] = im.split_path()  # FIXME: out_base
-    info_dict['paths']['out_base'] = info_dict['paths']['base']
-    im.close()
-
-    ppath = '{}.pickle'.format(info_dict['paths']['base'])
-    with open(ppath, 'rb') as f:
-        info_dict['parameters'] = pickle.load(f)
-    info_dict['centreslices'] = get_centreslices(info_dict)
-
-    return info_dict
-
-
-def generate_report(outputdir, dataset, ioff=False):
-
-    chsize = (11.69, 8.27)  # A4 portrait
-    figtitle = 'STAPL-3D Z-stack mask report'
-    filestem = os.path.join(outputdir, dataset)
-
-    figtitle = '{} \n {}'.format(figtitle, dataset)
-    subplots = [1, 1]
-
-    figsize = (chsize[1]*subplots[1], chsize[0]*subplots[0])
-    f = plt.figure(figsize=figsize, constrained_layout=False)
-    gs = gridspec.GridSpec(subplots[0], subplots[1], figure=f)
-
-    axdict = gen_subgrid(f, gs[0])
-    image_in = '{}_mask.h5/mean'.format(filestem)
-    info_dict = get_info_dict(image_in, channel=0)
-    plot_params(f, axdict, info_dict)
-    plot_images(f, axdict, info_dict)
-    plot_profiles(f, axdict, info_dict)
-
-    f.suptitle(figtitle, fontsize=14, fontweight='bold')
-    f.savefig('{}_mask.pdf'.format(filestem))
-    if ioff:
-        plt.close(f)
 
 
 if __name__ == "__main__":

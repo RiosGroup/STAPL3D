@@ -2,6 +2,7 @@
 
 """Average membrane and nuclear channels and write as blocks.
 
+    # TODO: reports
 """
 
 import os
@@ -19,531 +20,645 @@ import numpy as np
 from skimage.transform import resize
 from skimage.segmentation import relabel_sequential
 
-from stapl3d import (
-    parse_args_common,
-    get_outputdir,
-    get_params,
-    get_blockinfo,
-    get_n_blocks,
-    get_n_workers,
-    get_paths,
-    get_ims_ref_path,
-    Image,
-    wmeMPI,
-    get_blockfiles,
-    get_imageprops,
-    LabelImage,
-    split_filename,
-    )
+from stapl3d import parse_args, Stapl3r, Image, LabelImage, format_, split_filename
+from stapl3d.preprocessing.biasfield import write_image, get_bias_field_block
+
+import glob
+import h5py
+import pathlib
 
 logger = logging.getLogger(__name__)
 
 
 def main(argv):
-    """Correct z-stack shading.
+    """Block operations."""
 
-    """
+    steps = ['split', 'merge']
+    args = parse_args('blocks', steps, *argv)
 
-    step_ids = ['splitblocks', 'mergeblocks']
-    fun_selector = {
-        'split': split,
-        'merge': merge,
-        }
+    subclasses = {'split': Splitter, 'merge': Merger}
 
-    args, mapper = parse_args_common(step_ids, fun_selector, *argv)
-
-    for step, step_id in mapper.items():
-        fun_selector[step](
+    for step in args.steps:
+        blocker = subclasses[step](
             args.image_in,
             args.parameter_file,
-            step_id,
-            args.outputdir,
-            args.n_workers,
+            step_id=args.step_id,
+            directory=args.outputdir,
+            dataset=args.dataset,
+            suffix=args.suffix,
+            n_workers=args.n_workers,
+        )
+        blocker._fun_selector[step]()
+
+
+class Block(object):
+    """Block."""
+
+    def __init__(self, id='', path='', slices={}, **kwargs):
+
+        self.id = id
+        self.path = path
+        self.slices = slices
+        self.shape = {}
+        self.margin = {}
+
+    def __str__(self):
+        return yaml.dump(vars(self), default_flow_style=False)
+
+
+class Blocker(Stapl3r):
+    """Block operations."""
+
+    def __init__(self, image_in='', parameter_file='', **kwargs):
+
+        super(Blocker, self).__init__(
+            image_in, parameter_file,
+            **kwargs,
             )
 
+        self._fun_selector = {
+            'blockinfo': self.print_blockinfo,
+            }
 
-def split(
-    image_in,
-    parameter_file='',
-    step_id='splitblocks',
-    outputdir='',
-    n_workers=0,
-    blocksize=[],
-    blockmargin=[],
-    blocks=[],
-    bias_image='',
-    bias_dsfacs=[1, 64, 64, 1],
-    memb_idxs=None,
-    memb_weights=[],
-    nucl_idxs=None,
-    nucl_weights=[],
-    mean_idxs=None,
-    mean_weights=[],
-    output_channels=None,
-    datatype='',
-    chunksize=[],
-    outputtemplate='',
-    ):
-    """Average membrane and nuclear channels and write as blocks."""
+        default_attr = {
+            'step_id': 'blocks',
+            'blocksize_xy': 640,
+            'blockmargin_xy': 64,
+            'blocksize': {},
+            'blockmargin': {},
+            'blockfiles': [],
+            'fullsize': {},
+            'filepat': '',
+            '_blocks': [],
+        }
+        for k, v in default_attr.items():
+            setattr(self, k, v)
 
-    outputdir = get_outputdir(image_in, parameter_file, outputdir, 'blocks', 'blocks')
+        for step in self._fun_selector.keys():
+            self.set_parameters(step)
 
-    params = get_params(locals().copy(), parameter_file, step_id)
-    subparams = get_params(locals().copy(), parameter_file, step_id, 'submit')
+        self.set_blocksize()
+        self.set_blockmargin()
+        self.set_blocks()
+        self.set_blockfiles()
 
-    blocksize, blockmargin, blocks = get_blockinfo(image_in, parameter_file, params)
+        self._parsets = {
+            'split': {
+                'fpar': self._FPAR_NAMES,
+                'ppar': ('blocksize_xy', 'blockmargin_xy', 'fullsize'),
+                'spar': ('n_workers', 'blocksize', 'blockmargin', '_blocks'),
+                },
+            }
 
-    arglist = [
-        (
-            image_in,
-            blocksize,
-            blockmargin,
-            [b_idx, b_idx + 1],
-            params['bias_image'],
-            params['bias_dsfacs'],
-            params['memb_idxs'],
-            params['memb_weights'],
-            params['nucl_idxs'],
-            params['nucl_weights'],
-            params['mean_idxs'],
-            params['mean_weights'],
-            params['output_channels'],
-            params['datatype'],
-            params['chunksize'],
-            params['outputtemplate'],
-            step_id,
-            outputdir,
-        )
-        for b_idx in blocks]
+        # TODO: merge with parsets?
+        self._partable = {}
 
-    n_workers = get_n_workers(len(blocks), subparams)
-    with multiprocessing.Pool(processes=n_workers) as pool:
-        pool.starmap(split_with_combinechannels, arglist)
+    def print_blockinfo(self):
+        # TODO
+        # print(self.dump_parameters(write=False))
+        # for i, block in enumerate(self._blocks):
+        #     print('Block {:05d} with id {} refers to sliced region {}'.format(i, block.id, block.slices))
+        pass
 
+    def set_blocksize(self, blocksize={}):
 
-def split_with_combinechannels(
-    image_in,
-    blocksize,
-    blockmargin=[0, 64, 64],
-    blockrange=[],
-    bias_image='',
-    bias_dsfacs=[1, 64, 64, 1],
-    memb_idxs=None,
-    memb_weights=[],
-    nucl_idxs=None,
-    nucl_weights=[],
-    mean_idxs=None,
-    mean_weights=[],
-    output_channels=None,
-    datatype='',
-    chunksize=[],
-    outputtemplate='',
-    step_id='splitblocks',
-    outputdir='',
-    ):
-    """Average membrane and nuclear channels and write as blocks."""
+        im = Image(self.image_in, permission='r')
+        im.load(load_data=False)
+        bs_im = dict(zip(im.axlab, im.dims))
+        im.close()
 
-    # Prepare the output.
-    postfix = ''
+        bs_xy = {d: self.blocksize_xy for d in 'xy' if self.blocksize_xy}
 
-    outputdir = get_outputdir(image_in, '', outputdir, 'blocks', 'blocks')
+        self.blocksize = {**bs_im, **bs_xy, **self.blocksize, **blocksize}
 
-    paths = get_paths(image_in)
-    datadir, filename = os.path.split(paths['base'])
-    dataset, ext = os.path.splitext(filename)
+    def set_blockmargin(self, blockmargin={}):
 
-    filestem = '{}'.format(dataset)
-    outputstem = os.path.join(outputdir, filestem)
-    outputpat = '{}.h5/{}'.format(outputstem, '{}')
+        bm_im = {d: 0 for d in self.blocksize.keys()}
 
-    logging.basicConfig(filename='{}.log'.format(outputstem), level=logging.INFO)
-    report = {'parameters': locals()}
+        bm_xy = {d: self.blockmargin_xy for d in 'xy' if self.blockmargin_xy}
 
-    mpi = wmeMPI(usempi=False)
+        self.blockmargin = {**bm_im, **bm_xy, **self.blockmargin, **blockmargin}
 
-    im = Image(image_in, permission='r')
-    im.load(comm=mpi.comm, load_data=False)
+    def set_blocks(self):
+        """
 
-    if bias_image:
-        bf = Image(bias_image, permission='r')
-        bf.load(comm=mpi.comm, load_data=False)
-    else:
+        """
+
+        im = Image(self.image_in, permission='r')
+        im.load()
+        im.close()
+
+        outputstem = os.path.join(self.directory, self.format_())
+        path_tpl = outputstem + '_{bid}.h5/{ods}'
+
+        imslices = dict(zip(im.axlab, im.slices))
+        shape = {d: len(range(*slc.indices(slc.stop))) for d, slc in imslices.items()}
+        blocksize = self.blocksize or shape
+        blocksize = {d: bs if bs else shape[d] for d, bs in blocksize.items()}
+        margin = self.blockmargin or dict(zip(im.axlab, [0] * len(im.axlab)))
+
+        starts, stops, = {}, {}
+        for d in im.axlab:
+            starts[d], stops[d] = self._get_blockbounds(
+                imslices[d].start,
+                shape[d],
+                blocksize[d],
+                margin[d],
+                )
+
+        ndim = len(im.axlab)
+        starts = tuple(starts[dim] for dim in im.axlab)
+        stops = tuple(stops[dim] for dim in im.axlab)
+        startsgrid = np.array(np.meshgrid(*starts))
+        stopsgrid = np.array(np.meshgrid(*stops))
+        starts = np.transpose(np.reshape(startsgrid, [ndim, -1]))
+        stops = np.transpose(np.reshape(stopsgrid, [ndim, -1]))
+
+        def blockdict(start, stop, axlab, b_idx):
+            idstring = self._suffix_formats['b']
+            idxs = [axlab.index(d) for d in 'xyzct']
+            slcs = [slice(sta, sto) for sta, sto in zip(start, stop)]
+            id = idstring.format(b_idx)
+            # id = idstring.format(
+            #     slcs[idxs[0]].start, slcs[idxs[0]].stop,
+            #     slcs[idxs[1]].start, slcs[idxs[1]].stop,
+            #     slcs[idxs[2]].start, slcs[idxs[2]].stop,
+            #     )
+            bpat = path_tpl.format(bid=id, ods='{ods}')
+            return {'slices': slcs, 'id': id, 'path': bpat}
+
+        blocks = [Block(**blockdict(start, stop, im.axlab, b_idx))
+                  for b_idx, (start, stop) in enumerate(zip(starts, stops))]
+
+        self._blocks = blocks
+
+    def _get_blockbounds(self, offset, shape, blocksize, margin):
+        """Get the block range for a dimension."""
+
+        # blocks
+        starts = range(offset, shape + offset, blocksize)
+        stops = np.array(starts) + blocksize
+
+        # blocks with margin
+        starts = np.array(starts) - margin
+        stops = np.array(stops) + margin
+
+        # blocks with margin reduced on boundary blocks
+        starts[starts < offset] = offset
+        stops[stops > shape + offset] = shape + offset
+
+        return starts, stops
+
+    def _margins(self, fc, fC, blocksize, margin, fullsize):
+        """Return lower coordinate (fullstack and block) corrected for margin."""
+
+        if fc == 0:
+            bc = 0
+        else:
+            bc = 0 + margin
+            fc += margin
+
+        if fC == fullsize:
+            bC = bc + blocksize + (fullsize % blocksize)
+
+        else:
+            bC = bc + blocksize
+            fC -= margin
+
+        return (fc, fC), (bc, bC)
+
+    def set_blockfiles(self):
+
+        self._set_filepat()
+        pat = os.path.join(self.directory, self.filepat)
+        self.blockfiles = sorted(glob.glob(pat))
+
+    def _set_filepat(self):
+
+        if not self.filepat:
+            matcher = self._suffix_formats['b'].format(0).replace('0', '?')
+            self.filepat ='{}_{}.h5'.format(self.format_(), matcher)
+
+class Splitter(Blocker):
+    """Block splitting."""
+
+    def __init__(self, image_in='', parameter_file='', **kwargs):
+
+        super(Splitter, self).__init__(
+            image_in, parameter_file,
+            module_id='blocks',
+            **kwargs,
+            )
+
+        self._fun_selector = {
+            'blockinfo': self.print_blockinfo,
+            'split': self.split,
+            }
+
+        default_attr = {
+            'blocks': [],
+            'memb_idxs': None,
+            'memb_weights': [],
+            'nucl_idxs': None,
+            'nucl_weights': [],
+            'mean_idxs': None,
+            'mean_weights': [],
+            'output_channels': None,
+            'output_ND': False,
+            'bias_image': '',
+            'bias_dsfacs': [],
+            'datatype': '',
+            'chunksize': [],
+            'outputtemplate': '',
+        }
+        for k, v in default_attr.items():
+            setattr(self, k, v)
+
+        for step in self._fun_selector.keys():
+            self.set_parameters(step)
+
+        self._parsets = {
+            'split': {
+                'fpar': self._FPAR_NAMES,
+                'ppar': ('memb_idxs', 'memb_weights',
+                         'nucl_idxs', 'nucl_weights',
+                         'mean_idxs', 'mean_weights',
+                         'output_channels',
+                         'output_ND',
+                         'bias_image', 'bias_dsfacs',
+                         'datatype', 'chunksize',
+                         'outputtemplate',
+                         ),
+                'spar': ('n_workers', 'blocksize', 'blockmargin', 'blocks'),
+                },
+            }
+
+        # TODO: merge with parsets?
+        self._partable = {
+            'memb_idxs': 'Membrane channel indices',
+            'memb_weights': 'Membrane channel weights',
+            'nucl_idxs': 'Nuclear channel indices',
+            'nucl_weights': 'Nuclear channel weights',
+            'mean_idxs': 'Channel indices for global mean',
+            'mean_weights': 'Channel weights for global mean',
+            }
+
+    def split(self, **kwargs):
+        """Average membrane and nuclear channels and write as blocks.
+
+        blocksize=[],
+        blockmargin=[],
+        blocks=[],
+        memb_idxs=None,
+        memb_weights=[],
+        nucl_idxs=None,
+        nucl_weights=[],
+        mean_idxs=None,
+        mean_weights=[],
+        output_channels=None,
+        output_ND=False,
+        bias_image='',
+        bias_dsfacs=[1, 64, 64, 1],
+        datatype='',
+        chunksize=[],
+        outputtemplate='',
+        """
+
+        self.set_parameters('split', kwargs)
+        arglist = self._get_arglist(['_blocks'])
+        self.set_n_workers(len(arglist))
+        self.dump_parameters(step=self.step)
+
+        with multiprocessing.Pool(processes=self.n_workers) as pool:
+            pool.starmap(self._split_with_combinechannels, arglist)
+
+    def _split_with_combinechannels(self, block):
+        """Average membrane and nuclear channels and write as blocks."""
+
+        print('Writing block with id {} to {}'.format(block.id, block.path))
+
+        im = Image(self.image_in, permission='r')
+        im.load()
+
         bf = None
+        if self.bias_image:
+            bf = Image(self.bias_image, permission='r')
+            bf.load()
 
-    outputtemplate = outputtemplate or '{}_{}.h5/ods'.format(outputstem, '{}')
-    mpi.set_blocks(im, blocksize, blockmargin, blockrange, outputtemplate)
-    mpi.scatter_series()
+        props = im.get_props2()
+        props['path'] = block.path.format(ods='data')
+        props['permission'] = 'r+'
+        props['dtype'] = self.datatype or props['dtype']
+        props['chunks'] = self.chunksize or [self.blockmargin[d] if d in 'xy' else s for d, s in zip(im.axlab, im.dims)]
+        props['shape'] = list(im.slices2shape(list(block.slices)))
+        props['dims'] = list(im.slices2shape(list(block.slices)))
+        props['slices'] = None
+        mo_ND = Image(**props)
+        if self.output_ND:
+            mo_ND.create()
+            print(mo_ND.dtype)
+        mo_3D = Image(**props)
+        mo_3D.squeeze('ct')
+        print(mo_3D.dtype)
 
-    props = prep_props(im, datatype, chunksize, blockmargin)
-    for i in mpi.series:
-        block = mpi.blocks[i]
-        print('Processing blocknr {:4d} with id: {}'.format(i, block['id']))
-        if len(im.dims) == 3:
-            data = im.slice_dataset().astype('float')
+        c_axis = im.axlab.index('c')
+        channel_list = [i for i in range(im.dims[c_axis])]
+
+        ch_idxs = [self.memb_idxs, self.nucl_idxs, self.mean_idxs]
+        ch_weights = [self.memb_weights, self.nucl_weights, self.mean_weights]
+        ch_out = ['memb/mean', 'nucl/mean', 'mean']
+        ch_ids = ['memb', 'nucl', 'mean']
+
+        output_channels = self.output_channels
+        if output_channels is not None:
+
+            if output_channels == [-1]:
+                output_channels = channel_list
+
+            ids = ["ch{:02d}".format(ch) for ch in output_channels]
+            ch_idxs += [[ch] for ch in output_channels]
+            ch_weights += [[1.0]] * len(output_channels)
+            ch_out += ['chan/{}'.format(ch_id) for ch_id in ids]
+            ch_ids += ids
+
+        outputs = {}
+        for key, idxs, weights, ods in zip(ch_ids, ch_idxs, ch_weights, ch_out):
+
+            if idxs is None:
+                continue
+            elif idxs == [-1]:
+                idxs = [i for i in range(im.dims[c_axis])]
+
+            if weights == [-1]:
+                weights = [1] * len(idxs)
+
+            outputs[key] = {
+                'idxs': idxs,
+                'weights': weights,
+                'ods': ods,
+                'dtype': mo_3D.dtype,
+                'data': np.zeros(mo_3D.shape, dtype='float'),
+                }
+
+        im.slices = block.slices
+
+        idxs_set = set([l for k, v in outputs.items() for l in v['idxs']])
+        for volnr in idxs_set:
+
+            im.slices[c_axis] = slice(volnr, volnr + 1, 1)
+            data = im.slice_dataset(squeeze=False).astype('float')
+
             if bf is not None:
-                bias = get_bias_field_block(bf, im.slices, data.shape, bias_dsfacs)
+                bias = get_bias_field_block(bf, im.slices, data.shape, self.bias_dsfacs)
                 bias = np.reshape(bias, data.shape)
                 data /= bias
                 data = np.nan_to_num(data, copy=False)
-            outputpostfix = ".h5/{}".format(output['ods'])
-            outpath = block['path'].replace(".h5/ods", outputpostfix)
-            write_output(outpath, output['data'].astype(output['dtype']), props)
-        else:
-            add_volumes(im, block, props, bf, bias_dsfacs,
-                        memb_idxs, memb_weights,
-                        nucl_idxs, nucl_weights,
-                        mean_idxs, mean_weights,
-                        output_channels,
-                        )
 
-    im.close()
+            if self.output_ND:
+                mo_ND.slices[c_axis] = slice(volnr, volnr + 1, 1)
+                mo_ND.write(data.astype(mo_ND.dtype))
 
+            for name, output in outputs.items():
+                if volnr in output['idxs']:
+                    idx = output['idxs'].index(volnr)
+                    data *= output['weights'][idx]
+                    output['data'] += np.squeeze(data)
 
-def add_volumes(im, block, props, bf=None, bias_dsfacs=[1, 64, 64, 1],
-                memb_idxs=None, memb_weights=[],
-                nucl_idxs=None, nucl_weights=[],
-                mean_idxs=None, mean_weights=[],
-                output_channels=None,
-                ):
-    """Read, channel-average and write blocks of of data."""
-
-    c_axis = im.axlab.index('c')
-    channel_list = [i for i in range(im.dims[c_axis])]
-    size = get_outsize(im, block['slices'])
-
-    ch_idxs = [memb_idxs, nucl_idxs, mean_idxs]
-    ch_weights = [memb_weights, nucl_weights, mean_weights]
-    ch_out = ['memb/mean', 'nucl/mean', 'mean']
-    ch_ids = ['memb', 'nucl', 'mean']
-
-    if output_channels is not None:
-
-        if output_channels == [-1]:
-            output_channels = channel_list
-
-        ids = ["ch{:02d}".format(ch) for ch in output_channels]
-        ch_idxs += [[ch] for ch in output_channels]
-        ch_weights += [[1.0]] * len(output_channels)
-        ch_out += ['chan/{}'.format(ch_id) for ch_id in ids]
-        ch_ids += ids
-
-    outputs = {}
-    for key, idxs, weights, ods in zip(ch_ids, ch_idxs, ch_weights, ch_out):
-
-        if idxs is None:
-            continue
-        elif idxs == [-1]:
-            idxs = [i for i in range(im.dims[c_axis])]
-
-        if weights == [-1]:
-            weights = [1] * len(idxs)
-
-        outputs[key] = {
-            'idxs': idxs,
-            'weights': weights,
-            'ods': ods,
-            'dtype': props['dtype'],
-            'data': np.zeros(size, dtype='float'),
-            }
-
-    im.slices = block['slices']
-
-    idxs_set = set([l for k, v in outputs.items() for l in v['idxs']])
-    for volnr in idxs_set:
-
-        im.slices[c_axis] = slice(volnr, volnr + 1, 1)
-        data = im.slice_dataset().astype('float')
-
-        if bf is not None:
-            bias = get_bias_field_block(bf, im.slices, data.shape, bias_dsfacs)
-            bias = np.reshape(bias, data.shape)
-            data /= bias
-            data = np.nan_to_num(data, copy=False)
+        mo_ND.close()
 
         for name, output in outputs.items():
-            if volnr in output['idxs']:
-                idx = output['idxs'].index(volnr)
-                data *= output['weights'][idx]
-                output['data'] += data
+            output['data'] /= len(output['idxs'])
+            write_image(mo_3D, block.path.format(ods=output['ods']), output['data'].astype(mo_3D.dtype))
 
-    for name, output in outputs.items():
-        output['data'] = output['data'] / len(output['idxs'])
-        outputpostfix = ".h5/{}".format(output['ods'])
-        outpath = block['path'].replace(".h5/ods", outputpostfix)
-        write_output(outpath, output['data'].astype(output['dtype']), props)
+    def view_with_napari(self, filepath='', idss=['mean', 'memb/mean', 'nucl/mean'], ldss=[], block_idx=0):
+
+        if not filepath:
+            filepath = self.blockfiles[block_idx]
+        super().view_with_napari(filepath, idss, ldss=[])
 
 
-def write_output(outpath, data, props):
-    """Write data to file."""
+class Merger(Blocker):
+    """Block merging."""
 
-    props['shape'] = data.shape
-    props['dtype'] = data.dtype
+    def __init__(self, image_in='', parameter_file='', **kwargs):
 
-    mo = Image(outpath, **props)
-    mo.create()
-    mo.write(data=data)
-    mo.close()
+        super(Merger, self).__init__(
+            image_in, parameter_file,
+            module_id='blocks',
+            **kwargs,
+            )
 
+        self._fun_selector = {
+            'blockinfo': self.print_blockinfo,
+            'merge': self.merge,
+            'postprocess': self.postprocess,
+            }
 
-def get_bias_field_block(bf, slices, outdims, dsfacs=[1, 64, 64, 1]):
-    """Retrieve and upsample the biasfield for a datablock."""
+        default_attr = {
+            'volumes': [],
+            'blocks': [],
+            'fullsize': [],
+            'datatype': '',
+            'elsize': [],
+            'inlayout': '',
+            'squeeze': '',
+            'is_labelimage': False,
+            'ulabelpath': '',
+            '_outputpaths': [],
+        }
+        for k, v in default_attr.items():
+            setattr(self, k, v)
 
-    bf.slices = [slice(int(slc.start / ds), int(slc.stop / ds), 1)
-                 for slc, ds in zip(slices, dsfacs)]
-    bf_block = bf.slice_dataset().astype('float32')
-    bias = resize(bf_block, outdims, preserve_range=True)
+        for step in self._fun_selector.keys():
+            self.set_parameters(step)
 
-    return bias
+        self._parsets = {
+            'merge': {
+                'fpar': self._FPAR_NAMES,
+                'ppar': (),  # TODO
+                'spar': ('n_workers', 'blocksize', 'blockmargin', 'volumes', 'blocks'),
+                },
+            'postprocess': {
+                'fpar': self._FPAR_NAMES,
+                'ppar': (),
+                'spar': ('n_workers',),
+                },
+            }
 
+        self._partable = {}
 
-def squeeze_slices(slices, axis):
+    def merge(self, **kwargs):
+        """
 
-    slcs = list(slices)
-    del slcs[axis]
-
-    return slcs
-
-
-def get_outsize(im, slices):
-    """Return the dimensions of the image."""
-
-    slcs = list(slices)
-    if 't' in im.axlab:
-        slcs = squeeze_slices(slices, im.axlab.index('t'))
-    if 'c' in im.axlab:
-        slcs = squeeze_slices(slcs, im.axlab.index('c'))
-    size = list(im.slices2shape(slcs))
-
-    return size
-
-
-def prep_props(im, datatype, chunksize, blockmargin):
-    """Create a block-specific props-dictionary."""
-
-    props = im.get_props()
-
-    props['dtype'] = datatype or props['dtype']
-
-    chunks = list(im.dims)
-    for d in 'xy':
-        axis = im.axlab.index(d)
-        chunks[axis] = blockmargin[axis]
-    props['chunks'] = chunksize or chunks
-
-    if len(props['shape']) == 5:
-        props = im.squeeze_props(props=props, dim=4)
-    if len(props['shape']) == 4:
-        props = im.squeeze_props(props=props, dim=3)
-
-    return props
-
-
-def splitblocks(image_in, blocksize, blockmargin, blockrange, outputtemplate):
-    """Split an image into blocks."""
-
-    mpi = wmeMPI(usempi=False)
-    im = Image(image_in, permission='r')
-    im.load(load_data=False)
-
-    mpi.set_blocks(im, blocksize, blockmargin, blockrange, outputtemplate)
-    mpi.scatter_series()
-    props = im.get_props()
-    for i in mpi.series:
-        block = mpi.blocks[i]
-        im.slices = block['slices']
-        data = im.slice_dataset()
-        write_output(block['path'], data, props)
-
-
-def merge(
-    image_in,
-    parameter_file='',
-    step_id='mergeblocks',
-    outputdir='',
-    n_workers=0,
-    idss_select=[],
-    blocksize=[],
-    blockmargin=[],
-    blockrange=[],
-    blocks=[],
-    fullsize=[],
-    ims_ref_path='',
-    datatype='',
-    ipf='',
-    elsize=[],
-    inlayout='',
-    squeeze='',
-    is_labelimage=False,
-    ):
-    """Average membrane and nuclear channels and write as blocks."""
-
-    blockdir = get_outputdir(image_in, parameter_file, '', step_id, 'blocks')
-    outputdir = get_outputdir(image_in, parameter_file, outputdir, step_id, '')
-
-    params = get_params(locals().copy(), parameter_file, step_id)
-    subparams = get_params(locals().copy(), parameter_file, step_id, 'submit')
-
-    block_postfix = '.h5'
-    if params['ipf']:
-        block_postfix = '{}{}'.format(params['ipf'], block_postfix)
-    blockfiles, blocks = get_blockfiles(image_in, blockdir, params['blocks'], block_postfix)
-    blocksize, blockmargin, _ = get_blockinfo(image_in, parameter_file, params)
-
-    paths = get_paths(image_in)
-    props = get_imageprops(image_in)
-    dataset = os.path.splitext(paths['fname'])[0]
-    ims_ref_path = get_ims_ref_path(image_in, parameter_file, params['ims_ref_path'])
-
-    idss_dicts = [v for k, v in sorted(params.items()) if k.startswith('ids0')]  # TODO: better regex matching
-    idss_select = params['idss_select'] or list(range(len(idss_dicts)))
-    idss_dicts = [ids for i, ids in enumerate(idss_dicts) if i in idss_select]
-
-    idss, outputnames, ulabelpaths = [], [], []
-    for d in idss_dicts:
-        outname = '{}_{}'.format(dataset, d['ids'].replace('/', '-'))
-        ulabelpath = ''
-        if 'is_labelimage' in d.keys():
-            if d['is_labelimage']:
-                ulabelpath = '{}_ulabels.npy'.format(outname)
-        if d['format'] == 'h5':
-            outname = '{}{}/{}'.format(outname, block_postfix, d['ids'])
-        elif d['format'] == 'ims':
-            outname = '{}.ims'.format(outname)
-        idss.append(d['ids'])
-        outputnames.append(outname)
-        ulabelpaths.append(ulabelpath)
-
-    arglist = [
-        (
-            ['{}/{}'.format(blockfile, ids) for blockfile in blockfiles],
-            blocksize[:3],
-            blockmargin[:3],
-            [],
-            props['shape'][:3],
-            ims_ref_path,
-            params['datatype'],
-            params['elsize'],
-            params['inlayout'],
-            params['squeeze'],
-            ulabelpath,
-            os.path.join(outputdir, outputname),
-        )
-        for ids, outputname, ulabelpaths in zip(idss, outputnames, ulabelpaths)]
-
-    n_workers = get_n_workers(len(idss), subparams)
-    with multiprocessing.Pool(processes=n_workers) as pool:
-        pool.starmap(mergeblocks, arglist)
-
-
-def mergeblocks(
-        images_in,
-        blocksize=[],
-        blockmargin=[],
-        blockrange=[],
+        volumes=[],
+        suffix='',
         fullsize=[],
-        ims_ref_path='',
         datatype='',
         elsize=[],
         inlayout='',
         squeeze='',
-        ulabelpath='',
-        outputpath='',
-        ):
-    """Merge blocks of data into a single hdf5 file."""
+        is_labelimage=False,
+        """
 
-    if blockrange:
-        images_in = images_in[blockrange[0]:blockrange[1]]
+        self.set_parameters('merge', kwargs)
+        arglist = self._get_arglist(['volumes'])
+        self.set_n_workers(len(arglist))
+        self.dump_parameters(step=self.step)
 
-    mpi = wmeMPI(usempi=False)
+        with multiprocessing.Pool(processes=self.n_workers) as pool:
+            pool.starmap(self._mergeblocks, arglist)
 
-    im = Image(images_in[0], permission='r')
-    im.load(mpi.comm, load_data=False)
-    props = im.get_props()
-    ndim = im.get_ndim()
+    def _mergeblocks(self, volume):
+        """Merge blocks of data into a single hdf5 file."""
 
-    inlayout = inlayout or props['axlab']
-    props['axlab'] = inlayout
-    props['elsize'] = elsize or props['elsize']
+        ids = list(volume.keys())[0]
+        outstem = self.get_outputpath(volume)
 
-    dims = fullsize.copy()
-    if ndim == 4:
-        c_idx = props['axlab'].index('c')
-        dims.insert(c_idx, im.ds.shape[c_idx])
-    props['shape'] = dims
+        ulabelpath = ''
+        if 'is_labelimage' in volume[ids].keys():
+            # or ... TODO: detect ulabel attribute h5?
+            if volume[ids]['is_labelimage']:
+                ulabelpath = self.ulabelpath or '{stem}_{vol}_ulabels.npy'.format(stem=outstem, vol=ids)
 
-    for ax in squeeze:
-        props = im.squeeze_props(props, dim=props['axlab'].index(ax))
-
-    props['dtype'] = datatype or props['dtype']
-    props['chunks'] = props['chunks'] or None
-
-    if outputpath.endswith('.ims'):
-        shutil.copy2(ims_ref_path, outputpath)
-        mo = Image(outputpath)
-        mo.load()
-    else:
-        mo = LabelImage(outputpath, **props)
-        mo.create(comm=mpi.comm)
-
-    mpi.blocks = [{'path': image_in} for image_in in images_in]
-    mpi.nblocks = len(images_in)
-    mpi.scatter_series()
-
-    # merge the datasets
-    ulabels = set([])  # TODO: handle for parallel MPI
-    for i in mpi.series:
-        block = mpi.blocks[i]
-
-        im = Image(block['path'], permission='r')
-        im.load(mpi.comm, load_data=False)
-        set_slices_in_and_out(im, mo, blocksize, blockmargin, fullsize, inlayout)
-        data = im.slice_dataset()
-        if ulabelpath:
-            ulabels |= set(np.unique(data))
-        mo.write(data)
+        # PROPS  # TODO: cleanup
+        bpath = self._blocks[0].path.format(ods=ids)
+        im = Image(bpath, permission='r')
+        im.load()
+        props = im.get_props2()
         im.close()
 
-        print('processed block {:03d}: {}'.format(i, block['path']))
+        props['path'] = '{stem}.h5/{vol}'.format(stem=outstem, vol=ids)
+        props['permission'] = 'r+'
+        props['axlab'] = self.inlayout or props['axlab']
+        props['elsize'] = self.elsize or props['elsize']
+        props['dtype'] = self.datatype or props['dtype']
+        props['chunks'] = props['chunks'] or None
 
-    if ulabelpath:
-        np.save(ulabelpath, np.array(ulabels))
+        if not self.fullsize:
+            self.fullsize = {d: self._blocks[-1].slices[im.axlab.index(d)].stop
+                             for d in props['axlab']}
 
-    im.close()
-    mo.close()
+        dims = [self.fullsize[d] for d in im.axlab]
+        ndim = im.get_ndim()
+        if ndim == 4:
+            c_idx = props['axlab'].index('c')
+            dims.insert(c_idx, im.ds.shape[c_idx])
+        props['shape'] = dims
 
+        for ax in self.squeeze:
+            props = im.squeeze_props(props, dim=props['axlab'].index(ax))
 
-def set_slices_in_and_out(im, mo, blocksize, margin, fullsize, axlab='zyx'):
+        mo = LabelImage(**props)
+        mo.create()
 
-    comps = im.split_path()
-    _, x, X, y, Y, z, Z = split_filename(comps['file'])
-    (oz, oZ), (iz, iZ) = margins(z, Z, blocksize[0], margin[0], fullsize[0])
-    (oy, oY), (iy, iY) = margins(y, Y, blocksize[1], margin[1], fullsize[1])
-    (ox, oX), (ix, iX) = margins(x, X, blocksize[2], margin[2], fullsize[2])
-    im.slices[axlab.index('z')] = slice(iz, iZ)
-    im.slices[axlab.index('y')] = slice(iy, iY)
-    im.slices[axlab.index('x')] = slice(ix, iX)
-    mo.slices[mo.axlab.index('z')] = slice(oz, oZ)
-    mo.slices[mo.axlab.index('y')] = slice(oy, oY)
-    mo.slices[mo.axlab.index('x')] = slice(ox, oX)
+        # select block subset  # TODO: also for splitter
+        if not self.blocks:
+            self.blocks = list(range(len(self._blocks)))
+        blocks_wm = [block for i, block in enumerate(self._blocks)
+                     if i in self.blocks]
+        # blocks_nm = [block for i, block in enumerate(self._blocks_nomargin)
+        #              if i in self.blocks]  # unused for now
 
+        # Merge the blocks sequentially (TODO: reintroduce MPI with h5-para).
+        ulabels = set([])
+        # for block, block_nm in zip(blocks_wm, blocks_nm):
+        for block in blocks_wm:
+            inpath = block.path.format(ods=ids)
+            print('processing volume {} block {} from {}'.format(ids, block.id, inpath))
+            im = Image(inpath, permission='r')
+            im.load(load_data=False)
+            self.set_slices(im, mo, block)
+            data = im.slice_dataset()
+            mo.write(data)
+            im.close()
+            if ulabelpath:
+                ulabels |= set(np.unique(data))
 
-def margins(fc, fC, blocksize, margin, fullsize):
-    """Return lower coordinate (fullstack and block) corrected for margin."""
+        if ulabelpath:
+            np.save(ulabelpath, np.array(ulabels))
 
-    if fc == 0:
-        bc = 0
-    else:
-        bc = 0 + margin
-        fc += margin
+        im.close()
+        mo.close()
 
-    if fC == fullsize:
-        bC = bc + blocksize + (fullsize % blocksize)
+    def set_slices(self, im, mo, block=None):
 
-    else:
-        bC = bc + blocksize
-        fC -= margin
+        if block is None:
+            comps = im.split_path()
+            dset_info = split_filename(comps['file'])[0]
 
-    return (fc, fC), (bc, bC)
+        for d in im.axlab:
+
+            if block is None:
+                l = dset_info[d.lower()]
+                h = dset_info[d.upper()]
+            else:
+                l = block.slices[im.axlab.index(d)].start
+                h = block.slices[im.axlab.index(d)].stop
+
+            bs = self.blocksize[d]
+            bm = self.blockmargin[d]
+            fs = self.fullsize[d]
+
+            (ol, oh), (il, ih) = self._margins(l, h, bs, bm, fs)
+            im.slices[im.axlab.index(d)] = slice(il, ih)
+            mo.slices[mo.axlab.index(d)] = slice(ol, oh)
+
+    def postprocess(self):
+
+        def create_copy(f, tgt_loc, ext_file, ext_loc):
+            """Copy the imaris DatasetInfo group."""
+            try:
+                del f[tgt_loc]
+            except KeyError:
+                pass
+            g = h5py.File(ext_file, 'r')
+            f.copy(g[ext_loc], tgt_loc)
+            g.close()
+
+        def create_ext_link(f, tgt_loc, ext_file, ext_loc):
+            """Create an individual link."""
+            try:
+                del f[tgt_loc]
+            except KeyError:
+                pass
+            f[tgt_loc] = h5py.ExternalLink(ext_file, ext_loc)
+
+        basename = self.format_([self.dataset, self.suffix])
+        filestem = os.path.join(self.directory, basename)
+        tgt_file = '{}.h5'.format(filestem)
+        tgt_dir  = os.path.dirname(tgt_file)
+        f = h5py.File(tgt_file, 'w')
+        for volume in self.volumes:
+            filestem = self.get_outputpath(volume)
+            inputfile = '{}.h5'.format(filestem)
+            linked_path = os.path.relpath(inputfile, tgt_dir)
+            ext_file = pathlib.Path(linked_path).as_posix()
+            ids = list(volume.keys())[0]
+            create_ext_link(f, ids, ext_file, ids)
+
+    def get_outputpath(self, volume):
+
+        ids = list(volume.keys())[0]
+        try:
+            suf = volume[ids]['suffix'].replace('/', '-')
+        except:
+            suf = ids.replace('/', '-')
+        basename = self.format_([self.dataset, self.suffix, suf])
+        outstem = os.path.join(self.directory, basename)
+
+        return outstem
+
+    def view_with_napari(self, filepath='', idss=[], ldss=[], vol_idx=0):
+
+        idss = idss or [list(volume.keys())[0] for volume in self.volumes]
+
+        if not filepath:
+            basename = self.format_([self.dataset, self.suffix])
+            outstem = os.path.join(self.directory, basename)
+            filepath = '{}.h5'.format(outstem)
+
+        # TODO: dask array
+        super().view_with_napari(filepath, idss, slices={'z': 'ctr'})
 
 
 def link_blocks(filepath_in, filepath_out, dset_in, dset_out, delete=True, links=True, is_unet=False):

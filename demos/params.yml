@@ -1,0 +1,528 @@
+dirtree:
+    datadir:
+        blocks: blocks
+        channels: channels
+        shading: shading
+        mask:
+        biasfield: biasfield
+        profiling: profiling
+        jobfiles: jobfiles
+
+dataset:
+    name: HFK16w
+    alias: HFK16w
+    ims_ref_postfix: _ref_uint16
+    reslev: 4
+    dsr: 16
+    dsa: 4
+    dst: 64
+    dapi_chan: 0
+    dapi_thr: 0
+    dapi_shift: 0
+    memb_idxs: 3 5 6 7
+    memb_weights: 0.5 0.5 1.0 1.0
+    nucl_idxs: 0 1 2 4
+    nucl_weights: 1.0 1.0 1.0 1.0
+    mean_idxs: 0 1 2 3 4 5 6 7
+    mean_weights: 1.0 1.0 1.0 1.0 1.0 1.0 1.0 1.0
+    bs: 176
+    bm: 64
+
+shading:
+    file_format: czi
+    params:
+        postfix: _shading
+        metric: median
+        noise_threshold: 1000
+        z_range:
+        quantile_threshold: 0.9
+        polynomial_order: 3
+    submit:
+        n_workers:
+        channels:
+        array: channel
+        nodes: 1
+        tasks: 1
+        mem: 20G
+        wtime: 02:00:00
+    conda:
+        env: stapl3d
+
+stitching:
+    params:
+        postfix: _stitching
+    submit:
+    conda:
+        env: stapl3d
+
+splitchannels:
+    params:
+        channel_re: _ch{:02d}
+        insert: true
+        replace: false
+    submit:
+        array: channel
+        nodes: 1
+        tasks: 1
+        mem: 60G
+        wtime: 02:00:00
+    conda:
+        env: stapl3d
+
+mask:
+    params:
+        postfix: _mask
+        resolution_level: 1
+        sigma: 48.0
+        use_median_thresholds: true
+        median_factor: 3
+        abs_threshold: 1000
+        thresholds:
+            - 500
+            - 1000
+            - 2000
+            - 3000
+            - 4000
+            - 5000
+            - 10000
+        distance_to_edge: true
+    submit:
+        array: no
+        nodes: 1
+        tasks: 1
+        mem: 60G
+        wtime: 02:00:00
+    conda:
+        env: stapl3d
+
+ims_aggregate1:
+    params:
+    conda:
+        env: stapl3d
+    submit:
+        array: no
+        nodes: 1
+        tasks: 1
+        mem: 20G
+        wtime: 00:30:00
+
+biasfield:
+    params:
+        postfix: _biasfield
+        mask_in: true
+        resolution_level: 1
+        downsample_factors:
+            z: 1
+            y: 2
+            x: 2
+            c: 1
+            t: 1
+        n_iterations: 2
+        n_fitlevels: 4
+        n_bspline_cps:
+            z: 5
+            y: 5
+            x: 5
+    submit:
+        array: channel
+        nodes: 1
+        tasks: 2
+        mem: 20G
+        wtime: 02:00:00
+    conda:
+        env: stapl3d
+
+biasfield_stack:
+    conda:
+        env: stapl3d
+    submit:
+        array: no
+        nodes: 1
+        tasks: 1
+        mem: 20G
+        wtime: 00:30:00
+
+biasfield_apply:
+    params:
+        copy_from_ref: true
+        downsample_factors:
+            z: 1
+            y: 4
+            x: 4
+            c: 1
+            t: 1
+        blocksize_xy: 1280
+    submit:
+        array: channel
+        nodes: 1
+        tasks: 1
+        mem: 60G
+        wtime: 10:00:00
+    conda:
+        env: stapl3d
+
+ims_aggregate2:
+    params:
+    conda:
+        env: stapl3d
+    submit:
+        array: no
+        nodes: 1
+        tasks: 1
+        mem: 20G
+        wtime: 00:30:00
+
+block_segmentation:
+    params:
+    conda:
+        env: stapl3d
+    submit:
+        array: block
+        nodes: 1
+        tasks: 1
+        mem: 60G
+        wtime: 05:00:00
+
+splitblocks:
+    params:
+        memb_idxs:
+            - 3
+            - 5
+            - 6
+            - 7
+        memb_weights:
+            - 0.5
+            - 0.5
+            - 1.0
+            - 1.0
+        nucl_idxs:
+            - 0
+            - 1
+            - 2
+            - 4
+        nucl_weights:
+            - 1.0
+            - 1.0
+            - 1.0
+            - 1.0
+        mean_idxs:
+            - 0
+            - 1
+            - 2
+            - 3
+            - 4
+            - 5
+            - 6
+            - 7
+        mean_weights:
+            - 1.0
+            - 1.0
+            - 1.0
+            - 1.0
+            - 1.0
+            - 1.0
+            - 1.0
+            - 1.0
+        output_channels:
+            - 0
+    submit:
+        array: block
+        nodes: 1
+        tasks: 1
+        mem: 60G
+        wtime: 05:00:00
+    conda:
+        env: stapl3d
+
+membrane_enhancement:
+    params:
+        median_filter_par: 0.5
+        membrane_filter_par: 1.1
+    submit:
+        array: block
+        nodes: 1
+        tasks: 1
+        mem: 60G
+        wtime: 01:00:00
+    conda:
+        env: stapl3d
+
+segmentation:
+    params:
+        ids_memb_mask: memb/planarity
+        ids_memb_chan: memb/mean
+        ids_nucl_chan: chan/ch00
+        ids_dset_mean: mean
+        segments_ods: labels_memb_del
+        dapi_shift_planes: 3
+        nucl_opening_footprint:
+            - 3
+            - 7
+            - 7
+        dapi_filter: 'median'
+        dapi_sigma: 1
+        dapi_dog_sigma1: 2
+        dapi_dog_sigma2: 4
+        dapi_thr: 5000
+        sauvola_window_size:
+            - 19
+            - 75
+            - 75
+        sauvola_k: 0.2
+        dapi_absmin: 1000
+        dapi_erodisk: 3
+        dist_max: 5
+        peaks_size:
+            - 11
+            - 19
+            - 19
+        peaks_thr: 1.16
+        peaks_dil_footprint:
+            - 3
+            - 7
+            - 7
+        compactness: 0.0
+        memb_filter: 'median'
+        memb_sigma: 3.0
+        planarity_thr: 0.0005
+        dset_mask_filter: 'gaussian'
+        dset_mask_sigma: 50
+        dset_mask_thr: 1000
+        steps:
+            - 0
+            - 1
+            - 2
+            - 3
+            - 4
+            - 5
+            - 6
+            - 7
+            - 8
+    submit:
+        array: block
+        nodes: 1
+        tasks: 1
+        mem: 60G
+        wtime: 02:00:00
+    conda:
+        env: stapl3d
+
+segmentation_postproc:
+    params:
+    submit:
+        array: no
+        nodes: 1
+        tasks: 1
+        mem: 1G
+        wtime: 00:10:00
+    conda:
+        env: stapl3d
+
+segmentation_gather:
+    params:
+    submit:
+        array: no
+        nodes: 1
+        tasks: 1
+        mem: 1G
+        wtime: 00:10:00
+    conda:
+        env: stapl3d
+
+relabel:
+    params:
+        postfix: _relabeled
+    submit:
+        array: block
+        nodes: 1
+        tasks: 1
+        mem: 10G
+        wtime: 00:10:00
+    conda:
+        env: stapl3d
+
+relabel_gather:
+    params:
+        postfix: _relabeled
+    submit:
+        array: no
+        nodes: 1
+        tasks: 1
+        mem: 1G
+        wtime: 00:10:00
+    conda:
+        env: stapl3d
+
+copyblocks:
+    params:
+        postfix: _fix
+    submit:
+        array: block
+        nodes: 1
+        tasks: 1
+        mem: 10G
+        wtime: 00:10:00
+    conda:
+        env: stapl3d
+
+copyblocks_gather:
+    params:
+        postfix: _relabeled_fix
+    submit:
+        array: no
+        nodes: 1
+        tasks: 1
+        mem: 1G
+        wtime: 00:10:00
+    conda:
+        env: stapl3d
+
+zipping:
+    params:
+        blocksize:
+        blockmargin:
+        blockrange:
+        blocks:
+        grp: segm
+        ids: labels_memb_del_relabeled_fix
+        postfix: _relabeled_fix
+
+zipping_gather:
+    params:
+        postfix: _relabeled_fix
+    conda:
+        env: stapl3d
+    submit:
+        array: no
+        nodes: 1
+        tasks: 1
+        mem: 1G
+        wtime: 00:10:00
+
+ziplines:
+    params:
+    submit:
+        array: zipline
+        nodes: 1
+        tasks: 1
+        mem: 60G
+        wtime: 05:00:00
+    conda:
+        env: stapl3d
+
+zipquads:
+    params:
+        axis: 0
+    submit:
+        array: zipquad
+        nodes: 1
+        tasks: 1
+        mem: 60G
+        wtime: 05:00:00
+    conda:
+        env: stapl3d
+
+zipping_postproc:
+    params:
+    submit:
+        array: no
+        nodes: 1
+        tasks: 1
+        mem: 1G
+        wtime: 00:10:00
+    conda:
+        env: stapl3d
+
+copydataset:
+    params:
+        ids: /segm/labels_memb_del_relabeled_fix
+        ods: /segm/labels_memb_del_relabeled_fix_full
+    submit:
+        array: block
+        nodes: 1
+        tasks: 1
+        mem: 10G
+        wtime: 00:10:00
+    conda:
+        env: stapl3d
+
+subsegment:
+    params:
+        ids: segm/labels_memb_del_relabeled_fix
+        ods_full: segm/labels_memb_del_relabeled_fix_full
+        ods_memb: segm/labels_memb_del_relabeled_fix_memb
+        ods_nucl: segm/labels_memb_del_relabeled_fix_nucl
+    submit:
+        array: block
+        nodes: 1
+        tasks: 1
+        mem: 10G
+        wtime: 01:00:00
+    conda:
+        env: stapl3d
+
+mergeblocks:
+    params:
+        ids00:
+            ids: segm/labels_memb_del_relabeled_fix_full
+            format: h5
+            postfix: segm-labels_memb_del_relabeled_fix_full
+        ids01:
+            ids: segm/labels_memb_del_relabeled_fix_memb
+            format: h5
+            postfix: segm-labels_memb_del_relabeled_fix_memb
+        ids02:
+            ids: segm/labels_memb_del_relabeled_fix_nucl
+            format: h5
+            postfix: segm-labels_memb_del_relabeled_fix_nucl
+        ids03:
+            ids: nucl/dapi_mask_nuclei
+            format: ims
+            postfix:
+        ids04:
+            ids: nucl/dapi_shifted
+            format: ims
+            postfix:
+        ids05:
+            ids: memb/mean
+            format: ims
+            postfix:
+    submit:
+        array: idss
+        nodes: 1
+        tasks: 1
+        mem: 20G
+        wtime: 01:00:00
+    conda:
+        env: stapl3d
+
+features:
+    params:
+        ids: segm/labels_memb_del_relabeled_fix
+        seg_names:
+            - full
+            - memb
+            - nucl
+        min_labelsize: 50
+        fset_morph: minimal
+        fset_intens: minimal
+        blocksize_xy: 1280
+    submit:
+        array: block
+        nodes: 1
+        tasks: 1
+        mem: 60G
+        wtime: 02:00:00
+    conda:
+        env: stapl3d
+
+features_postproc:
+    params:
+    submit:
+        array: no
+        nodes: 1
+        tasks: 1
+        mem: 60G
+        wtime: 01:00:00
+    conda:
+        env: stapl3d

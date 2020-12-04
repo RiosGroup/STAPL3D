@@ -15,6 +15,7 @@ loaders:
   mirror_padding: [16, 32, 32]
   raw_internal_path: IDS_IMAGE
   num_workers: 8
+  output_dir: "PATH_TO_THE_TEST_SET/predictions_nucl_MODELNAME"
   test:
     file_paths:
       - "PATH_TO_THE_TEST_SET"

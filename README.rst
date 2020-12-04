@@ -91,7 +91,9 @@ STAPL-3D is most easily installed (< 5 min) with `conda <https://docs.conda.io/e
   conda env create -f environment.yml
   conda activate stapl3d
 
-  python setup.py install
+  pip install .
+..  python setup.py install
+..  pip install https://github.com/RiosGroup/scikit-image.git
   pip install --pre SimpleITK --find-links https://github.com/SimpleITK/SimpleITK/releases/tag/latest
 
 To use membrane enhancement in the pipeline, `ACME <https://wiki.med.harvard.edu/SysBio/Megason/ACME>`_ needs to be installed. To use the machine-learning channel clean-up procedures, `Ilastik <https://www.ilastik.org/documentation/basics/installation.html>`_ needs to be installed. **To run the demos, these two external packages are not required** as we provide these steps.

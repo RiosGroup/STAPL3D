@@ -1,7 +1,8 @@
 #!/usr/bin/env python
 
-"""Perform planarity estimation.
+"""Enhance the membrane with ACME.
 
+    # TODO: reports
 """
 
 import os
@@ -20,153 +21,162 @@ import numpy as np
 
 from glob import glob
 
-from stapl3d import (
-    parse_args_common,
-    get_outputdir,
-    get_blockfiles,
-    get_params,
-    get_n_workers,
-    Image,
-    h5_nii_convert,
-    )
+from stapl3d import parse_args, Stapl3r, Image, format_, h5_nii_convert
+from stapl3d.blocks import Blocker
 
 logger = logging.getLogger(__name__)
 
+
 def main(argv):
-    """"Enhance the membrane with ACME.
+    """Enhance the membrane with ACME."""
 
-    """
+    steps = ['estimate']
+    args = parse_args('membrane_enhancement', steps, *argv)
 
-    step_ids = ['membrane_enhancement']
-    fun_selector = {
-        'estimate': estimate,
-        }
+    enhancer = Enhancer(
+        args.image_in,
+        args.parameter_file,
+        step_id=args.step_id,
+        directory=args.outputdir,
+        dataset=args.dataset,
+        suffix=args.suffix,
+        n_workers=args.n_workers,
+    )
 
-    args, mapper = parse_args_common(step_ids, fun_selector, *argv)
+    for step in args.steps:
+        enhancer._fun_selector[step]()
 
-    for step, step_id in mapper.items():
-        fun_selector[step](
-            args.image_in,
-            args.parameter_file,
-            step_id,
-            args.outputdir,
-            args.n_workers,
+
+class Enhancer(Blocker):
+    """Enhance the membrane with ACME."""
+
+    def __init__(self, image_in='', parameter_file='', **kwargs):
+
+        super(Enhancer, self).__init__(
+            image_in, parameter_file,
+            module_id='membrane_enhancement',
+            **kwargs,
             )
 
+        self._fun_selector = {
+            'estimate': self.estimate,
+            }
 
-def estimate(
-    image_in,
-    parameter_file,
-    step_id='membrane_enhancement',
-    outputdir='',
-    n_workers=0,
-    blocks=[],  # FIXME: note that block selection implies selection of globbed files, not block idxs..
-    ACMEdir='',
-    ids_membrane='memb/mean',
-    ods_preprocess='memb/preprocess',
-    ods_planarity='memb/planarity',
-    median_filter_par=0.5,
-    membrane_filter_par=1.1,
-    cleanup=True,
-    ):
-    """Perform planarity estimation."""
+        default_attr = {
+            'step_id': 'membrane_enhancement',
+            'blocks': [],
+            'ACMEdir': '',
+            'ids_membrane': 'memb/mean',
+            'ods_preprocess': 'memb/preprocess',
+            'ods_planarity': 'memb/planarity',
+            'median_filter_par': 0.5,
+            'membrane_filter_par': 1.1,
+            'cleanup': True,
+        }
+        for k, v in default_attr.items():
+            setattr(self, k, v)
 
-    outputdir = get_outputdir(image_in, parameter_file, outputdir,
-                              step_id, 'blocks')
+        self.set_directory(subdirectory='blocks')
 
-    params = get_params(locals().copy(), parameter_file, step_id)
-    subparams = get_params(locals().copy(), parameter_file, step_id, 'submit')
+        for step in self._fun_selector.keys():
+            self.set_parameters(step)
 
-    filepaths, blocks = get_blockfiles(image_in, outputdir, params['blocks'])
+        self.set_blocksize()
+        self.set_blockmargin()
+        self.set_blocks()
+        self.set_blockfiles()
 
-    ACMEdir = ACMEdir or os.environ.get('ACME')
+        self.ACMEdir = self.ACMEdir or os.environ.get('ACME')
 
-    arglist = [
-        (
-            filepath,
-            ACMEdir,
-            params['ids_membrane'],
-            params['ods_preprocess'],
-            params['ods_planarity'],
-            params['median_filter_par'],
-            params['membrane_filter_par'],
-            params['cleanup'],
-            step_id,
-            outputdir,
-        )
-        for block_idx, filepath in zip(blocks, filepaths)]
+        self._parsets = {
+            'estimate': {
+                'fpar': self._FPAR_NAMES,
+                'ppar': ('ACMEdir',
+                         'ids_membrane', 'ods_preprocess', 'ods_planarity',
+                         'median_filter_par', 'membrane_filter_par', 'cleanup'),
+                'spar': ('n_workers', 'blocks', 'blockfiles'),
+                },
+            }
 
-    n_workers = get_n_workers(len(blocks), subparams)
-    with multiprocessing.Pool(processes=n_workers) as pool:
-        pool.starmap(membrane_enhancement, arglist)
+        # TODO: merge with parsets?
+        self._partable = {
+            'median_filter_par': 'Median filter parameter',
+            'membrane_filter_par': 'Membrane filter parameter',
+            }
 
+    def estimate(self, **kwargs):
+        """Perform planarity estimation.
 
-def membrane_enhancement(
-    filepath,
-    ACMEdir,
-    ids_membrane='memb/mean',
-    ods_preprocess='memb/preprocess',
-    ods_planarity='memb/planarity',
-    median_filter_par=0.5,
-    membrane_filter_par=1.1,
-    cleanup=True,
-    step_id='membrane_enhancement',
-    outputdir='',
-    ):
-    """Perform membrane enhancement."""
+        blocks=[],  # FIXME: note that block selection implies selection of globbed files, not block idxs..
+        ACMEdir='',
+        ids_membrane='memb/mean',
+        ods_preprocess='memb/preprocess',
+        ods_planarity='memb/planarity',
+        median_filter_par=0.5,
+        membrane_filter_par=1.1,
+        cleanup=True,
+        """
 
-    blockstem = os.path.splitext(filepath)[0]
+        self.set_parameters('estimate', kwargs)
+        arglist = self._get_arglist(['blockfiles'])
+        self.set_n_workers(len(arglist))
+        self.dump_parameters(step=self.step)
 
-    logging.basicConfig(filename='{}.log'.format(blockstem), level=logging.INFO)
-    report = {'parameters': locals()}
+        with multiprocessing.Pool(processes=self.n_workers) as pool:
+            pool.starmap(self._estimate_block, arglist)
 
-    image_in = '{}.h5/{}'.format(blockstem, ids_membrane)
-    niipath_memb = '{}_{}.nii.gz'.format(blockstem, ids_membrane.replace('/', '-'))
-    h5path_prep = '{}.h5/{}'.format(blockstem, ods_preprocess)
-    niipath_prep = '{}_{}.nii.gz'.format(blockstem, ods_preprocess.replace('/', '-'))
-    h5path_plan = '{}.h5/{}'.format(blockstem, ods_planarity)
-    niipath_plan = '{}_{}.nii.gz'.format(blockstem, ods_planarity.replace('/', '-'))
+    def _estimate_block(self, filepath):
+        """Perform planarity estimation for a block."""
 
-    h5_nii_convert(image_in, niipath_memb, datatype='uint8')
+        blockstem = os.path.splitext(filepath)[0]
 
-    subprocess.call([
-        os.path.join(ACMEdir, "cellPreprocess"),
-        niipath_memb, niipath_prep,
-        "{}".format(median_filter_par),
-    ])
+        image_in = '{}.h5/{}'.format(blockstem, self.ids_membrane)
+        niipath_memb = '{}_{}.nii.gz'.format(blockstem, self.ids_membrane.replace('/', '-'))
+        h5path_prep = '{}.h5/{}'.format(blockstem, self.ods_preprocess)
+        niipath_prep = '{}_{}.nii.gz'.format(blockstem, self.ods_preprocess.replace('/', '-'))
+        h5path_plan = '{}.h5/{}'.format(blockstem, self.ods_planarity)
+        niipath_plan = '{}_{}.nii.gz'.format(blockstem, self.ods_planarity.replace('/', '-'))
 
-    subprocess.call([
-        os.path.join(ACMEdir, "multiscalePlateMeasureImageFilter"),
-        niipath_prep, niipath_plan,
-        "{}_eigen.mha".format(blockstem),
-        "{}".format(membrane_filter_par),
-    ])
+        h5_nii_convert(image_in, niipath_memb, datatype='uint8')
 
-    """
-    subprocess.call([
-        os.path.join(ACMEdir, "membraneVotingField3D"),
-        niipath_plan,
-        "{}_eigen.mha".format(blockstem),
-        "{}_TV.mha".format(blockstem),
-        "1.0",
-    ])
+        subprocess.call([
+            os.path.join(self.ACMEdir, "cellPreprocess"),
+            niipath_memb, niipath_prep,
+            "{}".format(self.median_filter_par),
+        ])
 
-    subprocess.call([
-        os.path.join(ACMEdir, "membraneSegmentation"),
-        niipath_prep,
-        "{}_TV.mha".format(blockstem),
-        "{}_segment.mha".format(blockstem),
-        "1.0",
-    ])
-    """
+        subprocess.call([
+            os.path.join(self.ACMEdir, "multiscalePlateMeasureImageFilter"),
+            niipath_prep, niipath_plan,
+            "{}_eigen.mha".format(blockstem),
+            "{}".format(self.membrane_filter_par),
+        ])
 
-    if cleanup:
-        h5_nii_convert(niipath_prep, h5path_prep)
-        h5_nii_convert(niipath_plan, h5path_plan)
-        os.remove(niipath_memb)
-        os.remove(niipath_prep)
-        os.remove(niipath_plan)
-        os.remove("{}_eigen.mha".format(blockstem))
+        """
+        subprocess.call([
+            os.path.join(self.ACMEdir, "membraneVotingField3D"),
+            niipath_plan,
+            "{}_eigen.mha".format(blockstem),
+            "{}_TV.mha".format(blockstem),
+            "1.0",
+        ])
+
+        subprocess.call([
+            os.path.join(self.ACMEdir, "membraneSegmentation"),
+            niipath_prep,
+            "{}_TV.mha".format(blockstem),
+            "{}_segment.mha".format(blockstem),
+            "1.0",
+        ])
+        """
+
+        if self.cleanup:
+            h5_nii_convert(niipath_prep, h5path_prep)
+            h5_nii_convert(niipath_plan, h5path_plan)
+            os.remove(niipath_memb)
+            os.remove(niipath_prep)
+            os.remove(niipath_plan)
+            os.remove("{}_eigen.mha".format(blockstem))
 
 
 if __name__ == "__main__":

@@ -446,6 +446,8 @@ def read_images(info_ims, ids='segm/labels', imtype='Label',
     set_to_margin_slices(segs, axis, margin, n, include_margin)
 
     segs_marg = tuple(seg.slice_dataset() for seg in segs)
+    # segs_marg = tuple(seg.slice_dataset(squeeze=True) for seg in segs)
+    # FIXME: only squeeze 1st dim on 4D unet input?
 
     if concat:
         segs_marg = concat_images(segs_marg, axis)
@@ -470,23 +472,29 @@ def set_to_margin_slices(segs, axis=2, margin=64, n=2, include_margin=False):
     else:  # select only the part within the block-proper (i.e. minus margins)
         m = margin
 
+    axes = {2: 'x', 1: 'y', 0: 'z'}
     if axis > 0:
-        segs[0].slices[axis] = slice_ur(segs[0], axis, m, mn)  # left block
-        segs[1].slices[axis] = slice_ll(m, mn)  # right block
+        ax = segs[0].axlab.index(axes[axis])
+        # print(segs[0].path, ax)
+        segs[0].slices[ax] = slice_ur(segs[0], ax, m, mn)  # left block
+        segs[1].slices[ax] = slice_ll(m, mn)  # right block
+        # print(segs[0].slices[ax])
 
     elif axis == 0:  # NOTE: axis=0 hijacked for quads
+        ax2 = segs[0].axlab.index(axes[2])  # 'x'
+        ax1 = segs[0].axlab.index(axes[1])  # 'y'
         # left-bottom block
-        segs[0].slices[2] = slice_ur(segs[0], 2, m, mn)
-        segs[0].slices[1] = slice_ur(segs[0], 1, m, mn)
+        segs[0].slices[ax2] = slice_ur(segs[0], ax2, m, mn)
+        segs[0].slices[ax1] = slice_ur(segs[0], ax1, m, mn)
         # right-bottom block
-        segs[1].slices[2] = slice_ll(m, mn)
-        segs[1].slices[1] = slice_ur(segs[1], 1, m, mn)
+        segs[1].slices[ax2] = slice_ll(m, mn)
+        segs[1].slices[ax1] = slice_ur(segs[1], ax1, m, mn)
         # left-top block
-        segs[2].slices[2] = slice_ur(segs[2], 2, m, mn)
-        segs[2].slices[1] = slice_ll(m, mn)
+        segs[2].slices[ax2] = slice_ur(segs[2], ax2, m, mn)
+        segs[2].slices[ax1] = slice_ll(m, mn)
         # right-top block
-        segs[3].slices[2] = slice_ll(m, mn)
-        segs[3].slices[1] = slice_ll(m, mn)
+        segs[3].slices[ax2] = slice_ll(m, mn)
+        segs[3].slices[ax1] = slice_ll(m, mn)
 
 
 def get_labels(segs_marg, axis=2, margin=64, include_margin=False, bg=set([0])):

@@ -902,7 +902,7 @@ def postproc(
     ):
     """Generate a mask that covers the tissue."""
 
-    outputdir = get_outputdir(image_in, parameter_file, outputdir, step_id, '')
+    outputdir = get_outputdir(image_in, parameter_file, outputdir, '', '')
 
     params = get_params(locals().copy(), parameter_file, 'features')
     subparams = get_params(locals().copy(), parameter_file, step_id, 'submit')

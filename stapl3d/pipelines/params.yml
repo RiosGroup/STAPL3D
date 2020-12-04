@@ -278,6 +278,22 @@ segmentation:
             threshold: 0.9
             fill: true
 
+        # mask_nucl:
+        #     ids_image: nucl/prep
+        #     ods_mask: nucl/mask
+        #     sauvola:
+        #         absmin: 1000.0
+        #         threshold: 5000.0
+        #         window_size:
+        #             - 19
+        #             - 75
+        #             - 75
+        #         k: 0.2
+        #         fill: true
+        #     erode:
+        #         disk: 3
+        #         postfix: _mask_ero
+
         prep_memb:
             ids_image: memb/mean
             ods_image: memb/prep
@@ -290,6 +306,24 @@ segmentation:
             ids_image: memb/unet_stapl3d
             ods_mask: memb/mask
             threshold: 0.6
+
+        # mask_memb:
+        #     ids_image: memb/planarity
+        #     ods_mask: memb/mask
+        #     threshold: 0.0005
+
+        # prep_csol:
+        #     ids_image: csol/mean
+        #     ods_image: csol/prep
+        #     filter:
+        #         type: 'median'
+        #         sigma: 1.0
+        #
+        # mask_csol:
+        #     ids_image: csol/prep
+        #     ods_mask: csol/mask
+        #     threshold: 1000.0
+
 
         combine_masks:
             ids_nucl: nucl/mask
@@ -327,8 +361,7 @@ segmentation:
                     - 7
                     - 7
                     postfix: _dil
-            seeds:
-                threshold: 1.16
+            label: true
 
         segment:
             ids_image: memb/prep
@@ -402,6 +435,9 @@ zipping:
         blockmargin:
         blockrange:
         blocks:
+        ids_nucl: ''
+        ids_memb_chan: memb/mean_smooth
+        peaks_thr: 1.0
         grp: segm
         ids: labels_memb_del_relabeled_fix
         postfix: _relabeled_fix
