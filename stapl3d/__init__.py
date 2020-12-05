@@ -3128,7 +3128,7 @@ class Stapl3r(object):
         self._plot_profiles(f, axdict, info_dict)
 
         f.suptitle(figtitle, fontsize=14, fontweight='bold')
-        f.savefig('{}.pdf'.format(filestem))
+        f.savefig('{}.pdf'.format(filestem), format='pdf')
         if ioff:
             plt.close(f)
 
