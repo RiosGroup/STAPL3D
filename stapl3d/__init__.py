@@ -2780,7 +2780,7 @@ class Stapl3r(object):
         self.suffix = suffix
         self.n_workers = n_workers
 
-        self.cfg = {}  # private or public?
+        self.cfg = {}  # TODO: private or public?
         if self.parameter_file:
             self.set_config()
 
@@ -2793,20 +2793,6 @@ class Stapl3r(object):
         self._n_jobs = 0
 
         self._loginit()
-
-        # @property
-        # def _compute_env(self, compute_env=''):
-        #     return compute_env or os.environ.get('compute_env')
-        # @def foo():
-        #     doc = "The  property."
-        #     def fget(self):
-        #         return self._
-        #     def fset(self, value):
-        #         self._ = value
-        #     def fdel(self):
-        #         del self._
-        #     return locals()
-        #  = property(**())
 
         self._delimiter = '_'
         self._suffix_formats = {
@@ -2939,15 +2925,14 @@ class Stapl3r(object):
         """
 
         paths = get_paths(self.image_in)
-        datadir, filename = os.path.split(paths['base'])
 
         if directory:
             self.directory = directory
         elif subdirectory:
-            self.directory = os.path.join(datadir, subdirectory)
+            self.directory = os.path.join(paths['dir'], subdirectory)
 
         if not self.directory:
-            self.directory = os.path.join(datadir, self._module_id)
+            self.directory = os.path.join(paths['dir'], self._module_id)
 
         if self.directory:
             os.makedirs(self.directory, exist_ok=True)
@@ -3075,7 +3060,7 @@ class Stapl3r(object):
             datefmt='%Y-%m-%d %H:%M:%S',
             format='%(asctime)s [%(threadName)-12.12s] [%(levelname)-5.5s]  %(message)s',
             handlers=[logging.FileHandler('{}.log'.format(filestem)),
-                      logging.StreamHandler()]
+                      logging.StreamHandler()]  # FIXME: this goes to stderr
             )
 
     def _logstep(self, parameters):
