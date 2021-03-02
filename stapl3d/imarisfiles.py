@@ -23,7 +23,7 @@ import yaml
 import xml.etree.ElementTree as ET
 
 from stapl3d import (
-    parse_args_common,
+    # parse_args_common,
     get_n_workers,
     get_outputdir,
     get_imageprops,
@@ -40,21 +40,21 @@ def main(argv):
 
     # TODO: aggregate channels
     step_ids = ['split_channels', 'aggregate_channels']
-    fun_selector = {
-        'split': split_channels,
-        'aggregate': aggregate_channels,
-        }
-
-    args, mapper = parse_args_common(step_ids, fun_selector, *argv)
-
-    for step, step_id in mapper.items():
-        fun_selector[step](
-            args.image_in,
-            args.parameter_file,
-            step_id,
-            args.outputdir,
-            args.n_workers,
-            )
+#     fun_selector = {
+#         'split': split_channels,
+#         'aggregate': aggregate_channels,
+#         }
+#
+#     args, mapper = parse_args_common(step_ids, fun_selector, *argv)
+#
+#     for step, step_id in mapper.items():
+#         fun_selector[step](
+#             args.image_in,
+#             args.parameter_file,
+#             step_id,
+#             args.outputdir,
+#             args.n_workers,
+#             )
 
 
 def split_channels(
@@ -385,7 +385,6 @@ def find_downsample_factors(image_in, rl0_idx, rl1_idx):
     if im.format == '.ims':
         dims0 = find_dims(im, rl0_idx)
         dims1 = find_dims(im, rl1_idx)
-        print(dims0, dims1)
         dsfacs = np.around(np.array(dims0) / np.array(dims1)).astype('int')
     elif im.format == '.bdv':
         dsfacs = im.file['s00/resolutions'][rl1_idx, :][::-1]
@@ -393,6 +392,24 @@ def find_downsample_factors(image_in, rl0_idx, rl1_idx):
     im.close()
 
     return dsfacs
+
+
+def aggregate_hdf5(outputfile, inputpat, vol='data', xml_ref=''):
+    """Gather the inputfiles into an imarisfile by symbolic links."""
+
+    inputfiles = glob(inputpat)
+    inputfiles.sort()
+
+    h5chs_to_virtual(outputfile, inputpat, ids='data')
+    channels = [
+        {
+         'filepath': inputfile,
+         'Name': vol,
+         'xml_ref': xml_ref,
+         } for i, inputfile in enumerate(inputfiles)]
+
+    # h5chs_to_virtual(outputfile, inputpat, postfix='')
+    aggregate_h5_channels(outputfile, channels, ch_offset=0)
 
 
 def aggregate_h5(outputfile, inputstem, channel_pat='_ch??', postfix='', xml_ref=''):
@@ -444,10 +461,10 @@ def aggregate_h5_channels(tgt_file, channels, ch_offset=0):
         create_ext_link(f, ch_dict['Name'], ext_file, ch_dict['Name'])
 
 
-def aggregate_bigstitcher(outputfile, inputstem, channel_pat='_ch??', postfix='', ext='.h5', xml_ref=''):
+def aggregate_bigstitcher(outputfile, inputpat='_ch??', postfix='', ext='.h5', xml_ref=''):
     """Gather the inputfiles into an imarisfile by symbolic links."""
 
-    inputfiles = glob('{}{}{}{}'.format(inputstem, channel_pat, postfix, ext))
+    inputfiles = glob('{}{}{}'.format(inputpat, postfix, ext))
     inputfiles.sort()
 
     channels = [
@@ -501,7 +518,9 @@ def aggregate_bigstitcher_channels(tgt_file, channels, ch_offset=0, ext='.h5'):
 
     for ch_dict in channels:
 
-        xml_path = ch_dict['xml_ref'] or ch_dict['filepath'].replace(ext, '.xml')
+        xml_path = ch_dict['xml_ref'] or ch_dict['filepath'].replace(ext, '_stacks.xml')
+        # FIXME: remove this workaround for: 'VoxelSize unit upon fuse is in pixels, not um'
+        # xml_path = ch_dict['xml_ref'] or ch_dict['filepath'].replace(ext, '.xml')
         elsize = bdv_load_elsize(xml_path)
 
         linked_path = os.path.relpath(ch_dict['filepath'], os.path.dirname(tgt_file))
@@ -545,27 +564,45 @@ def bdv_to_virtual(outputfile, inputfile, reslev=0):
         f.create_virtual_dataset('data', layout, fillvalue=0)
 
 
-def h5chs_to_virtual(outputfile, inputstem, channel_pat='_ch??', postfix=''):
+def h5chs_to_virtual(outputfile, inputpat, ids='data'):
 
-    inputfiles = glob('{}{}{}.h5'.format(inputstem, channel_pat, postfix))
+    inputfiles = glob(inputpat)
     inputfiles.sort()
 
     f = h5py.File(inputfiles[0], 'r')
-    shape = f['data'].shape + (len(inputfiles),)
-    dtype = f['data'].dtype
+    shape = f[ids].shape + (len(inputfiles),)
+    dtype = f[ids].dtype
+
+    try:
+        axlab = [dim.label for dim in f[ids].dims]
+    except:
+        axlab = None
+    try:
+        elsize = [es for es in f[ids].attrs['element_size_um']]
+    except KeyError:
+        elsize = None
+
+    f.close()
     layout = h5py.VirtualLayout(shape=shape, dtype=dtype)
 
     for ch, inputfile in enumerate(inputfiles):
         image_in = "{}".format(inputfile)
-        vsource = h5py.VirtualSource(image_in, name='data', shape=shape[:3])
+        vsource = h5py.VirtualSource(image_in, name=ids, shape=shape[:3])
         layout[:, :, :, ch] = vsource
 
     # Add virtual dataset to output file
     if not outputfile:
         filestem, ext = os.path.splitext(inputfiles[0])
         outputfile = '{}{}{}'.format(filestem, '_virt', ext)
-    with h5py.File(outputfile, 'w', libver='latest') as f:
-        f.create_virtual_dataset('data', layout, fillvalue=0)
+    with h5py.File(outputfile, 'a', libver='latest') as f:
+        f.create_virtual_dataset(ids, layout, fillvalue=0)
+
+        if axlab is not None:
+            for i, label in enumerate(axlab + ['c']):
+                f[ids].dims[i].label = label
+        if elsize is not None:
+            f[ids].attrs['element_size_um'] = elsize + [1]
+
 
 if __name__ == "__main__":
     main(sys.argv[1:])

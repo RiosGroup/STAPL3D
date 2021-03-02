@@ -7,25 +7,24 @@ channel = args[1];
 tif_path = args[2];
 outputdir = args[3];
 basename = args[4];
-suffix = args[5];
-cfg_path = args[6];
-elsize_z = args[7];
-elsize_y = args[8];
-elsize_x = args[9];
+cfg_path = args[5];
+elsize_z = args[6];
+elsize_y = args[7];
+elsize_x = args[8];
 
-downsample_in_z = args[10];
-downsample_in_y = args[11];
-downsample_in_x = args[12];
+downsample_in_z = args[9];
+downsample_in_y = args[10];
+downsample_in_x = args[11];
 
-min_r = args[13];
-max_r = args[14];
-max_shift_in_z = args[15];
-max_shift_in_y = args[16];
-max_shift_in_x = args[17];
-max_displacement = args[18];
+min_r = args[12];
+max_r = args[13];
+max_shift_in_z = args[14];
+max_shift_in_y = args[15];
+max_shift_in_x = args[16];
+max_displacement = args[17];
 
-relative = args[19];
-absolute = args[20];
+relative = args[18];
+absolute = args[19];
 
 xml_file = basename + "_stacks.xml";
 xml_path = outputdir + File.separator + xml_file;

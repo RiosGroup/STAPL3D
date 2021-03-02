@@ -98,9 +98,11 @@ def estimate(
     params = get_params(locals().copy(), parameter_file, step_id)
     subparams = get_params(locals().copy(), parameter_file, step_id, 'submit')
 
-    filepaths, _ = get_blockfiles(image_in, outputdir, params['blocks'])
+    # filepaths, _ = get_blockfiles(image_in, outputdir, params['blocks'])
+    #, _ = get_blockfiles(image_in, outputdir, params['blocks'])
 
     blocksize, blockmargin, blocks = get_blockinfo(image_in, parameter_file, params)
+    print(blocks)
 
     with open(parameter_file, 'r') as ymlfile:
         cfg = yaml.safe_load(ymlfile)
@@ -149,7 +151,7 @@ def estimate(
             step_id,
             outputdir,
         )
-        for block_idx, filepath in zip(blocks, filepaths)]
+        for block_idx in blocks]
 
     n_workers = get_n_workers(len(blocks), subparams)
     with multiprocessing.Pool(processes=n_workers) as pool:
@@ -271,6 +273,7 @@ def process_block(
     for pf, label_im in label_ims.items():
         label_im.slices = block_label['slices'][:3]
         all_regions[pf] = label_im.slice_dataset().astype('int')
+        elsize = label_im.elsize
 
     all_data = {}
     for dpf, datadict in data_ims.items():
@@ -290,10 +293,24 @@ def process_block(
     if min_labelsize:
         all_regions = filter_size(all_regions, min_labelsize, outstem)
 
-    for pf, regions in all_regions.items():
+    from skimage.segmentation import clear_border
 
+    for pf, regions in all_regions.items():
+        all_regions[pf] = clear_border(regions, in_place=True)
+
+    rp = regionprops(all_regions[pf])
+    labs = np.array([prop.label for prop in rp])
+    n_samples = 200
+    labs = np.random.choice(labs, size=n_samples, replace=False)
+    print(labs)
+
+    for pf, regions in all_regions.items():
+        N = len(np.unique(regions))
+        print(f'found {N - 1} labels')
         try:
             rpt = regionprops_table(regions, properties=morph)
+            df = pd.DataFrame(rpt)
+            print('morphological feats done', df.shape)
         except IndexError:
             print('IndexError on MORPH {}: empty labelset'.format(block_label['id']))
             df = get_empty_dataframe(morph, add, intens, channels)
@@ -302,19 +319,64 @@ def process_block(
             df = get_empty_dataframe(morph, add, intens, channels)
         else:
 
-            df = pd.DataFrame(rpt)
-
             origin = [block_data['slices'][i].start for i in [0, 1, 2]]  # in full dataset voxels
             df = add_features(df, aux_data_path, origin, downsample_factors)
+            print('additional feats done', df.shape)
 
             for cpf, ch_data in all_data.items():
                 df_int = get_intensity_df_data(regions, intens, ch_data, cpf)
                 df = pd.concat([df, df_int], axis=1)
+            print('intensity feats done', df.shape)
+
+            df = df.set_index('label')
+            df = df[df.index.isin(labs)]
+            cols = [f'evals-{col}' for col in [2, 1, 0]]
+            for i, row in enumerate(df.iterrows()):
+                l = int(row[0])
+                print(f'proc label {l} as {i} / {N}')
+                mask = regions == l
+                df.loc[l, cols] = calculate_evals(mask, np.array(elsize))
+            df = add_feats(df)
+            print('corrected feats done', df.shape)
 
         outstem = outputstem or label_im.split_path()['base']
         outstem += '_{}'.format(block_label['id'])
         csv_path = "{}_features_{}.csv".format(outstem, pf)
         df.to_csv(csv_path)
+
+
+def add_feats(df):
+    cols_in = [f'evals-{i}' for i in [0, 1, 2]]
+    eigvals = np.clip(np.array(df[cols_in]), 0, np.inf)
+    fa = fractional_anisotropy(eigvals)
+    ma_al = get_ellips_axis_lengths(eigvals[:, 0])
+    mi_al = get_ellips_axis_lengths(eigvals[:, -1])
+    cols = ['evals_fractional_anisotropy', 'evals_major_axis_length', 'evals_minor_axis_length']
+    d = np.array((fa, ma_al, mi_al)).transpose()
+    df_t = pd.DataFrame(d, index=df.index, columns=cols)
+    df = df.join(df_t)
+    return df
+
+def calculate_evals(mask, spacing):
+    # adapted from pyradiomics
+
+    vcoords = np.where(mask != 0)
+    Np = len(vcoords[0])
+    coordinates = np.array(vcoords, dtype='int').transpose((1, 0))  # Transpose equals zip(*a)
+    pcoords = coordinates * spacing[None, :]
+    pcoords -= np.mean(pcoords, axis=0)  # Centered at 0
+    pcoords /= np.sqrt(Np)
+
+    covariance = np.dot(pcoords.T.copy(), pcoords)  # inertia_tensor
+
+    evals = np.linalg.eigvals(covariance)
+
+    machine_errors = np.bitwise_and(evals < 0, evals > -1e-10)
+    if np.sum(machine_errors) > 0:
+        evals[machine_errors] = 0
+    evals.sort()  # sort the eigenvalues from small to large
+
+    return evals
 
 
 def filter_borders(label_im, outstem):
@@ -612,6 +674,10 @@ def get_feature_set(fset_morph='minimal', fset_intens='minimal', aux_data_path='
     # intensity features
     fsets_intens ={
         'none': (),
+        'median': (
+            'median_intensity',
+            'weighted_centroid',
+            ),
         'minimal': (
             'mean_intensity',
             ),
@@ -802,15 +868,34 @@ def select_features(dfs, feat_select, min_size=0, split_features=False):
 
     df4 = pd.DataFrame(index=df1.index)
 
-    if 'ch00_weighted_centroid-0' in dfs['full'].keys() and 'memb' in dfs.keys():
+    elsizes = {'centroid-0': 1.2, 'centroid-1': 0.33, 'centroid-2': 0.33}
+    elsize = [1.2, 0.33, 0.33]
+    ctroid = 'ch00_weighted_centroid-'
+    #ctroid = 'centroid-'
+    w = 'full' if 'weighted' in ctroid else 'nucl'
+    # FIXME: convert to um?
+    if f'{ctroid}0' in dfs['full'].keys() and 'memb' in dfs.keys():
+
         comcols = ['centroid-0', 'centroid-1', 'centroid-2']
         dfa = dfs['full'][comcols]
-        dfb = dfs['full'][comcols]
-        dfb[dfb.index.isin(dfs['nucl'].index)] = dfs['nucl'][comcols]
-        comcols = ['ch00_weighted_centroid-0', 'ch00_weighted_centroid-1', 'ch00_weighted_centroid-2']
-        dfc = dfs['full'][comcols]
+        comcols = [f'{ctroid}{cidx}' for cidx in [0, 1, 2]]
+        dfc = dfs[w][comcols]
         dist_w = np.sqrt((np.square(np.array(dfa)-np.array(dfc)).sum(axis=1)))
         df4['polarity'] = dist_w / dfs['full']['major_axis_length']
+
+        comcols = ['centroid-0', 'centroid-1', 'centroid-2']
+        dfa = dfs['full'][comcols]
+        for ccol, es in zip(comcols, elsize):
+            dfa.loc[:, ccol] = dfa.loc[:, ccol] * es
+
+        comcols = [f'{ctroid}{cidx}' for cidx in [0, 1, 2]]
+        dfc = dfs[w][comcols]
+        for ccol, es in zip(comcols, elsize):
+            dfc.loc[:, ccol] = dfc.loc[:, ccol] * es
+
+        dist_w = np.sqrt((np.square(np.array(dfa)-np.array(dfc)).sum(axis=1)))
+        df4['evals_polarity'] = dist_w / dfs['full']['evals_major_axis_length']
+
         df_comp.append(df4)
 
     if 'dist_to_edge' in dfs['full'].keys():
@@ -847,6 +932,17 @@ def get_feature_names(fset_morph='', fset_intens='', metrics=['mean'], d={}):
         feat_names['morphs'] = [
             'area',
             'com_z', 'com_y', 'com_x',
+        ]
+    elif fset_morph == 'medium':
+        feat_names['morphs'] = [
+            'area',
+            'com_z', 'com_y', 'com_x',
+            'equivalent_diameter',
+            'extent',
+            'fractional_anisotropy',
+            'major_axis_length', 'minor_axis_length',
+            'evals_fractional_anisotropy',
+            'evals_major_axis_length', 'evals_minor_axis_length',
         ]
     elif fset_morph == 'maximal':
         feat_names['morphs'] = [
@@ -961,8 +1057,8 @@ def postprocess_features(
     min_size_nucl=50,
     save_border_labels=True,
     split_features=False,
-    fset_morph='minimal',
-    fset_intens='minimal',
+    fset_morph='medium',
+    fset_intens='median',
     memb_idxs=[],
     nucl_idxs=[],
     csol_idxs=[],
@@ -985,11 +1081,16 @@ def postprocess_features(
 
     li = []
     for i in mpi.series:
+
         print('processing block {:03d}'.format(i))
         block = mpi.blocks[i]
 
         # read the csv's
         filestem = '{}_{}{}'.format(csv_stem, block['id'], feat_pf)
+        filename = '{}_{}.{}'.format(filestem, segm_pfs[-1], ext)
+        filepath = os.path.join(csv_dir, filename)
+        if not os.path.isfile(filepath):
+            continue
         dfs = {}
         for segm_pf in segm_pfs:
             filename = '{}_{}.{}'.format(filestem, segm_pf, ext)
@@ -1001,9 +1102,9 @@ def postprocess_features(
 
         # select features
         # metrics=['mean', 'median', 'variance', 'min', 'max']
-        metrics = ['mean']  # TODO
+        metrics = ['median']  # TODO
         markers = {
-            'markers': memb_idxs + nucl_idxs + csol_idxs,
+            'markers': list(range(8)),  # memb_idxs + nucl_idxs + csol_idxs,  # FIXME: 0 and 7 seem to be swapped if done like this
             'membrane': memb_idxs,
             'nuclear': nucl_idxs,
             'cytosol': csol_idxs,
@@ -1012,24 +1113,6 @@ def postprocess_features(
         df = select_features(dfs, feat_names, min_size_nucl, split_features)
         #df = rename_columns(df, metrics=metrics)
         # TODO: channel names from yaml
-
-        # label filtering: only select full segments
-        filestem = '{}_{}'.format(csv_stem, block['id'])
-        sl_path = os.path.join(csv_dir, '{}_smalllabels.pickle'.format(filestem))
-        with open(sl_path, 'rb') as f:
-            slabels = pickle.load(f)
-        bl_path =  os.path.join(csv_dir, '{}_borderlabels.pickle'.format(filestem))
-        if save_border_labels:
-            labels.slices = block['slices']
-            blabels = find_border_labels(labels)
-            with open(bl_path, 'wb') as f:
-                pickle.dump(blabels, f)
-        else:
-            with open(bl_path, 'rb') as f:
-                blabels = pickle.load(f)
-
-        blabels -= slabels
-        df = df.drop(labels=blabels)
 
         li.append(df)
 

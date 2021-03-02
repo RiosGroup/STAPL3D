@@ -2,7 +2,26 @@
 
 """Calculate metrics for mLSR-3D equalization assay.
 
-# TODO: implement other than czi (e.g. make tif a possibility here)
+    # TODO: implement other than czi (e.g. make tif a possibility here)
+    # TODO: from stapl3d import mplog
+
+    # Generate reports. [now in 'metrics' steps]
+    if self._compute_env in ['SLURM', 'SGE']:
+        self._n_workers = 1
+    arglist = [(filepath,) for filepath in self.filepaths]
+    with multiprocessing.Pool(processes=self._n_workers) as pool:
+        pool.starmap(self._postprocess_report, arglist)
+
+    def _postprocess_report(self, filepath):
+        # "Generate reports."
+
+        filestem = os.path.splitext(os.path.basename(filepath))[0]
+        inputs = self._prep_paths(self.inputs, reps={'f': filestem})
+        outputs = self._prep_paths(self.outputs, reps={'f': filestem})
+        self.report(outputpath=inputs['report'],
+                    name=filestem, filestem=filestem,
+                    inputs=inputs, outputs=outputs)
+
 
 """
 
@@ -38,7 +57,6 @@ from stapl3d import parse_args, Stapl3r, Image, transpose_props, get_imageprops,
 from stapl3d.preprocessing import shading
 from stapl3d.reporting import merge_reports, get_centreslices
 
-# from stapl3d import mplog
 logger = logging.getLogger(__name__)
 
 
@@ -53,9 +71,8 @@ def main(argv):
         args.parameter_file,
         step_id=args.step_id,
         directory=args.outputdir,
-        dataset=args.dataset,
-        suffix=args.suffix,
-        n_workers=args.n_workers,
+        prefix=args.prefix,
+        max_workers=args.max_workers,
     )
 
     for step in args.steps:
@@ -75,16 +92,58 @@ class Equalizer(Stapl3r):
 
         self._fun_selector = {
             'smooth': self.smooth,
-            'segment': self.segment_regions,
-            'metrics': self.calculate_metrics,
+            'segment': self.segment,
+            'metrics': self.metrics,
             'postprocess': self.postprocess,
             }
 
+        self._parallelization = {
+            'smooth': ['filepaths'],
+            'segment': ['filepaths'],
+            'metrics': ['filepaths'],
+            'postprocess': [],
+            }
+
+        self._parameter_sets = {
+            'smooth': {
+                'fpar': self._FPAR_NAMES,
+                'ppar': ('sigma',),
+                'spar': ('_n_workers', 'filepaths'),
+                },
+            'segment': {
+                'fpar': self._FPAR_NAMES,
+                'ppar': ('otsu_factor_noise', 'otsu_factor_tissue',
+                         'threshold_noise', 'threshold_tissue',
+                         'thresholds', '_otsus',
+                         'segment_quantile', 'segment_min_size'),
+                'spar': ('_n_workers', 'filepaths',),
+                },
+            'metrics': {
+                'fpar': self._FPAR_NAMES,
+                'ppar': ('methods', 'quantiles', '_metrics'),
+                'spar': ('_n_workers', 'filepaths',),
+                },
+            'postprocess': {
+                'fpar': self._FPAR_NAMES,
+                'ppar': (),
+                'spar': (),
+                },
+            }
+
+        self._parameter_table = {
+            'sigma': 'Smoothing sigma',
+            'otsu_factor_noise': 'Multiplication factor for noise threshold',
+            'otsu_factor_tissue': 'Multiplication factor for tissue threshold',
+            'segment_quantile': 'Quantile used for segmentation',
+            'segment_min_size': 'Minimal connected component size',
+            'quantiles': 'Quantiles separating signal and tissue background',
+            }
+
         default_attr = {
-            'step_id': 'equalization',
-            'sigma': 60,
             'filepat': '*.czi',  # TODO
             'filepaths': [],
+            'outputformat': '.h5',
+            'sigma': 60,
             'otsu_factor_noise': 0.1,
             'otsu_factor_tissue': 1.1,
             'thresholds': {},
@@ -96,7 +155,6 @@ class Equalizer(Stapl3r):
             'methods': ['seg'],
             'quantiles': [0.50, 0.99],
             '_metrics': {},
-            'outputformat': '.h5',
         }
         for k, v in default_attr.items():
             setattr(self, k, v)
@@ -104,117 +162,143 @@ class Equalizer(Stapl3r):
         for step in self._fun_selector.keys():
             self.set_parameters(step)
 
+        self._init_paths()
+
+        self._init_log()
+
+    def _init_paths(self):
+
         self.set_filepaths()
 
-        self._parsets = {
+        vols_d = ['data', 'smooth']
+        vols_m = ['noise_mask', 'tissue_mask', 'segmentation']
+
+        if 'h5' in self.outputformat:
+            fstring = '{}.h5/{}'
+        elif 'nii' in self.outputformat:
+            fstring = '{}_{}.nii.gz'
+
+        stem = self._build_path()
+        fpat = self._build_path(suffixes=[{'f': 'p'}])
+
+        self._paths = {
             'smooth': {
-                'fpar': self._FPAR_NAMES,
-                'ppar': ('sigma',),
-                'spar': ('n_workers', 'filepaths'),
+                'inputs': {
+                    'data': f'{fpat}',
+                    },
+                'outputs': {
+                    ods: fstring.format(fpat, ods) for ods in vols_d
+                    },
                 },
             'segment': {
-                'fpar': self._FPAR_NAMES,
-                'ppar': ('otsu_factor_noise', 'otsu_factor_tissue',
-                         'threshold_noise', 'threshold_tissue',
-                         'thresholds', '_otsus',
-                         'segment_quantile', 'segment_min_size'),
-                'spar': ('filepaths',),
+                'inputs': {
+                    ods: fstring.format(fpat, ods) for ods in vols_d
+                    },
+                'outputs': {
+                    **{ods: fstring.format(fpat, ods) for ods in vols_m},
+                    **{'yml': f'{fpat}_segment'},
+                    },
                 },
             'metrics': {
-                'fpar': self._FPAR_NAMES,
-                'ppar': ('methods', 'quantiles', '_metrics'),
-                'spar': ('filepaths',),
+                'inputs': {
+                    **{ods: fstring.format(fpat, ods) for ods in vols_d + vols_m},
+                    **{'yml': f'{fpat}_segment.yml'},
+                    },
+                'outputs': {
+                    'csv': f'{fpat}.csv',
+                    'yml': f'{fpat}_metrics',
+                    'report': f'{fpat}.pdf',
+                    },
                 },
             'postprocess': {
-                'fpar': self._FPAR_NAMES,
-                'ppar': (),
-                'spar': (),
+                'inputs': {
+                    'data': fstring.format(fpat, 'data'),
+                    'csv': f'{fpat}.csv',
+                    'yml_segment': f'{fpat}_segment.yml',
+                    'yml_metrics': f'{fpat}_metrics.yml',
+                    'report': f'{fpat}.pdf',
+                    },
+                'outputs': {
+                    'csv': f'{stem}.csv',
+                    'yml_segment': f'{stem}_segment.yml',
+                    'yml_metrics': f'{stem}_metrics.yml',
+                    'report': f'{stem}.pdf',
+                    'summary': f'{stem}_summary.pdf',
+                    },
                 },
             }
 
-        # TODO: merge with parsets
-        self._partable = {
-            'sigma': 'Smoothing sigma',
-            'otsu_factor_noise': 'Multiplication factor for noise threshold',
-            'otsu_factor_tissue': 'Multiplication factor for tissue threshold',
-            # 'threshold_noise': 'Noise threshold',
-            # 'threshold_tissue': 'Tissue threshold',
-            'segment_quantile': 'Quantile used for segmentation',
-            'segment_min_size': 'Minimal connected component size',
-            'quantiles': 'Quantiles separating signal and tissue background',
-            }
+        for step in self._fun_selector.keys():
+            self.inputpaths[step]  = self._merge_paths(self._paths[step], step, 'inputs')
+            self.outputpaths[step] = self._merge_paths(self._paths[step], step, 'outputs')
 
     def smooth(self, **kwargs):
         """Smooth images with a gaussian kernel."""
 
-        self.set_parameters('smooth', kwargs)
-        arglist = self._get_arglist(['filepaths'])
-        self.set_n_workers(len(arglist))
-        pars = self.dump_parameters(step=self.step)
-        self._logstep(pars)
-
-        with multiprocessing.Pool(processes=self.n_workers) as pool:
+        arglist = self._prep_step('smooth', kwargs)
+        with multiprocessing.Pool(processes=self._n_workers) as pool:
             pool.starmap(self._smooth_image, arglist)
 
     def _smooth_image(self, filepath):
         """Smooth an image with a gaussian kernel."""
 
-        filestem, ext, outputpat = self._get_outputpat(filepath)
+        filestem = os.path.splitext(os.path.basename(filepath))[0]
+        inputs = self._prep_paths(self.inputs, reps={'f': filestem})
+        outputs = self._prep_paths(self.outputs, reps={'f': filestem})
 
-        # self._logmp(filestem)
-
-        # Load image => czi (/ lif?)
+        # Load image => czi (/ lif? / tif?)
         data = np.transpose(shading.read_tiled_plane(filepath, 0, 0)[0])
         data_smooth = gaussian_filter(data.astype('float'), self.sigma)
 
-        iminfo = shading.get_image_info(filepath)
-        # TODO: integrate iminfo and Image attributes
-        props = {}
-        props['path'] = ''
-        props['permission'] = 'r+'
-        props['axlab'] = 'zyx'
-        props['shape'] = iminfo['dims_zyxc'][:3]
-        props['elsize'] = iminfo['elsize_zyxc'][:3]
-        props['elsize'] = [es if es else 1.0 for es in props['elsize']]
-        # FIXME: for 2D the z-axis is returned 0.0
+        def get_props(filepath):
+            # TODO: integrate iminfo and Image attributes
+            # FIXME: for 2D the z-axis is returned 0.0
+            iminfo = shading.get_image_info(filepath)
+            props = {}
+            props['path'] = ''
+            props['permission'] = 'r+'
+            props['axlab'] = 'zyx'
+            props['shape'] = iminfo['dims_zyxc'][:3]
+            props['elsize'] = iminfo['elsize_zyxc'][:3]
+            props['elsize'] = [es if es else 1.0 for es in props['elsize']]
+            return props
+
+        props = get_props(filepath)
         if 'nii' in self.outputformat:
             props = transpose_props(props)
 
-        for ids, out in {'data': data, 'smooth': data_smooth}.items():
-            props['path'] = outputpat.format(ids)
+        vols = {'data': data, 'smooth': data_smooth}
+        for ids, out in vols.items():
+            props['path'] = outputs[ids]
             write_image(out, props)
 
-    def segment_regions(self, **kwargs):
+    def segment(self, **kwargs):
         """Segment the noise and tissue region in the image."""
 
-        self.set_parameters('segment', kwargs)
-        arglist = self._get_arglist(['filepaths'])
-        self.set_n_workers(len(self.filepaths))
-        pars = self.dump_parameters(step=self.step)
-        self._logstep(pars)
-
-        with multiprocessing.Pool(processes=self.n_workers) as pool:
+        arglist = self._prep_step('segment', kwargs)
+        with multiprocessing.Pool(processes=self._n_workers) as pool:
             pool.starmap(self._segment_regions_image, arglist)
 
     def _segment_regions_image(self, filepath):
 
-        filestem, ext, outputpat = self._get_outputpat(filepath)
+        filestem = os.path.splitext(os.path.basename(filepath))[0]
+        inputs = self._prep_paths(self.inputs, reps={'f': filestem})
+        outputs = self._prep_paths(self.outputs, reps={'f': filestem})
 
-        data, props = load_image(outputpat.format('data'))
-        smooth, props = load_image(outputpat.format('smooth'))
+        data, props = load_image(inputs['data'])
+        smooth, props = load_image(inputs['smooth'])
 
         masks, otsu, thrs = self._region_masks(smooth, filestem)
         masks = self._tissue_segmentation(data, masks)
 
         for ids, out in masks.items():
-            props['path'] = outputpat.format(ids)
+            props['path'] = outputs[ids]
             write_image(out, props)
 
         self.thresholds = {filestem: thrs}
         self._otsus = {filestem: otsu}
-        basename = self.format_([filestem, self._module_id, self.step])
-        outstem = os.path.join(self.directory, basename)
-        self.dump_parameters(step=self.step, filestem=outstem)
+
+        self.dump_parameters(self.step, outputs['yml'])
 
     def _region_masks(self, data, filestem):
 
@@ -263,15 +347,10 @@ class Equalizer(Stapl3r):
 
         return masks
 
-    def calculate_metrics(self, **kwargs):
+    def metrics(self, **kwargs):
 
-        self.set_parameters('metrics', kwargs)
-        arglist = self._get_arglist(['filepaths'])
-        self.set_n_workers(len(self.filepaths))
-        pars = self.dump_parameters(step=self.step)
-        self._logstep(pars)
-
-        with multiprocessing.Pool(processes=self.n_workers) as pool:
+        arglist = self._prep_step('metrics', kwargs)
+        with multiprocessing.Pool(processes=self._n_workers) as pool:
             pool.starmap(self._calculate_metrics_image, arglist)
 
     def _calculate_metrics_image(self, filepath):
@@ -289,14 +368,14 @@ class Equalizer(Stapl3r):
                 cnr = 0
             return cnr
 
-        def q_base(image, quantiles, outputdir, dataset):
+        def q_base(image, quantiles, segpath):
             """Simple quantiles."""
             data = np.ravel(image)
             vals, score = get_measures(data, quantiles)
             cnr = None
             return pd.DataFrame([vals[0], vals[1], score, cnr]).T
 
-        def q_clip(image, quantiles, outputdir, dataset):
+        def q_clip(image, quantiles, segpath):
             """Simple quantiles of non-clipping."""
             infun = np.iinfo if image.dtype.kind in 'ui' else np.finfo
             mask = np.logical_and(image > infun(image.dtype).min,
@@ -306,10 +385,10 @@ class Equalizer(Stapl3r):
             cnr = None
             return pd.DataFrame([vals[0], vals[1], score, cnr]).T
 
-        def q_mask(image, quantiles, outputdir, dataset):
+        def q_mask(image, quantiles, segpath):
             """Simple quantiles of image[tissue_mask]."""
-            tissue_mask, _ = load_image(outputpat.format('tissue_mask'))
-            tissue_mask = tissue_mask.astype('bool')
+            segmentation, _ = load_image(segpath)
+            tissue_mask = segmentation >= 2
             infun = np.iinfo if image.dtype.kind in 'ui' else np.finfo
             mask = np.logical_and(tissue_mask, image < infun(image.dtype).max)
             data = np.ravel(image[mask])
@@ -321,10 +400,10 @@ class Equalizer(Stapl3r):
             cnr = get_cnr(image, noise_mask, vals[1], vals[0])
             return pd.DataFrame([vals[0], vals[1], score, cnr]).T
 
-        def gmm(image, quantiles, outputdir, dataset):
+        def gmm(image, quantiles, segpath):
             """Two-comp GMM of segmentation image[tissue_mask]."""
-            tissue_mask, _ = load_image(outputpat.format('tissue_mask'))
-            tissue_mask = tissue_mask.astype('bool')
+            segmentation, _ = load_image(segpath)
+            tissue_mask = segmentation >= 2
             X_train = np.ravel(image[tissue_mask])
             X_train = X_train.reshape(-1, 1)
             gmm = GaussianMixture(n_components=2, max_iter=100, verbose=0,
@@ -336,96 +415,72 @@ class Equalizer(Stapl3r):
             cnr = get_cnr(image, noise_mask, vals[1], vals[0])
             return pd.DataFrame([vals[0], vals[1], score, cnr]).T
 
-        def seg(image, quantiles, outputdir, dataset):
+        def seg(image, quantiles, segpath):
             """Three-comp segmentation."""
-            segmentation, _ = load_image(outputpat.format('segmentation'))
+            segmentation, _ = load_image(segpath)
             vals = [np.median(np.ravel(image[segmentation==2])),
                     np.median(np.ravel(image[segmentation==3]))]
             score = vals[1] / vals[0]
             cnr = get_cnr(image, segmentation==3, vals[1], vals[0])
             return pd.DataFrame([vals[0], vals[1], score, cnr]).T
 
-        filestem, ext, outputpat = self._get_outputpat(filepath)
+        filestem = os.path.splitext(os.path.basename(filepath))[0]
+        inputs = self._prep_paths(self.inputs, reps={'f': filestem})
+        outputs = self._prep_paths(self.outputs, reps={'f': filestem})
 
-        image, _ = load_image(outputpat.format('data'))
-        smooth, props = load_image(outputpat.format('smooth'))
+        data, props = load_image(inputs['data'])
+        smooth, props = load_image(inputs['smooth'])
 
         df = pd.DataFrame()
         metrics = ['q1', 'q2', 'contrast', 'cnr']
-        meths = {'q_base': q_base, 'q_clip': q_base, 'q_mask': q_base,
+        meths = {'q_base': q_base, 'q_clip': q_clip, 'q_mask': q_mask,
                  'gmm': gmm, 'seg': seg}
         for method, fun in meths.items():
             if method in self.methods:
-                df0 = fun(image, self.quantiles, self.directory, filestem)
+                df0 = fun(data, self.quantiles, inputs['segmentation'])
                 df0.columns=['{}-{}'.format(method, metric) for metric in metrics]
                 df = pd.concat([df, df0], axis=1)
 
         df.index = [filestem]
 
         # NB: need single-file output for HCP distributed system
-        outputpath = os.path.join(self.directory, '{}.csv'.format(filestem))
-        df.to_csv(outputpath, index_label='sample_id')
+        df.to_csv(outputs['csv'], index_label='sample_id')
 
         self._metrics = {filestem: df.to_dict(orient='list')}
-        basename = self.format_([filestem, self._module_id, self.step])
-        outstem = os.path.join(self.directory, basename)
-        self.dump_parameters(step=self.step, filestem=outstem)
+        self.dump_parameters(self.step, outputs['yml'])
+
+        # Pars of this step
+        pars = self._step_pars(self._parameter_sets[self.step], vars(self))['params']
+        # Add 'sigma' parameter of previous step
+        pars = self._load_dumped_step(self._module_id, self._module_id, 'smooth', pars)
+        # Load thresholds from filestem-specific yml
+        with open(inputs['yml'], 'r') as ymlfile:
+            cfg = yaml.safe_load(ymlfile)
+        pars = {**pars, **cfg['equalization']['segment']['params']}
+
+        self.report(outputpath=outputs['report'],
+                    name=filestem, filestem=filestem,
+                    inputs=inputs, outputs=outputs,
+                    parameters=pars,
+                    # threshold_noise=pars['thresholds'][filestem][0],
+                    # threshold_tissue=pars['thresholds'][filestem][1],
+                    # threshold_otsu=pars['_otsus'][filestem],
+                    # cnr=self._metrics[filestem]['seg-cnr'][0],
+                    # contrast=self._metrics[filestem]['seg-contrast'][0],
+                    # median_bg=self._metrics[filestem]['seg-q1'][0],
+                    # median_fg=self._metrics[filestem]['seg-q2'][0],
+                    )
+                    # NOTE: doing this for 'seg' method only => TODO
 
     def postprocess(self, **kwargs):
 
-        self.set_parameters('postprocess', kwargs)
-        arglist = self._get_arglist(['filepaths'])
-        self.set_n_workers(len(self.filepaths))
-        pars = self.dump_parameters(step=self.step)
-        self._logstep(pars)
-
+        arglist = self._prep_step('postprocess', kwargs)
         self._postprocess()
 
     def _postprocess(self, basename='equalization_assay'):
 
-        self._postprocess_merge(basename)
+        outputs = self._prep_paths(self.outputs)
 
-        if self._compute_env == 'SLURM' or self._compute_env == 'SGE':
-            self.n_workers = 1
-        else:
-            self.set_n_workers(len(self.filepaths))
-
-        arglist = [(filepath,) for filepath in self.filepaths]
-        with multiprocessing.Pool(processes=self.n_workers) as pool:
-            pool.starmap(self._postprocess_report, arglist)
-
-        outputstem = os.path.join(self.directory, basename)
-        ext = os.path.splitext(self.filepaths[0])[1]
-
-        # Merge csv's.
-        pdfs = []
-        for filepath in self.filepaths:
-            basename = os.path.basename(os.path.splitext(filepath)[0])
-            filename = '{}.pdf'.format(basename)
-            pdfs.append(os.path.join(self.directory, filename))
-        pdfs.sort()
-        merge_reports(pdfs, '{}.pdf'.format(outputstem))
-
-        self.summary_report(basename=basename)
-
-    def _postprocess_merge(self, basename='equalization_assay'):
-
-        outputstem = os.path.join(self.directory, basename)
-        ext = os.path.splitext(self.filepaths[0])[1]
-
-        # Merge csv's.
-        # csvs = [filepath.replace(ext, '.csv') for filepath in self.filepaths]
-        csvs = []
-        for filepath in self.filepaths:
-            basename = os.path.basename(os.path.splitext(filepath)[0])
-            filename = '{}.csv'.format(basename)
-            csvs.append(os.path.join(self.directory, filename))
-        csvs.sort()
-        merge_csvs(csvs, '{}.csv'.format(outputstem))
-        for csv in csvs:
-            os.remove(csv)
-
-        # Aggregate thresholds/metrics from ymls.
         steps = {
             'segment': [
                 ['equalization', 'segment', 'params', 'thresholds'],
@@ -436,24 +491,13 @@ class Equalizer(Stapl3r):
                 ],
         }
         for step, trees in steps.items():
-            ymls = []
-            for filepath in self.filepaths:
-                filestem = os.path.splitext(os.path.basename(filepath))[0]
-                basename = self.format_([filestem, self._module_id, step])
-                ymlpath = os.path.join(self.directory, '{}.yml'.format(basename))
-                ymls.append(ymlpath)
-            ymls.sort()
-            bname = self.format_([self.dataset, self._module_id, step])
-            ymlstem = os.path.join(self.directory, bname)
-            self._merge_parameters(ymls, trees, ymlstem)
-            for yml in ymls:
-                os.remove(yml)
+            self._merge(f'yml_{step}', merge_parameters, trees=trees)
 
-    def _postprocess_report(self, filepath):
-        """Generate reports."""
+        self._merge('csv', merge_csvs)
 
-        filestem, ext = os.path.splitext(os.path.basename(filepath))
-        self.report(basename=filestem)
+        self._merge('report', merge_reports)
+
+        self.summary_report(outputpath=outputs['summary'])
 
     def set_filepaths(self):
         """Set the filepaths by globbing the directory."""
@@ -462,42 +506,30 @@ class Equalizer(Stapl3r):
         directory = os.path.abspath(os.path.dirname(self.image_in))
         self.filepaths = sorted(glob(os.path.join(directory, self.filepat)))
 
-    def _get_outputpat(self, filepath, ext='.czi'):
-        """Get io-info from filepath."""
+    def _get_info_dict(self, **kwargs):
 
-        filestem = os.path.basename(filepath).split(ext)[0]
+        if 'parameters' in kwargs.keys():
+            p = kwargs['parameters']
+        else:
+            p = self.load_dumped_pars()
+            kwargs['parameters'] = p
 
-        if 'h5' in self.outputformat:
-            filepat = '{}.h5/{}'.format(filestem, '{}')
-        elif 'nii' in self.outputformat:
-            filepat = '{}_{}.nii.gz'.format(filestem, '{}')
+        filestem = kwargs['filestem']
+        kwargs['threshold_noise']  = p['thresholds'][filestem][0]
+        kwargs['threshold_tissue'] = p['thresholds'][filestem][1]
+        kwargs['threshold_otsu']   = p['_otsus'][filestem]
+        # # NOTE: doing this for 'seg' method first => TODO
+        kwargs['cnr']              = p['_metrics'][filestem]['seg-cnr'][0]
+        kwargs['contrast']         = p['_metrics'][filestem]['seg-contrast'][0]
+        kwargs['median_bg']        = p['_metrics'][filestem]['seg-q1'][0]
+        kwargs['median_fg']        = p['_metrics'][filestem]['seg-q2'][0]
 
-        outputpat = os.path.join(self.directory, filepat)
+        filepath = kwargs['inputs']['data']
+        kwargs['props'] = get_imageprops(filepath)
+        kwargs['paths'] = get_paths(filepath)
+        kwargs['centreslices'] = get_centreslices(kwargs)
 
-        return filestem, ext, outputpat
-
-    def _get_info_dict(self, filestem, info_dict={}, channel=None):
-
-        basename = os.path.basename(filestem)
-        info_dict['filestem'] = basename
-
-        p = self.load_dumped_pars()
-        p['threshold_noise']  = p['thresholds'][basename][0]
-        p['threshold_tissue'] = p['thresholds'][basename][1]
-        p['threshold_otsu']   = p['_otsus'][basename]
-        # NOTE: doing this for 'seg' method first => TODO
-        p['cnr'] = p['_metrics'][basename]['seg-cnr'][0]
-        p['contrast'] = p['_metrics'][basename]['seg-contrast'][0]
-        p['median_bg'] = p['_metrics'][basename]['seg-q1'][0]
-        p['median_fg'] = p['_metrics'][basename]['seg-q2'][0]
-        info_dict['parameters'] = p
-
-        filepath = '{}.h5/data'.format(filestem)
-        info_dict['props'] = get_imageprops(filepath)
-        info_dict['paths'] = get_paths(filepath)
-        info_dict['centreslices'] = get_centreslices(info_dict)
-
-        return info_dict
+        return kwargs
 
     def _gen_subgrid(self, f, gs, channel=None):
         """4rows-2 columns: 4 images left, 4 plots right"""
@@ -538,9 +570,10 @@ class Equalizer(Stapl3r):
         dmax = infun(image.dtype).max
 
         # thresholds
-        p = info_dict['parameters']
+        # p = info_dict['parameters']
         t = ['noise', 'tissue', 'otsu']
-        thresholds = [p['threshold_{}'.format(k)] for k in t]
+        thresholds = [info_dict['threshold_{}'.format(k)] for k in t]
+        print(thresholds)
 
         # image with scalebar
         x_idx = 2; y_idx = 1;  # FIXME
@@ -591,7 +624,8 @@ class Equalizer(Stapl3r):
         ax.set_xlim([0, dmax])
 
         mets = ['cnr', 'contrast', 'median_fg', 'median_bg']
-        labs = ['{} = {}'.format(k, '{0: >8.2f}'.format(p[k])) for k in mets]
+        print(info_dict['cnr'])
+        labs = ['{} = {}'.format(k, '{0: >8.2f}'.format(info_dict[k])) for k in mets]
         lab = '\n'.join(labs)
         ax.annotate(
             text=lab, xy=(1.01, 1.01), c='k',
@@ -611,7 +645,8 @@ class Equalizer(Stapl3r):
 
     def _get_info_dict_summary(self, filestem, info_dict={}, channel=None):
 
-        info_dict['df'] = pd.read_csv('{}.csv'.format(filestem), index_col='sample_id')
+        filepath = self._abs(self.outputs['csv'].format(filestem))
+        info_dict['df'] = pd.read_csv(filepath, index_col='sample_id')
 
         return info_dict
 
@@ -641,6 +676,40 @@ def merge_csvs(csvs, outputpath):
     df = df.set_index('sample_id')
     df.to_csv(outputpath, index_label='sample_id')
 
+
+def merge_parameters(ymls, outputpath, **kwargs):
+    """Merge specific parameters from a set of yml files."""
+
+    trees = kwargs['trees']
+
+    def replace(d, path, replacement):
+        cur = d
+        for k in path[:-1]:
+            cur = cur[k]
+        cur[path[-1]] = replacement
+
+    with open(ymls[0], 'r') as ymlfile:
+        cfg_out = yaml.safe_load(ymlfile)
+
+    for tree in trees:
+        aggr = {}
+        for ymlpath in ymls:
+            with open(ymlpath, 'r') as ymlfile:
+                cfg = yaml.safe_load(ymlfile)
+            for item in tree:
+                cfg = cfg[item]
+            # FIXME: abusing instance for aggregationVSreplace switch
+            if isinstance(cfg, dict):
+                aggr.update(cfg)
+            else:
+                aggr = cfg
+        replace(cfg_out, tree, aggr)
+
+    if outputpath:
+        with open(outputpath, 'w') as f:
+            yaml.dump(cfg_out, f, default_flow_style=False)
+
+    return yaml.dump(cfg_out, default_flow_style=False)
 
 if __name__ == "__main__":
     main(sys.argv[1:])

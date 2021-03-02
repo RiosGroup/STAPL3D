@@ -54,6 +54,7 @@ function load_parameters {
     local verbose="${2}"
     local parfile="${3}"
 
+    # TODO: make two-spaced indentation possible
     [[ -z $parfile ]] && parfile="${datadir}/${dataset}.yml"
     eval $( parse_yaml "${parfile}" "" )
 
@@ -64,7 +65,7 @@ function load_parameters {
         parse_yaml "${parfile}"
         echo "" ; }
 
-    set_dirtree "${datadir}"
+    # set_dirtree "${datadir}"
 
     dataset_shading="${dataset}${shading__params__postfix}"
     dataset_stitching="${dataset_shading}${stitching__params__postfix}"
@@ -795,7 +796,7 @@ function pbs_directives {
 function conda_cmds {
     # Generate conda directives for submission script.
 
-    eval conda_env="\$${stage}__submit__conda_env"
+    eval conda_env="\$${stage}__${step}__submit__conda_env"
     [[ -z "${conda_env}" ]] && conda_env=${submit_defaults__submit__conda_env}
 
     if [ ! -z $conda_env ]
@@ -829,34 +830,35 @@ function base_cmds {
     echo load_dataset "${projectdir}" "${dataset}"
     echo load_parameters "${dataset}"
     echo ''
-    echo dataset="${dataset}"
-    echo projectdir="${projectdir}"
-    echo datadir="${datadir}"
-    echo stackdir="${stackdir}"
-    echo channeldir="${channeldir}"
-    echo blockdir="${blockdir}"
-    echo profdir="${profdir}"
-    echo featdir="${featdir}"
-    echo jobdir="${jobdir}"
-    echo ''
+
+    # echo dataset="${dataset}"
+    # echo projectdir="${projectdir}"
+    # echo datadir="${datadir}"
+    # echo stackdir="${stackdir}"
+    # echo channeldir="${channeldir}"
+    # echo blockdir="${blockdir}"
+    # echo profdir="${profdir}"
+    # echo featdir="${featdir}"
+    # echo jobdir="${jobdir}"
+    # echo ''
 
     if [ "$array" == 'channel_plane' ]
     then
         echo ch_idx="\$((idx/Z))"
         echo pl_idx="\$((idx%Z))"
-        echo channelstem="\${channeldir}/\${channelstems[ch_idx]}"
-    else
-        echo channelstem="\${channeldir}/\${channelstems[idx]}"
+    #     echo channelstem="\${channeldir}/\${channelstems[ch_idx]}"
+    # else
+    #     echo channelstem="\${channeldir}/\${channelstems[idx]}"
     fi
 
-    echo filestem="\${datadir}/\${dataset}"
-    echo shading_stem="\${filestem}${shading__params__postfix}"
-    echo stitching_stem="\${shading_stem}${stitching__params__postfix}"
-    # echo biasfield_stem="\${stitching_stem}${biasfield__params__postfix}"
-    echo biasfield_stem="\${filestem}"
-    echo block_id="\${block_ids[idx]}"
-    #echo blockstem="\${blockdir}/\${dataset_preproc}_\${block_id}"
-    echo blockstem="\${blockdir}/\${dataset}_\${block_id}"
+    # echo filestem="\${datadir}/\${dataset}"
+    # echo shading_stem="\${filestem}${shading__params__postfix}"
+    # echo stitching_stem="\${shading_stem}${stitching__params__postfix}"
+    # # echo biasfield_stem="\${stitching_stem}${biasfield__params__postfix}"
+    # echo biasfield_stem="\${filestem}"
+    # echo block_id="\${block_ids[idx]}"
+    # #echo blockstem="\${blockdir}/\${dataset_preproc}_\${block_id}"
+    # echo blockstem="\${blockdir}/\${dataset}_\${block_id}"
 
 }
 
@@ -945,7 +947,7 @@ function _parallelization {
 function finishing_directives {
     # Generate directives for parallel channels.
 
-    eval conda_env="\$${stage}__submit__conda_env"
+    eval conda_env="\$${stage}__${step}__submit__conda_env"
     [[ -z "${conda_env}" ]] && conda_env=${submit_defaults__submit__conda_env}
     if [ ! -z $conda_env ]
     then
@@ -967,15 +969,16 @@ function finishing_directives {
 
 function set_submit_pars {
 
-    local stage="$1"
+    local stage=$1
+    local step=$2
 
     unset submit_pars
     submit_pars=()
-    add_submit_par $stage 'array' 'no'
-    add_submit_par $stage 'nodes' '1'
-    add_submit_par $stage 'tasks' '1'
-    add_submit_par $stage 'mem' '10G'
-    add_submit_par $stage 'wtime' '01:00:00'
+    add_submit_par $stage $step 'array' 'no'
+    add_submit_par $stage $step 'nodes' '1'
+    add_submit_par $stage $step 'tasks' '1'
+    add_submit_par $stage $step 'mem' '10G'
+    add_submit_par $stage $step 'wtime' '01:00:00'
 
     case "${submit_pars[0]}" in
         'no')
@@ -1015,15 +1018,15 @@ function set_submit_pars {
     esac
 
     unset array_range
-    build_array_range $stage 'start' '1' ''
-    build_array_range $stage 'stop' '1' '-'
-    build_array_range $stage 'step' '1' ':'
-    build_array_range $stage 'simul' '0' '%'
+    build_array_range $stage $step 'start' '1' ''
+    build_array_range $stage $step 'stop'  '1' '-'
+    build_array_range $stage $step 'step'  '1' ':'
+    build_array_range $stage $step 'simul' '0' '%'
 
     submit_pars+=( $array_range )
 
-    add_submit_par $stage 'partition' 'cpu'
-    add_submit_par $stage 'gpus_per_node' '1'
+    add_submit_par $stage $step 'partition' 'cpu'
+    add_submit_par $stage $step 'gpus_per_node' '1'
 
 }
 
@@ -1031,10 +1034,11 @@ function set_submit_pars {
 function add_submit_par {
 
     local stage="${1}"
-    local varname="${2}"
-    local default="${3}"
+    local step="${2}"
+    local varname="${3}"
+    local default="${4}"
 
-    eval var=\$${stage}__submit__${varname}
+    eval var=\$${stage}__${step}__submit__${varname}
     [[ -z "${var}" ]] && eval var=\$submit_defaults__submit__${varname}
     [[ -z "${var}" ]] && var="${default}"
 
@@ -1046,12 +1050,13 @@ function add_submit_par {
 function build_array_range {
 
     local stage="${1}"
-    local varname="${2}"
-    local default="${3}"
-    local divider="${4}"
+    local step="${2}"
+    local varname="${3}"
+    local default="${4}"
+    local divider="${5}"
 
     eval var=\$array_${varname}
-    [[ -z "${var}" ]] && eval var=\$${stage}__submit__${varname}
+    [[ -z "${var}" ]] && eval var=\$${stage}__${step}__submit__${varname}
     [[ -z "${var}" ]] && eval var=\$submit_defaults__submit__${varname}
     [[ -z "${var}" ]] && var="${default}"
 
@@ -1077,15 +1082,16 @@ function expand_submit_pars {
 function generate_script {
 
     local stage=$1
-    shift 1
+    local step=$2
+    shift 2
 
-    jobname="go_${dataset__alias}_${stage}"
+    jobname="go_${dataset__alias}_${stage}_${step}"
     subfile="${datadir}/${jobname}.sh"
 
     local submit_pars=( "$@" )
     [[ "${stage}" == ziplines* ]] && stage='ziplines'
     [[ "${stage}" == zipquads* ]] && stage='zipquads'
-    [[ ${#submit_pars[@]} -eq 0 ]] && set_submit_pars ${stage}
+    [[ ${#submit_pars[@]} -eq 0 ]] && set_submit_pars ${stage} ${step}
 
     bash_directives > "${subfile}"
 
@@ -1104,7 +1110,7 @@ function generate_script {
 
     conda_cmds >> "${subfile}"
 
-    eval get_cmd_${stage} >> "${subfile}"
+    eval get_cmd_${stage}_${step} >> "${subfile}"
 
     finishing_directives >> "${subfile}"
 
@@ -1117,214 +1123,117 @@ function generate_script {
 ### functions to generate bash commands
 ###==========================================================================###
 
+## TODO: sensible submit defaults for each step => autoselect of parallelization in blocks/channels/stacks/planes etc
+# in add_submit_par: if ${stage}__${step}__submit__${varname} not specified ==> default
+# now goes to global default, we want a dictionary of specifics for steps here
+
+function get_cmd {
+    write_pyfile
+    echo_pyfile "$@"
+}
+
+function write_pyfile {
+    pyfile="${datadir}/${jobname}.py"
+    eval get_py_${stage}_${step} > "${pyfile}"
+}
+
+function echo_pyfile {
+    echo python "${pyfile}" "${image_in}" "${parfile}" "$@"
+}
+
+function get_py_header {
+    echo '#!/usr/bin/env python'
+    echo ''
+    echo 'import sys'
+    echo 'image_in = sys.argv[1]'
+    echo 'parameter_file = sys.argv[2]'
+    echo 'if len(sys.argv) > 3:'
+    echo '    idx = int(sys.argv[3])'
+    echo 'if len(sys.argv) > 4:'
+    echo '    idx2 = int(sys.argv[4])'
+}
+
+
 function get_py_shading {
-
-    echo '#!/usr/bin/env python'
-    echo ''
-    echo 'import sys'
-    echo 'image_in = sys.argv[1]'
-    echo 'parameter_file = sys.argv[2]'
-    echo 'ch_idx = int(sys.argv[3])'
-    echo 'pl_idx = int(sys.argv[4])'
     echo ''
     echo "from stapl3d.preprocessing import shading"
-    echo "shading.estimate(
-        image_in,
-        parameter_file,
-        channels=[ch_idx],
-        planes=[pl_idx],
-        )"
-
+    echo "deshader = shading.Deshader(image_in, parameter_file)"
 }
-function get_cmd_shading {
-
-    pyfile="${datadir}/${jobname}.py"
-    eval get_py_${stage} > "${pyfile}"
-
-    echo python "${pyfile}" \
-        "\${filestem}.${shading__file_format}" \
-        "${parfile}" \
-        "\${ch_idx}" "\${pl_idx}"
-
+function get_py_shading_estimate {
+    get_py_header
+    get_py_shading
+    echo "deshader.${step}(channels=[idx], planes=[idx2])"
 }
-
-
-function get_py_shading_postproc {
-
-    echo '#!/usr/bin/env python'
-    echo ''
-    echo 'import sys'
-    echo 'image_in = sys.argv[1]'
-    echo 'parameter_file = sys.argv[2]'
-    echo 'idx = int(sys.argv[3])'
-    echo ''
-    echo "from stapl3d.preprocessing import shading"
-    echo "shading.postprocess(
-        image_in,
-        parameter_file,
-        channels=[idx],
-        )"
-
+# FIXME: too much io overhead for plane*channel paralellization
+function get_cmd_shading_estimate { get_cmd "\${ch_idx}" "\${pl_idx}" ; }
+function get_py_shading_postprocess {
+    get_py_header
+    get_py_shading
+    echo "deshader.${step}(channels=[idx])"
 }
-function get_cmd_shading_postproc {
-
-    pyfile="${datadir}/${jobname}.py"
-    eval get_py_${stage} > "${pyfile}"
-
-    echo python "${pyfile}" \
-        "\${filestem}.${shading__file_format}" \
-        "${parfile}" \
-        "\${idx}"
-
-}
-
-
+function get_cmd_shading_postprocess { get_cmd "\${idx}" ; }
 function get_py_shading_apply {
-
-    echo '#!/usr/bin/env python'
-    echo ''
-    echo 'import sys'
-    echo 'image_in = sys.argv[1]'
-    echo 'parameter_file = sys.argv[2]'
-    echo 'idx = int(sys.argv[3])'
-    echo ''
-    echo "from stapl3d.preprocessing import shading"
-    echo "shading.czi_split_zstacks(
-        image_in,
-        offset=idx,
-        nstacks=1,
-        correct=True,
-        )"
-
+    get_py_header
+    get_py_shading
+    echo "deshader.${step}(stacks=[idx])"
 }
-function get_cmd_shading_apply {
+function get_cmd_shading_apply { get_cmd "\${idx}" ; }
 
-    pyfile="${datadir}/${jobname}.py"
-    eval get_py_${stage} > "${pyfile}"
 
-    echo python "${pyfile}" \
-        "\${filestem}.${shading__file_format}" \
-        "${parfile}" \
-        "\${idx}"
-
+function get_py_stitching {
+    echo ''
+    echo "from stapl3d.preprocessing import stitching"
+    echo "stitcher = stitching.Stitcher(image_in, parameter_file)"
+    echo "stitcher.elsize = [$elsize_z, $elsize_y, $elsize_x]"
 }
-
-
 function get_py_stitching_prep {
-
-    echo '#!/usr/bin/env python'
-    echo ''
-    echo 'import sys'
-    echo 'image_in = sys.argv[1]'
-    echo ''
-    echo "from stapl3d.preprocessing import stitching"
-    echo "stitching.write_stack_offsets(image_in)"
-
+    get_py_header
+    get_py_stitching
+    echo "stitcher.${step}()"
 }
-function get_cmd_stitching_prep {
-
-    pyfile="${datadir}/${jobname}.py"
-    eval get_py_${stage} > "${pyfile}"
-
-    echo python "${pyfile}" \
-        "\${filestem}.${shading__file_format}"
-
+function get_cmd_stitching_prep  { get_cmd "" ; }
+function get_py_stitching_load {
+    get_py_header
+    get_py_stitching
+    echo "stitcher.${step}(channels=[idx])"
 }
-function get_cmd_stitching_load {
-    echo $FIJI --headless --console -macro \
-        "$STAPL3D/preprocessing/stitching.ijm" \
-        \"1 ${stackdir}/${dataset}${shading__params__postfix} ${stitchingdir} \
-        ${dataset} \${idx} ${stitching__params__postfix} \
-        ${elsize_z} ${elsize_y} ${elsize_x}\"
-    echo $FIJI --headless --console -macro \
-        "$STAPL3D/preprocessing/stitching.ijm" \
-        \"2 ${stackdir}/${dataset}${shading__params__postfix} ${stitchingdir} \
-        ${dataset} \${idx} ${stitching__params__postfix} \
-        ${elsize_z} ${elsize_y} ${elsize_x}\"
+function get_cmd_stitching_load { get_cmd "\${idx}" ; }
+function get_py_stitching_calc {
+    get_py_header
+    get_py_stitching
+    echo "stitcher.${step}()"
 }
-function get_cmd_stitching_calc {
-    echo $FIJI --headless --console -macro \
-        "$STAPL3D/preprocessing/stitching.ijm" \
-        \"3 ${stackdir}/${dataset}${shading__params__postfix} ${stitchingdir} \
-        ${dataset} ${stitching__params__channel} ${stitching__params__postfix} \
-        ${elsize_z} ${elsize_y} ${elsize_x}\"
-    echo $FIJI --headless --console -macro \
-        "$STAPL3D/preprocessing/stitching.ijm" \
-        \"4 ${stackdir}/${dataset}${shading__params__postfix} ${stitchingdir} \
-        ${dataset} ${stitching__params__channel} ${stitching__params__postfix} \
-        ${elsize_z} ${elsize_y} ${elsize_x}\"
-    echo $FIJI --headless --console -macro \
-        "$STAPL3D/preprocessing/stitching.ijm" \
-        \"5 ${stackdir}/${dataset}${shading__params__postfix} ${stitchingdir} \
-        ${dataset} ${stitching__params__channel} ${stitching__params__postfix} \
-        ${elsize_z} ${elsize_y} ${elsize_x}\"
-}
+function get_cmd_stitching_calc { get_cmd "" ; }
 function get_py_stitching_fuse {
-
-    echo '#!/usr/bin/env python'
-    echo ''
-    echo 'import sys'
-    echo 'filestem = sys.argv[1]'
-    echo 'channel = int(sys.argv[2])'
-    echo 'channel_ref = int(sys.argv[3])'
-    echo 'dapi_shift = float(sys.argv[4])'
-    echo ''
-    echo "from stapl3d.preprocessing import stitching"
-    echo "stitching.adapt_xml(filestem, channel, channel_ref, dapi_shift)"
+    get_py_header
+    get_py_stitching
+    echo "stitcher.${step}(channels=[idx])"
 }
-function get_cmd_stitching_fuse {
-
-    pyfile="${datadir}/${jobname}.py"
-    eval get_py_${stage} > "${pyfile}"
-
-    echo python "${pyfile}" \
-        "${stitchingdir}/${dataset}" \  # "${stitchingdir}/${dataset}${shading__params__postfix}" \
-        "\${idx}" \
-        "${stitching__params__channel}" \
-        "${dataset__dapi_shift}"
-
-    echo $FIJI --headless --console -macro \
-        "$STAPL3D/preprocessing/stitching.ijm" \
-        \"6 ${stackdir}/${dataset}${shading__params__postfix} ${stitchingdir} \
-        ${dataset} \${idx} ${stitching__params__postfix} \
-        ${elsize_z} ${elsize_y} ${elsize_x}\"
+function get_cmd_stitching_fuse { get_cmd "\${idx}" ; }
+function get_py_stitching_postprocess {
+    get_py_header
+    get_py_stitching
+    echo "stitcher.${step}()"
 }
+function get_cmd_stitching_postprocess { get_cmd "" ; }
 
 
 function get_py_mask {
-
-    echo '#!/usr/bin/env python'
-    echo ''
-    echo 'import sys'
-    echo 'image_in = sys.argv[1]'
-    echo 'parameter_file = sys.argv[2]'
-    echo ''
     echo "from stapl3d.preprocessing import masking"
-    echo "masking.estimate(
-        image_in,
-        parameter_file,
-        )"
-
+    echo "masker = masking.Masker(image_in, parameter_file)"
 }
-function get_cmd_mask {
-
-    pyfile="${datadir}/${jobname}.py"
-    eval get_py_${stage} > "${pyfile}"
-
-    echo python "${pyfile}" \
-        "\${stitching_stem}.ims" \
-        "${parfile}"
-
+function get_py_mask_estimate {
+    get_py_header
+    get_py_mask
+    echo "masker.${step}()"
 }
+function get_cmd_mask_estimate { get_cmd "" ; }
 
 
+### >>> TODO
 function get_py_splitchannels {
 
-    echo '#!/usr/bin/env python'
-    echo ''
-    echo 'import sys'
-    echo 'image_in = sys.argv[1]'
-    echo 'parameter_file = sys.argv[2]'
+    get_py_header
     echo 'idx = int(sys.argv[3])'
     echo ''
     echo "from stapl3d import imarisfiles"
@@ -1346,8 +1255,6 @@ function get_cmd_splitchannels {
         "\${idx}"
 
 }
-
-
 function get_py_ims_aggregate1 {
 
     echo '#!/usr/bin/env python'
@@ -1374,113 +1281,34 @@ function get_cmd_ims_aggregate1 {
         "${channeldir}/${dataset_stitching}" '_ch??' ''
 
 }
+### <<< TODO
 
 
 function get_py_biasfield {
-
-    echo '#!/usr/bin/env python'
-    echo ''
-    echo 'import sys'
-    echo 'image_in = sys.argv[1]'
-    echo 'parameter_file = sys.argv[2]'
-    echo 'idx = int(sys.argv[3])'
-    echo ''
     echo "from stapl3d.preprocessing import biasfield"
-    echo "biasfield.estimate(
-        image_in,
-        parameter_file,
-        channels=[idx],
-        )"
-
+    echo "homogenizer = biasfield.Homogenizer(image_in, parameter_file)"
 }
-function get_cmd_biasfield {
-
-    pyfile="${datadir}/${jobname}.py"
-    eval get_py_${stage} > "${pyfile}"
-
-    echo python "${pyfile}" \
-        "\${stitching_stem}.ims" \
-        "${parfile}" \
-        "\${idx}"
-
+function get_py_biasfield_estimate {
+    get_py_header
+    get_py_biasfield
+    echo "homogenizer.${step}(channels=[idx])"
 }
-
-
-# TODO: change to biasfield.postprocess function
-function get_py_biasfield_stack {
-
-    echo '#!/usr/bin/env python'
-    echo ''
-    echo 'import sys'
-    echo 'inputstem = sys.argv[1]'
-    echo 'outputstem = sys.argv[2]'
-    echo 'biasfield_postfix = sys.argv[3]'
-    echo ''
-    echo "from glob import glob"
-    echo "from stapl3d.preprocessing import biasfield"
-    echo "from stapl3d import reporting"
-    echo ''
-    echo "inputpat = '{}_ch??{}'.format(inputstem, biasfield_postfix)"
-    echo ''
-    echo "inputfiles = glob('{}.h5'.format(inputpat))"
-    echo "inputfiles.sort()"
-    echo "outputfile = '{}.h5'.format(outputstem)"
-    echo "biasfield.stack_bias(inputfiles, outputfile)"
-    echo ''
-    echo "pdfs = glob('{}.pdf'.format(inputpat))"
-    echo "pdfs.sort()"
-    echo "pdf_out = '{}.pdf'.format(outputstem)"
-    echo "reporting.merge_reports(pdfs, pdf_out)"
-    echo ''
-    echo "pickles = glob('{}.pickle'.format(inputpat))"
-    echo "pickles.sort()"
-    echo "zip_out = '{}.zip'.format(outputstem)"
-    echo "reporting.zip_parameters(pickles, zip_out)"
-
+function get_cmd_biasfield_estimate { get_cmd "\${idx}" ; }
+function get_py_biasfield_postprocess {
+    get_py_header
+    get_py_biasfield
+    echo "homogenizer.${step}()"
 }
-function get_cmd_biasfield_stack {
-
-    pyfile="${datadir}/${jobname}.py"
-    eval get_py_${stage} > "${pyfile}"
-
-    echo python "${pyfile}" \
-        "${biasfielddir}/${dataset_stitching}" \
-        "${datadir}/${dataset_biasfield}" \
-        "${biasfield__params__postfix}"
-
-}
-
-
+function get_cmd_biasfield_postprocess { get_cmd "" ; }
 function get_py_biasfield_apply {
-
-    echo '#!/usr/bin/env python'
-    echo ''
-    echo 'import sys'
-    echo 'image_in = sys.argv[1]'
-    echo 'parameter_file = sys.argv[2]'
-    echo 'idx = int(sys.argv[3])'
-    echo ''
-    echo "from stapl3d.preprocessing import biasfield"
-    echo "biasfield.apply(
-        image_in,
-        parameter_file,
-        channels=[idx],
-        )"
-
+    get_py_header
+    get_py_biasfield
+    echo "homogenizer.${step}(channels=[idx])"
 }
-function get_cmd_biasfield_apply {
-
-    pyfile="${datadir}/${jobname}.py"
-    eval get_py_${stage} > "${pyfile}"
-
-    echo python "${pyfile}" \
-        "\${stitching_stem}.ims" \
-        "${parfile}" \
-        "\${idx}"
-
-}
+function get_cmd_biasfield_apply { get_cmd "\${idx}" ; }
 
 
+### >>> TODO
 function get_py_ims_aggregate2 {
 
     echo '#!/usr/bin/env python'
@@ -1507,47 +1335,29 @@ function get_cmd_ims_aggregate2 {
         "${channeldir}/${dataset_stitching}" '_ch??' "${biasfield__params__postfix}"
 
 }
+### <<< TODO
 
 
-function get_cmd_block_segmentation {
-
-    jobname="go_${dataset__alias}_splitblocks"
-    get_cmd_splitblocks
-    jobname="go_${dataset__alias}_membrane_enhancement"
-    get_cmd_membrane_enhancement
-    jobname="go_${dataset__alias}_segmentation"
-    get_cmd_segmentation
-
-}
+# function get_cmd_block_segmentation {
+#     jobname="go_${dataset__alias}_blocks_split"
+#     get_cmd_blocks_split
+#     jobname="go_${dataset__alias}_membrane_enhancement"
+#     get_cmd_membrane_enhancement
+#     jobname="go_${dataset__alias}_segmentation"
+#     get_cmd_segmentation
+# }
 
 
-function get_py_splitblocks {
-
-    echo '#!/usr/bin/env python'
-    echo ''
-    echo 'import sys'
-    echo 'image_in = sys.argv[1]'
-    echo 'parameter_file = sys.argv[2]'
-    echo 'idx = int(sys.argv[3])'
-    echo ''
+function get_py_blocks {
     echo "from stapl3d import blocks"
-    echo "blocks.split(
-        image_in,
-        parameter_file,
-        blocks=[idx],
-        )"
+    echo "splitter = blocks.Splitter(image_in, parameter_file)"
 }
-function get_cmd_splitblocks {
-
-    pyfile="${datadir}/${jobname}.py"
-    eval get_py_${stage} > "${pyfile}"
-
-    echo python "${pyfile}" \
-        "\${biasfield_stem}.ims" \
-        "${parfile}" \
-        "\${idx}"
-
+function get_py_blocks_split {
+    get_py_header
+    get_py_splitblocks
+    echo "splitter.${step}(blocks=[idx])"
 }
+function get_cmd_blocks_split { get_cmd "\${idx}" ; }
 
 
 function get_py_membrane_enhancement {

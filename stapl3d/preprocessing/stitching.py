@@ -8,30 +8,9 @@
     # TODO: cleanup shading stacks after converting to bdv
     # TODO: check if tileoffsets order needs to be switched after ch<=>tile order switch
     # TODO: check on data stitchability (i.e. mostly for ntiles=1)
-    # TODO: put shading suffix in stitching intermediate filenames?
     # TODO: outstem not used for ijm
 
-    # no good way to name fused if datset and suffix are unset
-
-    # logging.basicConfig(filename='{}.log'.format(outputstem), level=logging.INFO)
-    # report = {'parameters': locals()}
-
-FIXME: on calc:
-java.lang.NumberFormatException: empty String
-	at sun.misc.FloatingDecimal.readJavaFormatString(FloatingDecimal.java:1842)
-	at sun.misc.FloatingDecimal.parseDouble(FloatingDecimal.java:110)
-	at java.lang.Double.parseDouble(Double.java:538)
-	at net.imagej.patcher.HeadlessGenericDialog.getMacroParameter(HeadlessGenericDialog.java:348)
-	at net.imagej.patcher.HeadlessGenericDialog.addNumericField(HeadlessGenericDialog.java:128)
-	at net.preibisch.stitcher.gui.popup.SimpleRemoveLinkPopup.filterPairwiseShifts(SimpleRemoveLinkPopup.java:78)
-	at net.preibisch.stitcher.plugin.Filter_Pairwise_Shifts.run(Filter_Pairwise_Shifts.java:40)
-	at ij.IJ.runUserPlugIn(IJ.java:230)
-	at ij.IJ.runPlugIn(IJ.java:193)
-	at ij.Executer.runCommand(Executer.java:137)
-	at ij.Executer.run(Executer.java:66)
-	at ij.IJ.run(IJ.java:312)
-	at ij.IJ.run(IJ.java:323)
-...
+    # FIXME: VoxelSize unit upon fuse is in pixels, not um
 
 """
 
@@ -100,9 +79,8 @@ def main(argv):
         args.parameter_file,
         step_id=args.step_id,
         directory=args.outputdir,
-        dataset=args.dataset,
-        suffix=args.suffix,
-        n_workers=args.n_workers,
+        prefix=args.prefix,
+        max_workers=args.max_workers,
     )
 
     for step in args.steps:
@@ -136,14 +114,52 @@ class Stitcher(Stapl3r):
             'postprocess': self.postprocess,
             }
 
+        self._parallelization = {
+            'prep': [],
+            'load': ['channels'],
+            'calc': [],
+            'fuse': ['channels'],
+            'postprocess': [],
+            }
+
+        self._parameter_sets = {
+            'prep': {
+                'fpar': self._FPAR_NAMES,
+                'ppar': (),
+                'spar': ('_n_workers',),
+                },
+            'load': {
+                'fpar': self._FPAR_NAMES + ('FIJI',),
+                'ppar': ('elsize',),
+                'spar': ('_n_workers', 'stitch_steps', 'channels'),
+                },
+            'calc': {
+                'fpar': self._FPAR_NAMES + ('FIJI',),
+                'ppar': ('downsample', 'r', 'max_shift', 'max_displacement',
+                         'relative_shift', 'absolute_shift'),
+                'spar': ('_n_workers', 'stitch_steps'),
+                },
+            'fuse': {
+                'fpar': self._FPAR_NAMES + ('FIJI',),
+                'ppar': ('channel_ref', 'z_shift'),
+                'spar': ('_n_workers', 'stitch_steps', 'channels'),
+                },
+            'postprocess': {
+                'fpar': self._FPAR_NAMES,
+                'ppar': (),
+                'spar': ('_n_workers', 'channels'),
+                },
+            }
+
+        self._parameter_table = {}
+
         default_attr = {
-            'step_id': 'stitching',
             'stitch_steps': [],
             'channels': [],
+            'stacks': [],
             'channel_ref': 0,
             'FIJI': '',
             'inputstem': '',
-            'tilefile': '',
             'z_shift': 0,
             'elsize': [],
             'downsample': [1, 2, 2],
@@ -152,7 +168,6 @@ class Stitcher(Stapl3r):
             'max_displacement': 0,
             'relative_shift': 2.5,
             'absolute_shift': 3.5,
-            'outputpath': '',
         }
         for k, v in default_attr.items():
             setattr(self, k, v)
@@ -160,79 +175,116 @@ class Stitcher(Stapl3r):
         for step in self._fun_selector.keys():
             self.set_parameters(step)
 
-        # Set derived parameter defaults.
-        # TODO: clear warning or error message
+        self._init_paths()
+
+        self._init_log()
+
+        # Set derived parameter defaults.  # TODO: clear warning or error message
         self.FIJI = self.FIJI or os.environ.get('FIJI')
         iminfo = get_image_info(self.image_in)
         self.elsize = self.elsize or iminfo['elsize_zyxc'][:3]
-        self.set_tilefile()
-        self._set_inputstem('shading', 'apply')
-        self._set_outputpath()
 
-        self._parsets = {
+    def _init_paths(self):
+
+        # FIXME: moduledir (=step_id?) can vary
+        prev_path = {
+            'moduledir': 'shading', 'module_id': 'shading',
+            'step_id': 'shading', 'step': 'apply',
+            'ioitem': 'outputs', 'output': 'stacks',
+            }
+        spat = self._get_inpath(prev_path)
+        if spat == 'default':
+            spat = self._build_path(
+                moduledir=prev_path['moduledir'],
+                prefixes=[self.prefix, prev_path['module_id']],
+                suffixes=[{'c': 'p', 's': 'p'}],
+                ext='tif',
+                )
+        pat = self._suffix_formats['s']
+        smat = spat.replace(pat, self._pat2mat(pat))
+
+        tilefile = self._build_path(ext='conf')
+        cmat = self._build_path(suffixes=[{'c': '?'}])
+        cpat = self._build_filestem(suffixes=[{'c': 'p'}])
+        xpat = self._build_path(suffixes=[{'c': 'p'}, 'stacks'], ext='xml')
+        hpat = self._build_basename(suffixes=[{'c': 'p'}, 'stacks'], ext='h5')
+
+        self._paths = {
             'prep': {
-                'fpar': self._FPAR_NAMES + ('tilefile',),
-                'ppar': (),
-                'spar': ('n_workers',),
+                'inputs': {
+                    'data': self.image_in,
+                    },
+                'outputs': {
+                    'tilefile': tilefile,
+                    },
                 },
             'load': {
-                'fpar': self._FPAR_NAMES + ('FIJI', 'tilefile', 'inputstem'),
-                'ppar': ('elsize',),
-                'spar': ('n_workers', 'stitch_steps', 'channels'),
+                'inputs': {
+                    'stacks': smat,
+                    'tilefile': tilefile,
+                    },
+                'outputs': {
+                    'channels': cpat,
+                    },
                 },
             'calc': {
-                'fpar': self._FPAR_NAMES + ('FIJI',),
-                'ppar': ('downsample', 'r', 'max_shift', 'max_displacement',
-                         'relative_shift', 'absolute_shift'),
-                'spar': ('n_workers', 'stitch_steps'),
+                'inputs': {
+                    'stacks': smat,
+                    },
+                'outputs': {
+                    'channels': cpat,
+                    },
                 },
             'fuse': {
-                'fpar': self._FPAR_NAMES + ('FIJI',),
-                'ppar': ('channel_ref', 'z_shift'),
-                'spar': ('n_workers', 'stitch_steps', 'channels'),
-                },
+                'inputs': {
+                    'stacks': smat,
+                    },
+                'outputs': {
+                    'channels': cpat,
+                    'xml': xpat,
+                    'h5stem': hpat,
+                    },
+            },
             'postprocess': {
-                'fpar': self._FPAR_NAMES + ('outputpath',),
-                'ppar': (),
-                'spar': ('n_workers', 'channels'),
-                },
-            }
+                'inputs': {
+                    'channels': cmat,
+                    },
+                'outputs': {
+                    'aggregate': self._build_path(ext='bdv'),
+                    },
+            },
+        }
 
-        self._partable = {}
+        for step in self._fun_selector.keys():
+            self.inputpaths[step]  = self._merge_paths(self._paths[step], step, 'inputs')
+            self.outputpaths[step] = self._merge_paths(self._paths[step], step, 'outputs')
 
     def prep(self, **kwargs):
         """Write tile position offsets."""
-        step = 'prep'
-        self.stitch_steps = self._stepmap[step]
-        self.estimate(step=step, **kwargs)
+
+        self._prep_step('prep', kwargs)
+        self.write_stack_offsets()
 
     def load(self, **kwargs):
         """Define dataset and load tile positions."""
-        step = 'load'
-        self.stitch_steps = self._stepmap[step]
-        self.estimate(step=step, **kwargs)
+
+        self.estimate(step='load', **kwargs)
 
     def calc(self, **kwargs):
         """Calculate the stitch."""
-        step = 'calc'
-        self.stitch_steps = self._stepmap[step]
-        channels = list(self.channels)
-        self.channels = [self.channel_ref]
-        self.estimate(step=step, **kwargs)
-        self.channels = list(channels)
+
+        self.estimate(step='calc', **kwargs)
 
     def fuse(self, **kwargs):
         """Fuse the tiles."""
-        step = 'fuse'
-        self.stitch_steps = self._stepmap[step]
-        self.estimate(step=step, **kwargs)
+
+        self.estimate(step='fuse', **kwargs)
 
     def postprocess(self, **kwargs):
         """Merge the channels in a symlinked file."""
-        step = 'postprocess'
-        self.stitch_steps = self._stepmap[step]
-        self.n_workers = 1
-        self.estimate(step=step, **kwargs)
+
+        self._prep_step('postprocess', kwargs)
+        self._link_channels()
 
     def estimate(self, step='', **kwargs):
         """Stitch dataset.
@@ -240,7 +292,6 @@ class Stitcher(Stapl3r):
         # channels=[],
         # FIJI='',
         # inputstem='',
-        # tilefile='',
         # channel_ref=0,
         # z_shift=0,
         # elsize=[],
@@ -253,58 +304,47 @@ class Stitcher(Stapl3r):
         # ):
         """
 
-        self.set_parameters(step, kwargs)
-        arglist = self._get_arglist(['channels'])
-        self.set_n_workers(len(arglist))
-        pars = self.dump_parameters(step=self.step)
-        self._logstep(pars)
-
-        if self.step == 'prep':
-            self.write_stack_offsets()
-            return
-        elif self.step == 'postprocess':
-            self._link_channels()
-            return
-
-        with multiprocessing.Pool(processes=self.n_workers) as pool:
+        self.stitch_steps = self._stepmap[step]
+        arglist = self._prep_step(step, kwargs)
+        with multiprocessing.Pool(processes=self._n_workers) as pool:
             pool.starmap(self._estimate_channel, arglist)
 
     def _estimate_channel(self, channel):
         """Stitch dataset with fiji BigStitcher."""
 
-        basename = self.format_()
-        outstem = os.path.join(self.directory, basename)
+        inputs = self._prep_paths(self.inputs, reps={'c': channel}, abs=False)
+        outputs = self._prep_paths(self.outputs, reps={'c': channel}, abs=False)
 
         macro_path = os.path.realpath(__file__).replace('.py', '.ijm')
 
-        # Inputs <inputstem><ch><stack>.tif
-        # [TODO: generalize ch and stack]
-        suffix_ch = 'C*' if channel < 0 else self._suffix_formats['c'].format(channel)
-        suffix_st = self.format_([suffix_ch, 'S*'])
-
-        if os.path.isdir(self.inputstem):
-            tif_path = os.path.join(self.inputstem, '{}.tif'.format(suffix_st))
-        else:
-            tif_path = '{}_{}.tif'.format(self.inputstem, suffix_st)
-
-        # Output
-        suffix_ch = '' if channel < 0 else self._suffix_formats['c'].format(channel)
-        basename = self.format_([self.dataset, self.suffix, suffix_ch])
-
         for stitch_step in self.stitch_steps:
 
-            if stitch_step == 6:
+            if stitch_step == 6:  # fuse
                 self._adapt_xml(channel)
-                basename = self.format_([self.dataset, self.suffix, suffix_ch])
 
-            args = [stitch_step, channel, tif_path, self.directory, basename, self.suffix, self.tilefile]
-            args += self.elsize + self.downsample + self.r + self.max_shift
-            args += [self.max_displacement, self.relative_shift, self.absolute_shift]
-            args = self.format_([str(arg) for arg in args], delimiter=' ')
-            cmdlist = [self.FIJI, '--headless', '--console', '-macro', macro_path, args]
+            args = [
+                stitch_step,
+                channel,
+                inputs['stacks'],
+                os.path.join(self.datadir, self.directory),
+                outputs['channels'],
+                inputs['tilefile'] if stitch_step == 2 else 'spam',
+                ]
+            args += list(self.elsize)
+            args += list(self.downsample)
+            args += list(self.r) + list(self.max_shift) + [self.max_displacement]
+            args += [self.relative_shift, self.absolute_shift]
+
+            cmdlist = [
+                self.FIJI,
+                '--headless', '--console', '-macro',
+                macro_path,
+                ' '.join([str(arg) for arg in args]),
+                ]
+
             subprocess.call(cmdlist)
 
-    def _get_arglist(self, parallelized_pars):
+    def _get_arglist(self, parallelized_pars=[]):
 
         arglist = super()._get_arglist(parallelized_pars)
         if self.step=='calc':
@@ -312,36 +352,13 @@ class Stitcher(Stapl3r):
 
         return arglist
 
-    def set_tilefile(self, suffix_tl='tiles', ext='.conf'):
-        """Generate a filepath for a BigStitcher tile configuration file."""
-
-        # TODO: option to provide INfilepath as argument
-        if not self.tilefile:
-            basename = self.format_([self.dataset, self.suffix, suffix_tl])
-            filename =  '{}{}'.format(basename, ext)
-            self.tilefile = os.path.join(self.directory, filename)
-
-    def write_stack_offsets(self):
-        """Write tile offsets to file."""
-
-        # TODO: option to provide OUTfilepath as argument
-        iminfo = get_image_info(self.image_in)
-
-        if not self.tilefile:
-            filestem, _ = os.path.splitext(self.image_in)
-            self.tilefile = '{}_tiles.conf'.format(filestem)
-
-        # entry per channel X tile
-        vo = np.tile(iminfo['stack_offsets'], [iminfo['nchannels'], 1])
-        vo[:, 0] = list(range(0, vo.shape[0]))
-        np.savetxt(self.tilefile, vo,
-                   fmt='%d;;(%10.5f, %10.5f, %10.5f)',
-                   header='dim=3', comments='')
-
     def _adapt_xml(self, channel, setups=[], replace=True):
         """Copy reference xml, replace filename and add affine mat for zshift."""
 
-        def create_ViewTransform_element(name='Transform', affine='1.0 0.0 0.0 0.0 0.0 1.0 0.0 0.0 0.0 0.0 1.0 0.0'):
+        def create_ViewTransform_element(
+            name='Transform',
+            affine='1.0 0.0 0.0 0.0 0.0 1.0 0.0 0.0 0.0 0.0 1.0 0.0',
+            ):
             """Generate affine-transform xml element.
 
             <ViewTransform type="affine">
@@ -356,23 +373,20 @@ class Stitcher(Stapl3r):
             c.text = affine
             return vt_new
 
-        ch_suf = self._suffix_formats['c'].format(self.channel_ref)
-        basename = self.format_([self.dataset, self.suffix, ch_suf, 'stacks'])
-        xml_ref = os.path.join(self.directory, '{}.xml'.format(basename))
-        ch_suf = self._suffix_formats['c'].format(channel)
-        basename = self.format_([self.dataset, self.suffix, ch_suf, 'stacks'])
-        xml_path = os.path.join(self.directory, '{}.xml'.format(basename))
+        outputs = self._prep_paths(self.outputs, reps={'c': channel})
+        outputs_ref = self._prep_paths(self.outputs, reps={'c': self.channel_ref})
+        outputs_h5 = self._prep_paths(self.outputs, reps={'c': channel}, abs=False)
 
-        shutil.copy2(xml_path, '{}.orig'.format(xml_path))
+        shutil.copy2(outputs['xml'], '{}.orig'.format(outputs['xml']))
         if channel != self.channel_ref:
-            shutil.copy2(xml_ref, xml_path)
+            shutil.copy2(outputs_ref['xml'], outputs['xml'])
 
-        tree = ET.parse(xml_path)
+        tree = ET.parse(outputs['xml'])
         root = tree.getroot()
 
         if replace:
             h5 = root.find('SequenceDescription').find('ImageLoader').find('hdf5')
-            h5.text = '{}.h5'.format(basename)
+            h5.text = outputs_h5['h5stem']
 
         if self.z_shift:
             vrs = root.find('ViewRegistrations')
@@ -385,31 +399,34 @@ class Stitcher(Stapl3r):
                 elif int(setup) in setups:
                     vr.insert(0, vt_new)
 
-        tree.write(xml_path, encoding='utf-8', xml_declaration=True)
+        tree.write(outputs['xml'], encoding='utf-8', xml_declaration=True)
 
-    def _link_channels(self, inputstem='', channel_pat='', ext='.bdv'):
+    def write_stack_offsets(self):
+        """Write tile offsets to file."""
+
+        inputs = self._prep_paths(self.inputs)
+        outputs = self._prep_paths(self.outputs)
+
+        # entry per channel X tile
+        iminfo = get_image_info(inputs['data'])
+        vo = np.tile(iminfo['stack_offsets'], [iminfo['nchannels'], 1])
+        vo[:, 0] = list(range(0, vo.shape[0]))
+        np.savetxt(outputs['tilefile'], vo,
+                   fmt='%d;;(%10.5f, %10.5f, %10.5f)',
+                   header='dim=3', comments='')
+
+    def _link_channels(self):
         """Merge the channels in a symlinked file."""
 
+        inputs = self._prep_paths(self.inputs)
+        outputs = self._prep_paths(self.outputs)
+
         # TODO: remove workaround: => directly to bdv
-        base, ext = os.path.splitext(self.outputpath)
-        outputpath = base + '.h5'
-
-        inputstem = os.path.join(self.directory, self.format_())
-        channel_pat = self._suffix_formats['c'].format(0).replace('0', '?')
-        imarisfiles.aggregate_bigstitcher(outputpath,
-            inputstem, channel_pat=channel_pat, ext='.h5')
-
-        os.rename(outputpath, base + ext)
-
+        base, ext = os.path.splitext(outputs['aggregate'])
+        h5path = f'{base}.h5'
+        imarisfiles.aggregate_bigstitcher(h5path, inputpat=inputs['channels'], ext='.h5')
+        os.rename(h5path, outputs['aggregate'])
         # TODO: cat xmls
-
-    def _set_outputpath(self, basename='stitched', ext='.bdv'):
-        """Set the path to module output."""
-
-        basename = self.format_() or basename
-        outputfile = '{}{}'.format(basename, ext)
-        self.outputpath = os.path.join(self.directory, outputfile)
-        # self.outputpath = os.path.relpath(self.outputpath, start=self.directory)
 
 
 if __name__ == "__main__":

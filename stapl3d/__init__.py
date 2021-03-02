@@ -259,7 +259,6 @@ class Image(object):
         if self.chunks is None:
             return
 
-        print(self.chunks, self.dims)
         self.chunks = tuple([cs if cs < dim else dim
                              for cs, dim in zip(list(self.chunks), self.dims)])
 
@@ -1806,12 +1805,18 @@ class Image(object):
 
         # TODO: squeeze data?
         squeezable = ['shape', 'dims', 'elsize', 'chunks', 'slices', 'axlab']
+        print(self.axlab, dims)
         for dim in dims:
+            if dim not in self.axlab:
+                continue
             for attr in squeezable:
                 attr_val = getattr(self, attr)
                 if attr_val is not None:
                     attr_list = list(attr_val)
-                    del attr_list[self.axlab.index(dim)]
+                    try:
+                        del attr_list[self.axlab.index(dim)]
+                    except:
+                        pass
                     setattr(self, attr, attr_list)
                     # setattr(self, attr, tuple(attr_list))
 
@@ -1882,6 +1887,32 @@ class Image(object):
         self.slices = slcs
 
         return mo
+
+    def find_downsample_factors(self, rl0_idx=0, rl1_idx=-1):
+        """Find downsample factors."""
+
+        def att2str(att):
+            return ''.join([t.decode('utf-8') for t in att])
+
+        def find_dims(im, idx):
+            rl = self.file['/DataSet/ResolutionLevel {}'.format(idx)]
+            im_info = rl['TimePoint 0/Channel 0']
+            return [int(att2str(im_info.attrs['ImageSize{}'.format(dim)]))
+                    for dim in 'ZYX']
+
+        if rl1_idx == -1:
+            rl1_idx = self.reslev
+
+        if self.format == '.ims':
+            dims0 = find_dims(self, rl0_idx)
+            dims1 = find_dims(self, rl1_idx)
+            dsfacs = np.around(np.array(dims0) / np.array(dims1)).astype('int')
+        elif self.format == '.bdv':
+            dsfacs = self.file['s00/resolutions'][rl1_idx, :][::-1]
+        else:  # FIXME
+            dsfacs = [1] * len(self.dims)
+
+        return dsfacs
 
 
 class MaskImage(Image):
@@ -2644,7 +2675,7 @@ def parse_args(step_id, fun_selector, *argv):
     parser.add_argument(
         '-i', '--image_in',
         required=True,
-        help='path to image file',
+        help='path to raw image file',
         )
     parser.add_argument(
         '-p', '--parameter_file',
@@ -2671,21 +2702,21 @@ def parse_args(step_id, fun_selector, *argv):
         help='path to output directory',
         )
     parser.add_argument(
-        '-d', '--dataset',
+        '-x', '--prefix',
         required=False,
-        help='name of the dataset',
+        help='name of the dataset prepended to each file',
         )
+    # parser.add_argument(
+    #     '-x', '--suffix',
+    #     required=False,
+    #     help='path to output directory',
+    #     )
     parser.add_argument(
-        '-x', '--suffix',
-        required=False,
-        help='path to output directory',
-        )
-    parser.add_argument(
-        '-n', '--n_workers',
+        '-n', '--max_workers',
         type=int,
         default=0,
         required=False,
-        help='number of workers (0: automatic)',
+        help='maximal number of concurrent workers (0: automatic)',
         )
 
     args = parser.parse_args()
@@ -2696,66 +2727,66 @@ def parse_args(step_id, fun_selector, *argv):
     return args
 
 
-def parse_args_common(step_ids, fun_selector, *argv):
-    """Parse arguments common to all modules."""
-
-    steps = list(fun_selector.keys())
-
-    parser = argparse.ArgumentParser(
-        description=__doc__,
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter
-        )
-    parser.add_argument(
-        '-i', '--image_in',
-        required=True,
-        help='path to image file',
-        )
-    parser.add_argument(
-        '-p', '--parameter_file',
-        required=True,
-        help='path to yaml parameter file',
-        )
-    parser.add_argument(
-        '-s', '--steps',
-        default='all',
-        nargs='+',
-        choices=steps,
-        required=False,
-        help='processing steps to execute',
-        )
-    parser.add_argument(
-        '-S', '--step_ids',
-        default=step_ids,
-        nargs='+',
-        required=False,
-        help='top level name(s) of the processing step(s) in parameter file',
-        )
-    parser.add_argument(
-        '-o', '--outputdir',
-        required=False,
-        help='path to output directory',
-        )
-    parser.add_argument(
-        '-n', '--n_workers',
-        type=int,
-        default=0,
-        required=False,
-        help='number of workers (0: automatic)',
-        )
-
-    args = parser.parse_args()
-
-    if args.steps is None or args.steps == 'all':
-        mapper = dict(zip(steps, args.step_ids))
-    else:
-        # FIXME: this is dodgy for when the wrong number of args is supplied
-        if len(args.step_ids) != len(args.steps):
-            idxs = [steps.index(step) for step in args.steps]
-            step_ids = [step_ids[i] for i in idxs]
-        mapper = dict(zip(args.steps, step_ids))
-
-    return args, mapper
-
+# def parse_args_common(step_ids, fun_selector, *argv):
+#     """Parse arguments common to all modules."""
+#
+#     steps = list(fun_selector.keys())
+#
+#     parser = argparse.ArgumentParser(
+#         description=__doc__,
+#         formatter_class=argparse.ArgumentDefaultsHelpFormatter
+#         )
+#     parser.add_argument(
+#         '-i', '--image_in',
+#         required=True,
+#         help='path to image file',
+#         )
+#     parser.add_argument(
+#         '-p', '--parameter_file',
+#         required=True,
+#         help='path to yaml parameter file',
+#         )
+#     parser.add_argument(
+#         '-s', '--steps',
+#         default='all',
+#         nargs='+',
+#         choices=steps,
+#         required=False,
+#         help='processing steps to execute',
+#         )
+#     parser.add_argument(
+#         '-S', '--step_ids',
+#         default=step_ids,
+#         nargs='+',
+#         required=False,
+#         help='top level name(s) of the processing step(s) in parameter file',
+#         )
+#     parser.add_argument(
+#         '-o', '--outputdir',
+#         required=False,
+#         help='path to output directory',
+#         )
+#     parser.add_argument(
+#         '-n', '--n_workers',
+#         type=int,
+#         default=0,
+#         required=False,
+#         help='number of workers (0: automatic)',
+#         )
+#
+#     args = parser.parse_args()
+#
+#     if args.steps is None or args.steps == 'all':
+#         mapper = dict(zip(steps, args.step_ids))
+#     else:
+#         # FIXME: this is dodgy for when the wrong number of args is supplied
+#         if len(args.step_ids) != len(args.steps):
+#             idxs = [steps.index(step) for step in args.steps]
+#             step_ids = [step_ids[i] for i in idxs]
+#         mapper = dict(zip(args.steps, step_ids))
+#
+#     return args, mapper
+#
 
 class Stapl3r(object):
     """Base class for STAPL3D framework."""
@@ -2766,43 +2797,43 @@ class Stapl3r(object):
         module_id='',
         step_id='',
         directory='',
-        dataset='',
-        suffix='',
-        n_workers=0,
+        prefix='',
+        # suffix='',
+        max_workers=0,
         ):
 
-        self.image_in = image_in
-        self.parameter_file = parameter_file
-        self.step_id = step_id
-        self._module_id = module_id
-        self.directory = directory
-        self.dataset = dataset
-        self.suffix = suffix
-        self.n_workers = n_workers
+        self._module_id = module_id  # module name
+        self.step_id = step_id or self._module_id # yml-file entry
 
-        self.cfg = {}  # TODO: private or public?
-        if self.parameter_file:
-            self.set_config()
-
+        self.image_in = image_in  # raw input image file (.czi / .lif)
         self.datadir = os.path.abspath(os.path.dirname(image_in))
+        # self.image_in = os.path.basename(image_in)  # raw input image file (.czi / .lif)
+        # self.projdir = os.path.dirname(self.datadir)
 
-        self.set_directory()
+        self.directory = ''  # output directory
+        self.set_directory(directory)
+        self.prefix = prefix
+
+        self.parameter_file = parameter_file  #os.path.abspath(parameter_file)
+        self._cfg = {}
+        self.set_config()
+
+        self.max_workers = max_workers
+        self._n_workers = 0
+        self._n_jobs = 0
+
+        self.inputpaths = {}
+        self.outputpaths = {}
+        self.inputs = {}
+        self.outputs = {}
 
         self._compute_env = os.environ.get('compute_env')
 
-        self._n_jobs = 0
-
-        self._loginit()
-
         self._delimiter = '_'
-        self._suffix_formats = {
-            'z': 'Z{:03d}', 'y': 'Y{:03d}', 'x': 'X{:03d}',
-            'c': 'C{:03d}', 't': 'T{:03d}', 's': 'S{:03d}',
-            'b': 'B{:05d}',
-            # 'b': '{:05d}-{:05d}_{:05d}-{:05d}_{:05d}-{:05d}',
-            }
 
-        self._FPAR_NAMES = ('image_in', 'parameter_file', 'directory', 'datadir', 'dataset', 'suffix')
+        self._set_suffix_formats()
+
+        self._FPAR_NAMES = ('image_in', 'parameter_file', 'directory', 'datadir', 'prefix', 'inputs', 'outputs')  #, 'projdir'  'inputpath', 'outputpath',
 
         self._fdict = {
             'fontsize': 7,
@@ -2811,35 +2842,93 @@ class Stapl3r(object):
             }
 
     def __str__(self):
+        """Print attributes in yml structure."""
         return self.dump_parameters()
 
-    def run_all(self):
+    def run(self):
+        """Run all steps in the module."""
+
         for step, fun in self._fun_selector.items():
-            print('Running {}:{}'.format(self._module_id, step))
+            print(f'Running {self._module_id}:{step}')
             fun()
-            self.n_workers = 0
 
-    def format_(self, elements=[], delimiter=''):
-        elements = elements or [self.dataset, self.suffix]
-        delimiter = delimiter or self._delimiter
-        return delimiter.join([x for x in elements if x])
+    def _set_suffix_formats(self):
+        """Set format strings for dimension suffixes."""
 
-    def set_parameters(self, step, kwargs={}):
+        d_suffixes = {
+            'z': 'Z{z:03d}', 'y': 'Y{y:05d}', 'x': 'X{x:05d}',
+            'c': 'C{c:03d}', 't': 'T{t:03d}', 's': 'S{s:03d}',
+            'b': 'B{b:05d}',  # 'b': '{:05d}-{:05d}_{:05d}-{:05d}_{:05d}-{:05d}',
+            'f': '{f}',
+            'a': '{a}',
+            }
 
-        if kwargs:
-            kwargs.update({'step': step})
-            self.__dict__.update(kwargs)
-        else:
-            pars = {'step': step}
-            try:
-                pars.update(self.cfg[self.step_id][step])
-            except TypeError:
-                pass
-            except KeyError:
-                pass
-            self.__dict__.update(pars)
+        try:
+            p_suffixes = self._cfg['suffix_formats']
+        except KeyError:
+            p_suffixes = {}
 
-    def _get_arglist(self, parallelized_pars):
+        self._suffix_formats = {**d_suffixes, **p_suffixes}
+
+    def _prep_step(self, step, kwargs={}):
+        """Run through common operations before step execution.
+
+        - Attributes are set.
+        - Paths are set.
+        - Parallelization is generated.
+        - Number of workers is set.
+        - Parameters are dumped to yml and logs.
+
+        Returns the argument list for parallelization.
+        """
+
+        # self.set_parameters(step, kwargs)
+        kwargs.update({'step': step})
+        self.__dict__.update(kwargs)
+
+        self._set_paths_step()
+
+        arglist = self._get_arglist()
+        self._set_n_workers(len(arglist))
+
+        pars = self.dump_parameters(step=self.step)
+        self._logstep(pars)
+
+        return arglist
+
+    def set_parameters(self, step):  # , kwargs={}
+        """Set parameters for a processing step."""
+
+        # if kwargs:
+        #     kwargs.update({'step': step})
+        #     self.__dict__.update(kwargs)
+        # else:
+            # DONE FIXME: this may overwrite things set on objects with parfile pars if no kwargs are given on method call;
+            # NB: this should only be done from __init__ methods, not from _prep_step
+        pars = {'step': step}
+        try:
+            pars.update(self._cfg[self.step_id][step])
+        except TypeError:
+            pass
+        except KeyError:
+            pass
+        self.__dict__.update(pars)
+
+    def _merge_paths(self, paths, step, key='inputs'):
+        """Merge default paths with paths from parameterfile[=leading]."""
+
+        try:
+            par_paths = self._cfg[self.step_id][step][key]
+        except (KeyError, TypeError):
+            par_paths = {}
+            # print(f'No {key} specified for step {step}:')
+            # print(f'   ... using default file structures.')
+        return {**paths[key], **par_paths}
+
+    def _get_arglist(self, parallelized_pars=[]):
+        """Generate a argument list for multiprocessing."""
+
+        parallelized_pars = parallelized_pars or self._parallelization[self.step]
 
         def getset(parname, alt_val):
             par = getattr(self, parname) or alt_val
@@ -2848,21 +2937,40 @@ class Stapl3r(object):
 
         imdims = ['stacks', 'channels', 'planes']
         if any(pp in imdims for pp in parallelized_pars):
-            from stapl3d.preprocessing import shading  # TODO
-            iminfo = shading.get_image_info(self.image_in)
+            # if 'data' in self.inputs:
+            #     # shading:estimate,
+            #     image_in = self.inputs['data']  # shading, biasfield
+            # elif 'metrics' in self.inputs:
+            #     image_in = self.inputs['estimate']['data']
+            # else:
+            #     image_in = self.inputpaths['prep']['data']  # stitching
+            first_step = list(self.inputpaths.keys())[0]
+            image_in = self.inputpaths[first_step]['data']
+            from stapl3d.preprocessing import shading  # TODO: without import
+            iminfo = shading.get_image_info(image_in)
             pars = [getset(pp, iminfo[pp]) for pp in parallelized_pars]
 
         elif parallelized_pars == ['filepaths']:  # may generalize this?
-            pars = [getset(pp, self.filepaths) for pp in parallelized_pars]
-
-        elif parallelized_pars == ['blockfiles']:
-            filepaths = self.blockfiles
-            if self.blocks:
-                filepaths = [filepaths[i] for i in self.blocks]
+            filepaths = self.filepaths
             pars = [getset(pp, filepaths) for pp in parallelized_pars]
 
-        elif parallelized_pars == ['_blocks']:
-            pars = [getset(pp, self._blocks) for pp in parallelized_pars]
+        elif parallelized_pars == ['blocks']:
+            blocks = list(range(len(self._blocks)))
+            pars = [getset(pp, blocks) for pp in parallelized_pars]
+
+        # elif parallelized_pars == ['blockfiles']:
+        #     filepaths = self.blockfiles
+        #     if self.blocks:
+        #         filepaths = [filepaths[i] for i in self.blocks]
+        #     pars = [getset(pp, filepaths) for pp in parallelized_pars]
+
+        # elif parallelized_pars == ['_blocks']:
+        #     if self.blocks:
+        #         block_idxs = self.blocks
+        #     else:
+        #         block_idxs = [block.idx for block in self._blocks]
+        #     block_obs = [block for block in self._blocks if block.idx in block_idxs]
+        #     pars = [getset(pp, block_obs) for pp in parallelized_pars]
 
         elif parallelized_pars == ['volumes']:
             paths = get_paths(self._blocks[0].path)
@@ -2876,40 +2984,26 @@ class Stapl3r(object):
                     f.visititems(extract)
             pars = [getset(pp, volumes) for pp in parallelized_pars]
 
+        elif parallelized_pars == []:
+            pars = [(0,)]
+
         arglist = list(itertools.product(*pars))
         self._n_jobs = len(arglist)
 
         return arglist
 
-    # def set_pars(self, dicts):
-    #     """Set class attributes from defaults - arguments - parameterfile."""
-    #
-    #     for d in dicts:
-    #         if d is not None:
-    #             self._attr_setter(d)
-    #
-    # def _attr_setter(self, *pars, **kwargs):
-    #     """Set class attributes from dictionary."""
-    #
-    #     # self.__dict__.update(kwargs)  # I think this would work too
-    #     for p in pars:
-    #         for k in p:
-    #             setattr(self, k, p[k])
-    #     for k in kwargs:
-    #         setattr(self, k, kwargs[k])
-
     def set_config(self):
-        """."""
+        """Load parameters from the yml parameter file."""
+
+        if not self.parameter_file:
+            return
 
         with open(self.parameter_file, 'r') as ymlfile:
-            self.cfg = yaml.safe_load(ymlfile)
+            self._cfg = yaml.safe_load(ymlfile)
 
     def get_config(self):
-        """."""
-
         with open(self.parameter_file, 'r') as ymlfile:
             cfg = yaml.safe_load(ymlfile)
-
         return cfg
 
     def set_directory(self, directory='', subdirectory=''):
@@ -2924,18 +3018,17 @@ class Stapl3r(object):
         2. Use <imagedir>/<parfile_key>.
         """
 
-        paths = get_paths(self.image_in)
-
         if directory:
             self.directory = directory
         elif subdirectory:
-            self.directory = os.path.join(paths['dir'], subdirectory)
+            self.directory = os.path.join(self.datadir, subdirectory)
 
         if not self.directory:
-            self.directory = os.path.join(paths['dir'], self._module_id)
+            self.directory = os.path.join(self.datadir, self.step_id)
 
-        if self.directory:
-            os.makedirs(self.directory, exist_ok=True)
+        os.makedirs(self.directory, exist_ok=True)
+
+        self.directory = os.path.relpath(self.directory, self.datadir)
 
     def _step_pars(self, parsets, pdict):
         return {
@@ -2945,22 +3038,31 @@ class Stapl3r(object):
             }
 
     def dump_parameters(self, step='', filestem='', write=True):
+        """Write parameters as yml."""
 
         # FIXME: not always serialized correctly (if they are references)
-        if not filestem:
-            basename = format_([self.dataset, self._module_id, step])
-            filestem = os.path.join(self.directory, basename)
 
-        steps = [step] if step else self._parsets.keys()
-        stepdict = {step: self._step_pars(self._parsets[step], vars(self)) for step in steps}
+        steps = [step] if step else self._parameter_sets.keys()
+        step_dict = {step: self._step_pars(self._parameter_sets[step], vars(self))
+                     for step in steps}
+        module_dict = {self._module_id: step_dict}
 
         if write:
-            with open('{}.yml'.format(filestem), 'w') as f:
-                yaml.dump({self._module_id: stepdict}, f, default_flow_style=False)
+            if not filestem:
+                prefixes = [self.prefix, self._module_id, step]
+                filestem = self._build_path(prefixes=prefixes)
+            filepath = self._abs(f'{filestem}.yml')
+            with open(filepath, 'w') as f:
+                yaml.dump(module_dict, f, default_flow_style=False)
 
-        return yaml.dump({self._module_id: stepdict}, default_flow_style=False)
+        return yaml.dump(module_dict, default_flow_style=False)
 
-    def _merge_parameters(self, ymls, trees=[], filestem='', write=True, aggregate=True):
+    def _merge_parameters(self, ymls, outputpath, **kwargs):
+        """Merge specific parameters from a set of yml files."""
+
+        trees = kwargs['trees']
+
+        aggregate = kwargs['aggregate'] if 'aggregate' in kwargs.keys() else True
 
         def replace(d, path, replacement):
             cur = d
@@ -2985,31 +3087,65 @@ class Stapl3r(object):
                     aggr = cfg
             replace(cfg_out, tree, aggr)
 
-        if write:
-            with open('{}.yml'.format(filestem), 'w') as f:
+        if outputpath:
+            with open(outputpath, 'w') as f:
                 yaml.dump(cfg_out, f, default_flow_style=False)
 
         return yaml.dump(cfg_out, default_flow_style=False)
 
-    def set_n_workers(self, n_workers=0):
+    def _set_n_workers(self, n_workers=0):
         """Determine the number of workers."""
 
         cpu_count = multiprocessing.cpu_count()
-        n_workers = self.n_workers or n_workers or cpu_count
-        self.n_workers = min(n_workers, cpu_count)
+        n_workers = self.max_workers or n_workers or cpu_count
+        self._n_workers = min(n_workers, cpu_count)
 
-    def _set_inputstem(self, step_id, step):
+    def format_(self, elements=[], delimiter=''):
+        """String together elements of the filename."""
+
+        # TODO: private
+        # TODO: use alias instead of dataset?
+        elements = elements or [self.prefix, self._module_id]
+        delimiter = delimiter or self._delimiter
+        name = delimiter.join([x for x in elements if x])
+        # if use_fallback:, use_fallback=True
+        #     name = name or self._module_id
+
+        return name
+
+    def get_filestem(self, sufdict={}, elements=[], delimiter=''):
+        """Generate (partial) filename."""
+
+        suf = []
+        for k, v in sufdict.items():
+            if v == 'p':
+                suf.append(self._suffix_formats[k])
+            elif v == '*' or v == '?':
+                suf.append(self._suffix_formats[k].format(0).replace('0', v))
+            else:
+                suf.append(self._suffix_formats[k].format(v))
+
+        elements = elements or [self.prefix, self._module_id]
+
+        name = self.format_(elements + suf, delimiter)
+
+        return name
+
+    def _get_inputstem(self, step_id, step, idx=0):
         """Derive the inputstem from the usual previous step."""
 
-        cfg_step = get_config_step(self.image_in, self.dataset, step_id, step)
+        cfg_step = get_config_step(self.image_in, self.prefix, step_id, step)
         files = cfg_step['files']
-        if 'outputpath' in files.keys():
-            self.inputstem = files['outputpath']
-        else:
-            basename = format_([files['dataset'], files['suffix']])
-            self.inputstem = os.path.join(files['directory'], basename)
 
-    def _get_input(self, input, step_id, step, formatstring, fallback=''):
+        if files['_outputs']:
+            instem = files['_outputs'][idx]
+        else:
+            filestem = self.get_filestem()
+            instem = os.path.join(files['datadir'], files['directory'], filestem)
+
+        return instem
+
+    def _get_input(self, input, step_id, step, formatstring='{}', fallback=''):
         """
 
         input=False => use fallback value
@@ -3018,16 +3154,181 @@ class Stapl3r(object):
         """
 
         if isinstance(input, bool):
-            if not input:
+            if input:
+                # try:
+                instem = self._get_inputstem(step_id, step)
+                # except:
+                #     instem = self.get_filestem()
+                #     instem = os.path.join(self.datadir, self.directory, filestem)
+                return formatstring.format(instem)
+            else:
                 return fallback
-            inputstem = self._set_inputstem(step_id, step)
-            return formatstring.format(self.inputstem)
         else:
             if os.path.exists(get_paths(input)['file']):
                 return input
 
     def _set_inputpath(self, step_id, step, formatstring, fallback=''):
+
         self.inputpath = self._get_input(self.inputpath, step_id, step, formatstring, fallback)
+
+    def _get_outputpath(self, filestem, ext='', delimiter='.', rel=False):
+
+        filename = self.format_([filestem, ext], delimiter)
+        p = os.path.join(self.directory, filename)
+        if not rel:
+            p = os.path.join(self.datadir, p)
+        return p
+
+    def _set_outputpath(self, filestem, ext=''):
+
+        self.outputpath = self._get_outputpath(filestem, ext)
+
+    # def set_paths(self, path_struture):
+    #
+    #     for step in self._fun_selector.keys():
+    #         self.inputpaths[step] = [self._get_path(pspec) for pspec in path_struture[step]['inputs']]
+    #         self.outputpaths[step] = [self._get_path(pspec) for pspec in path_struture[step]['outputs']]
+
+    def _get_path(self, pspec={'suf': {}, 'ext': '', 'delimiter': '.'}):
+        """"""
+
+        if not pspec:
+            p = self._get_outputpath(self.get_filestem(), rel=True)
+        elif isinstance(pspec, dict):
+            filestem = self.get_filestem(pspec['suf'])
+            p = self._get_outputpath(filestem, pspec['ext'], rel=True)
+        else:  # or maybe Pathlike...
+            p = pspec
+
+        return p
+        # return os.path.relpath(p, self.datadir)
+
+    def _abs(self, filepath):
+        if filepath and not os.path.isabs(filepath):
+            filepath = os.path.join(self.datadir, filepath)
+        return filepath
+
+    def _abspaths(self, paths, ):
+        return {ids: self._abs(paths[ids]) for ids in paths.keys()}
+
+    def _prep_paths(self, paths, reps={}, abs=True):
+        """Format-in reps by keywords into (absolute) in- and outputpaths."""
+
+        if reps:
+            paths = {ids: p.format(**reps) for ids, p in paths.items()}
+        if abs:
+            paths = {ids: self._abs(p) for ids, p in paths.items()}
+
+        return paths
+
+    # def _get_prevpath(self, suf, dir, ext):
+    #     stem = self.get_filestem(elements=[self.prefix, suf])
+    #     return os.path.join(self.datadir, dir, f'{stem}.{ext}')
+
+    def _get_inpath(self, prev_path):
+        """
+
+        # -1) from inputpaths attribute directly
+        # 0) from 'inputs' of current step in config file
+        # 1) from 'outputs' of previous step in config dump
+        # 2) from 'outputs' of previous step in config file
+        # 3) from expected default?
+        """
+
+        try:
+            pars = self._load_dumped_step(
+                prev_path['moduledir'],
+                prev_path['module_id'],
+                prev_path['step'],
+                )
+            inpath = pars[prev_path['ioitem']][prev_path['output']]
+        except (KeyError, TypeError):
+            try:
+                inpath = self._cfg[prev_path['step_id']][prev_path['step']][prev_path['ioitem']][prev_path['output']]
+            except (KeyError, TypeError):
+                print(f"Could not determine inputpath from {prev_path['module_id']}:{prev_path['step']}")
+                print(f"Trying default path")
+                inpath = 'default'
+
+        return inpath
+
+    def _build_path(self, datadir='', moduledir='', prefixes=[], suffixes=[], ext='', rel=True):
+        """Generate filepath.
+
+        <datadir>/<directory>/<prefix>_<dim-suffixes>.<ext>
+        """
+
+        basename = self._build_basename(prefixes, suffixes, ext)
+
+        moduledir = moduledir or self.directory
+        filepath = os.path.join(moduledir, basename)
+
+        if not rel:
+            datadir = datadir or self.datadir
+            filepath = os.path.join(datadir, filepath)
+
+        return filepath
+
+    def _build_basename(self, prefixes=[], suffixes=[], ext=''):
+        """Generate filename with extension."""
+
+        filestem = self._build_filestem(prefixes, suffixes)
+
+        basename = self.format_([filestem, ext], delimiter='.')
+
+        return basename
+
+    def _build_filestem(self, prefixes=[], suffixes=[], use_fallback=True):
+        """Generate filename without extension."""
+
+        prefixes = prefixes or [self.prefix, self._module_id]
+        prefix = self.format_(prefixes)
+
+        suffix = self._build_suffix(suffixes)
+
+        filestem = self.format_([prefix, suffix])
+
+        if use_fallback:
+            filestem = filestem or self._module_id
+
+        return filestem
+
+    def _build_suffix(self, suffixes=[]):
+        """Join suffixes into a single string."""
+
+        suf = []
+        for s in suffixes:
+            if isinstance(s, dict):
+                suf += [self._unpack_suffix(k, v) for k, v in s.items()]
+            elif isinstance(s, list):
+                suf += s
+            else:
+                suf.append(s)
+
+        return self._delimiter.join(suf)
+
+    def _unpack_suffix(self, dim, val):
+        """Turn a suffix {k: v} spec into a formatter, matcher or formatted suffix."""
+
+        if val == 'p':
+            s = self._suffix_formats[dim]
+        elif val == '?':
+            s = self._suffix_formats[dim].format(**{dim: 0}).replace('0', val)
+        elif val == '*':
+            pat = self._suffix_formats[dim]
+            s = pat.replace(pat[pat.find("{"):pat.find("}")+1], '*')
+        else:
+            s = self._suffix_formats[dim].format(**{dim: val})
+
+        return s
+
+    def _pat2mat(self, pat, mat='*'):
+        """"""
+        return pat.replace(pat[pat.find("{"):pat.find("}")+1], '*')
+
+    def _set_paths_step(self):
+        self.inputs = self.inputpaths[self.step]
+        self.outputs = self.outputpaths[self.step]
 
     def view_with_napari(self, filepath, idss, ldss=[], slices=[]):
 
@@ -3052,21 +3353,31 @@ class Stapl3r(object):
         for lds in ldss:
             viewer.add_labels(get_h5_dset(filepath, lds, slices), name=lds)
 
-    def _loginit(self):
+        im = Image('{}/{}'.format(filepath, idss[0]), permission='r')
+        im.load(load_data=False)
+        im.close()
+        viewer.dims.axis_labels = [al for al in im.axlab]
+        for lay in viewer.layers:
+            lay.scale = [es for es in im.elsize]
 
-        filestem = os.path.join(self.directory, self._module_id)
+    def _init_log(self):
+
+        logfile = self._build_path(ext='log', rel=False)
+
         logging.basicConfig(
             level=logging.INFO,
             datefmt='%Y-%m-%d %H:%M:%S',
             format='%(asctime)s [%(threadName)-12.12s] [%(levelname)-5.5s]  %(message)s',
-            handlers=[logging.FileHandler('{}.log'.format(filestem)),
-                      logging.StreamHandler()]  # FIXME: this goes to stderr
+            handlers=[logging.FileHandler(logfile), logging.StreamHandler()]  # FIXME: this goes to stderr
             )
 
-    def _logstep(self, parameters):
+    def _logstep(self, parameters=[]):
 
-        logging.info('Running step "{}" over {} jobs using {} workers'.format(self.step, self._n_jobs, self.n_workers))
-        logging.info("Parameters: \n {}".format(parameters))
+        if not parameters:
+            parameters = self.dump_parameters(step=self.step)
+
+        logging.info('Running step "{}" over {} jobs using {} workers'.format(self.step, self._n_jobs, self._n_workers))
+        logging.info("Parameters: \n{}".format(parameters))
 
     def _logmp(self, filestem):
 
@@ -3077,57 +3388,54 @@ class Stapl3r(object):
 
 # class Reporter(Stapl3r):
 #     """Correct z-stack shading."""
-#
 #     def __init__(self, image_in, parameter_file, **kwargs):
-#
 #         pass
-#
-    def report(self, ioff=True, channel=None, basename=''):
+
+    def report(self, outputpath='', name='', ioff=True, **kwargs):
 
         figsize = (8.27, 11.69)  # A4 portrait
         f = plt.figure(figsize=figsize, constrained_layout=False)
         gs = gridspec.GridSpec(1, 1, figure=f)
 
-        if not basename:
-            basename = self.format_()
-
         figtitle = 'STAPL-3D {} report'.format(self._module_id)
-        figtitle = '{} \n {}'.format(figtitle, basename)
+        name = name or self.prefix  # TODO: we would always like the full name here?
+        figtitle = '{} \n {}'.format(figtitle, name)
 
-        if not basename:
-            basename = self.format_()
+        # TODO generalize (to eg blocks) or remove and supply name from function call
+        if 'channel' in kwargs.keys():
+            channel = kwargs['channel']
+            figtitle += ' channel ' + self._suffix_formats['c'].format(c=channel)
+            suf = {'c': channel}
+        else:
+            channel = None
+            suf = {}
 
-        if channel is not None:
-            postfix_ch = self._suffix_formats['c'].format(channel)
-            basename = self.format_([basename, postfix_ch])
-            figtitle += ' channel {:02d}'.format(channel)
-
-        filestem = os.path.join(self.directory, basename)
-
-        info_dict = self._get_info_dict(filestem, channel=channel)
-
+        info_dict = self._get_info_dict(**kwargs)
         axdict = self._gen_subgrid(f, gs[0], channel=channel)
 
         self._plot_params(f, axdict, info_dict)
         self._plot_images(f, axdict, info_dict)
         self._plot_profiles(f, axdict, info_dict)
 
+        outputpath = outputpath or self._build_path(suffixes=[suf])
+
         f.suptitle(figtitle, fontsize=14, fontweight='bold')
-        f.savefig('{}.pdf'.format(filestem), format='pdf')
+        f.savefig(outputpath, format='pdf')
         if ioff:
             plt.close(f)
 
-    def summary_report(self, ioff=True, channel=None, basename=''):
+    def summary_report(self, name='', channel=None, ioff=True, outputpath=''):
 
         figsize = (8.27, 11.69)  # A4 portrait
         f = plt.figure(figsize=figsize, constrained_layout=False)
         gs = gridspec.GridSpec(1, 1, figure=f)
 
         figtitle = 'STAPL-3D {} report'.format(self._module_id)
-        figtitle = '{} \n {}'.format(figtitle, self.dataset)
+        name = name or self.prefix  # TODO: we would like the full name here?
+        figtitle = '{} \n {}'.format(figtitle, name)
 
-        basename = basename or self.dataset or self._module_id
-        filestem = os.path.join(self.directory, basename)
+        filestem = self._build_path()
+        outputpath = outputpath or '{}_summary.pdf'.format(filestem)
 
         info_dict = self._get_info_dict_summary(filestem, channel=channel)
 
@@ -3136,7 +3444,7 @@ class Stapl3r(object):
         self._summary_report(f, axdict, info_dict)
 
         f.suptitle(figtitle, fontsize=14, fontweight='bold')
-        f.savefig('{}_summary.pdf'.format(filestem))
+        f.savefig(outputpath)
         if ioff:
             plt.close(f)
 
@@ -3149,10 +3457,14 @@ class Stapl3r(object):
 
         return ax
 
-    def load_dumped_step(self, step, pars={}):
+    def _load_dumped_step(self, moduledir, module_id, step, pars={}):
 
-        basename = self.format_([self.dataset, self._module_id, step])
-        ymlpath = os.path.join(self.directory, '{}.yml'.format(basename))
+        ymlpath = self._build_path(
+            moduledir=moduledir,
+            prefixes=[self.prefix, module_id, step],
+            ext='yml',
+            rel=False,
+            )
         try:
             with open(ymlpath, 'r') as ymlfile:
                 cfg = yaml.safe_load(ymlfile)
@@ -3160,14 +3472,31 @@ class Stapl3r(object):
             pass
         else:
             for k in ['params', 'files', 'submit']:
-                pars.update(cfg[self._module_id][step][k])
+                pars.update(cfg[module_id][step][k])
 
         return pars
 
+    # def load_dumped_step(self, step, pars={}):
+    #
+    #     elements = [self.prefix, self._module_id, step]
+    #     filestem = self.get_filestem(elements=elements)
+    #     ymlpath = self._get_outputpath(filestem, 'yml')
+    #     try:
+    #         with open(ymlpath, 'r') as ymlfile:
+    #             cfg = yaml.safe_load(ymlfile)
+    #     except FileNotFoundError:
+    #         pass
+    #     else:
+    #         for k in ['params', 'files', 'submit']:
+    #             pars.update(cfg[self._module_id][step][k])
+    #
+    #     return pars
+
     def load_dumped_pars(self, pars={}):
+        """TODO: private, or make intuitive action"""
 
         for step in self._fun_selector.keys():
-            pars = self.load_dumped_step(step, pars)
+            pars = self._load_dumped_step(self.directory, self._module_id, step, pars)
 
         return pars
 
@@ -3199,7 +3528,7 @@ class Stapl3r(object):
         """Show parameter table in report."""
 
         cellText = []
-        for par, name in self._partable.items():
+        for par, name in self._parameter_table.items():
             v = info_dict['parameters'][par]
             if not isinstance(v, list):
                 v = [v]
@@ -3251,6 +3580,7 @@ class Stapl3r(object):
 
     def _get_clim(self, cslc, q=[0.05, 0.95], roundfuns=[np.round, np.round]):
         c_min = np.amin([np.quantile(cslc[d], q[0]) for d in 'xyz'])
+        c_min = max(0, c_min)  # FIXME: make negatives possible
         c_max = np.amax([np.quantile(cslc[d], q[1]) for d in 'xyz'])
         c_min = self._power_rounder(c_min, roundfuns[0])
         c_max = self._power_rounder(c_max, roundfuns[1])
@@ -3304,3 +3634,40 @@ class Stapl3r(object):
     def _plot_images(self, f, axdict, info_dict):
         """Plot graphs with profiles."""
         pass
+
+    def _merge_reports(self, pdfs, outputpath):
+        """Merge pages of a report."""
+
+        if not pdfs:
+            return
+
+        try:
+            from PyPDF2 import PdfFileMerger
+            merger = PdfFileMerger()
+            for pdf in pdfs:
+                merger.append(pdf)
+            merger.write(outputpath)
+            merger.close()
+        except:
+            print('NOTICE: could not merge report pdfs')
+        else:
+            for pdf in pdfs:
+                os.remove(pdf)
+
+    def _merge(self, filetype, fun, **kwargs):
+        """Merge files."""
+
+        mpaths = []
+        outputs = self._prep_paths(self.outputs)
+        for filepath in self.filepaths:
+            filestem = os.path.splitext(os.path.basename(filepath))[0]
+            inputs = self._prep_paths(self.inputs, reps={'f': filestem})
+            mpaths.append(inputs[filetype])
+        mpaths.sort()
+
+        try:
+            fun(mpaths, outputs[filetype], **kwargs)
+            for mpath in mpaths:
+                os.remove(mpath)
+        except FileNotFoundError:
+            print(f"WARNING: {filetype}s could not be merged")

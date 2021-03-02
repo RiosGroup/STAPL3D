@@ -28,6 +28,10 @@ dataset = '200824_RL67_10Ttransplant_redo_25x'
 datadir = os.path.join(projectdir, dataset)
 filestem = os.path.join(datadir, dataset)
 
+projectdir = 'E:\\Ravi'
+dataset = '200720_Exp7_AP_HFK_25x'
+datadir = os.path.join(projectdir, dataset)
+filestem = os.path.join(datadir, dataset)
 
 par_file = '{}.yml'.format(filestem)
 

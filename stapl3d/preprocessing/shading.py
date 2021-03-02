@@ -15,16 +15,7 @@
     # TODO: clean <>_X.npz and <>_Y.npz files
     # TODO: change step_id to module_id throughout?
 
-    # TODO: maybe dump_pars from within functions to be useful for HCP calls too
-
-    # TODO: merge pdfs
     # TODO: generalize read-write in 'apply'
-
-    # TODO: logging system
-    # logstem = os.path.join(outputdir, '{}_{}'.format(dataset, step_id))
-    # logging.basicConfig(filename='{}.log'.format(logstem), level=logging.INFO)
-    # msg = 'Processing ch{:02d}:plane{:03d}'.format(channel, plane)
-    # logger.info(msg)  # print(msg)
 
     # # Save derived parameters.
     # dpars = {'z_sel': [v.item() for v in z_sel]}
@@ -63,7 +54,8 @@ from skimage.io import imread, imsave
 import czifile
 from readlif.reader import LifFile
 
-from stapl3d import parse_args, Stapl3r, Image, format_
+from stapl3d import parse_args, Stapl3r, Image
+from stapl3d.reporting import merge_reports
 
 logger = logging.getLogger(__name__)
 
@@ -71,7 +63,7 @@ logger = logging.getLogger(__name__)
 def main(argv):
     """Correct z-stack shading."""
 
-    steps = ['estimate', 'postprocess', 'apply']
+    steps = ['estimate', 'process', 'postprocess', 'apply']
     args = parse_args('shading', steps, *argv)
 
     deshader = Deshader(
@@ -79,9 +71,8 @@ def main(argv):
         args.parameter_file,
         step_id=args.step_id,
         directory=args.outputdir,
-        dataset=args.dataset,
-        suffix=args.suffix,
-        n_workers=args.n_workers,
+        prefix=args.prefix,
+        max_workers=args.max_workers,
     )
 
     for step in args.steps:
@@ -101,22 +92,58 @@ class Deshader(Stapl3r):
 
         self._fun_selector = {
             'estimate': self.estimate,
+            'process': self.process,
             'postprocess': self.postprocess,
             'apply': self.apply,
             }
 
+        self._parallelization = {
+            'estimate': ['channels', 'planes'],
+            'process': ['channels'],
+            'postprocess': [],
+            'apply': ['stacks'],
+            }
+
+        self._parameter_sets = {
+            'estimate': {
+                'fpar': self._FPAR_NAMES,
+                'ppar': ('noise_threshold', 'metric'),
+                'spar': ('_n_workers', 'channels', 'planes'),
+                },
+            'process': {
+                'fpar': self._FPAR_NAMES,
+                'ppar': ('quantile_threshold', 'polynomial_order'),
+                'spar': ('_n_workers', 'channels'),
+                },
+            'postprocess': {
+                'fpar': self._FPAR_NAMES,
+                'ppar': (),
+                'spar': (),
+                },
+            'apply': {
+                'fpar': self._FPAR_NAMES,
+                'ppar': ('clipping_mask', 'correct', 'write_to_tif'),
+                'spar': ('_n_workers', 'stacks'),
+                },
+            }
+
+        self._parameter_table = {
+            'noise_threshold': 'Noise threshold',
+            'metric': 'Metric',
+            'quantile_threshold': 'Quantile threshold',
+            'polynomial_order': 'Polynomial order',
+            }
+
         default_attr = {
-            'step_id': 'shading',
             'channels': [],
             'planes': [],
-            'noise_threshold': 0,
+            'noise_threshold': None,
             'metric': 'median',
             'quantile_threshold': 0.8,
             'polynomial_order': 3,
             'stacks': [],
             'clipping_mask': False,
             'correct': True,
-            'shadingpat': '',
             'write_to_tif': True,
         }
         for k, v in default_attr.items():
@@ -125,31 +152,61 @@ class Deshader(Stapl3r):
         for step in self._fun_selector.keys():
             self.set_parameters(step)
 
-        self._parsets = {
+        self._init_paths()
+
+        self._init_log()
+
+    def _init_paths(self):
+
+        stem = self._build_path()
+        ppat = self._build_path(suffixes=[{'c': 'p', 'z': 'p'}])
+        pmat = self._build_path(suffixes=[{'c': 'p', 'z': '?'}])
+        cpat = self._build_path(suffixes=[{'c': 'p'}])
+        cmat = self._build_path(suffixes=[{'c': '?'}])
+        spat = self._build_path(suffixes=[{'c': 'p', 's': 'p'}])
+
+        self._paths = {
             'estimate': {
-                'fpar': self._FPAR_NAMES,
-                'ppar': ('noise_threshold', 'metric'),
-                'spar': ('n_workers', 'channels', 'planes'),
+                'inputs': {
+                    'data': self.image_in,
+                    },
+                'outputs': {
+                    'metrics': f'{ppat}.npz',
+                    },
+                },
+            'process': {
+                'inputs': {
+                    'metrics': f'{pmat}.npz',
+                    },
+                'outputs': {
+                    'profile_X': f'{cpat}_X.npz',
+                    'profile_Y': f'{cpat}_Y.npz',
+                    'shading': f'{cpat}.tif',
+                    'report': f'{cpat}.pdf',
+                    },
                 },
             'postprocess': {
-                'fpar': self._FPAR_NAMES,
-                'ppar': ('quantile_threshold', 'polynomial_order'),
-                'spar': ('n_workers', 'channels'),
+                'inputs': {
+                    'report': f'{cmat}.pdf',
+                    },
+                'outputs': {
+                    'report': f'{stem}.pdf',
+                    },
                 },
             'apply': {
-                'fpar': self._FPAR_NAMES,
-                'ppar': ('clipping_mask', 'correct', 'shadingpat', 'write_to_tif'),
-                'spar': ('n_workers', 'stacks'),
-                },
-            }
+                'inputs': {
+                    'data': self.image_in,
+                    'shading': f'{cpat}.tif',
+                    },
+                'outputs': {
+                    'stacks': f'{spat}.tif',
+                    },
+            },
+        }
 
-        # TODO: merge with parsets
-        self._partable = {
-            'noise_threshold': 'Noise threshold',
-            'metric': 'Metric',
-            'quantile_threshold': 'Quantile threshold',
-            'polynomial_order': 'Polynomial order',
-            }
+        for step in self._fun_selector.keys():
+            self.inputpaths[step]  = self._merge_paths(self._paths[step], step, 'inputs')
+            self.outputpaths[step] = self._merge_paths(self._paths[step], step, 'outputs')
 
     def estimate(self, **kwargs):
         """Estimate z-stack shading.
@@ -160,25 +217,18 @@ class Deshader(Stapl3r):
         metric='median',
         """
 
-        self.set_parameters('estimate', kwargs)
-        arglist = self._get_arglist(['channels', 'planes'])
-        self.set_n_workers(len(arglist))
-        pars = self.dump_parameters(step=self.step)
-        self._logstep(pars)
-
-        with multiprocessing.Pool(processes=self.n_workers) as pool:
+        arglist = self._prep_step('estimate', kwargs)
+        with multiprocessing.Pool(processes=self._n_workers) as pool:
             pool.starmap(self._estimate_plane, arglist)
 
     def _estimate_plane(self, channel, plane):
         """Estimate the x- and y-profiles for a channel in a czi/lif file."""
 
-        postfix_ch = self._suffix_formats['c'].format(channel)
-        postfix_st = self._suffix_formats['z'].format(plane)
-        basename = self.format_([self.dataset, self.suffix, postfix_ch, postfix_st])
-        outstem = os.path.join(self.directory, basename)
+        inputs = self._prep_paths(self.inputs)
+        outputs = self._prep_paths(self.outputs, reps={'c': channel, 'z': plane})
 
         # Compute median values per plane for X and Y concatenation.
-        dstack = read_tiled_plane(self.image_in, channel, plane)
+        dstack = read_tiled_plane(inputs['data'], channel, plane)
         out = {}
         for axis in [0, 1]:
             dstacked = np.concatenate(dstack, axis=0)
@@ -188,9 +238,9 @@ class Deshader(Stapl3r):
             else:
                 out[axis] = np.ma.mean(ma_data, axis=0)
 
-        np.savez('{}.npz'.format(outstem), X=out[1], Y=out[0])
+        np.savez(outputs['metrics'], X=out[1], Y=out[0])
 
-    def postprocess(self, **kwargs):
+    def process(self, **kwargs):
         """Fit shading profiles for all channels.
 
         channels=[],
@@ -198,39 +248,30 @@ class Deshader(Stapl3r):
         polynomial_order=3,
         """
 
-        self.set_parameters('postprocess', kwargs)
-        arglist = self._get_arglist(['channels'])
-        self.set_n_workers(len(arglist))
-        pars = self.dump_parameters(step=self.step)
-        self._logstep(pars)
+        arglist = self._prep_step('process', kwargs)
+        with multiprocessing.Pool(processes=self._n_workers) as pool:
+            pool.starmap(self._process_channel, arglist)
 
-        with multiprocessing.Pool(processes=self.n_workers) as pool:
-            pool.starmap(self._postprocess_channel, arglist)
-
-    def _postprocess_channel(self, channel):
+    def _process_channel(self, channel):
         """Fit shading profiles for a channel."""
 
-        postfix_ch = self._suffix_formats['c'].format(channel)
-        basename = self.format_([self.dataset, self.suffix, postfix_ch])
-        outstem = os.path.join(self.directory, basename)
+        inputs = self._prep_paths(self.inputs, reps={'c': channel})
+        outputs = self._prep_paths(self.outputs, reps={'c': channel})
+
+        npzs = glob(inputs['metrics'])
+        npzs.sort()
 
         iminfo = get_image_info(self.image_in)
         img_fitted = np.ones(iminfo['tilesize'], dtype='float')
 
-        # Process the medians for the channel.
-        suffix_pat = self._suffix_formats['z'].format(0).replace('0', '?')
-        plane_pat = self.format_([basename, suffix_pat])
-        npzs = glob(os.path.join(self.directory, '{}.npz'.format(plane_pat)))
-        npzs.sort()
-
-        def process_medians(meds, q_thr, order, outstem, dim):
+        def process_medians(meds, q_thr, order, outputpath):
             """Select, normalize and fit profiles; and save for report."""
 
             sel, dm, z_sel = select_z_range(meds, q_thr)
             m, n, nm = normalize_profile(sel)
             f, fn = fit_profile(nm, order)
-            np.savez(
-                '{}_{}.npz'.format(outstem, dim),
+
+            np.savez(outputpath,
                 sel=sel, dm=dm, z_sel=z_sel,
                 mean=m, norm=n, norm_mean=nm,
                 fitp=f, fitp_norm=fn,
@@ -238,18 +279,19 @@ class Deshader(Stapl3r):
 
             return fn
 
+        # TODO: write to single npz file per channel
         for dim in 'XY':
 
             meds = []
             for npzfile in npzs:
-                medians = np.load(npzfile)
+                medians = np.load(npzfile, allow_pickle=True)
                 meds.append(medians[dim])
                 medians.close()
 
             fitp_norm = process_medians(
                 np.stack(meds, axis=0),
                 self.quantile_threshold, self.polynomial_order,
-                outstem, dim,
+                outputs[f'profile_{dim}'],
                 )
 
             if dim == 'X':
@@ -258,15 +300,35 @@ class Deshader(Stapl3r):
                 img_fitted *= fitp_norm[:, np.newaxis]
 
         # Save estimated shading image.  # FIXME: handle floats here
-        img = np.array(img_fitted * np.iinfo(iminfo['dtype']).max, dtype=iminfo['dtype'])
-        imsave('{}.tif'.format(outstem), img)
+        img = np.array(img_fitted * np.iinfo(iminfo['dtype']).max,
+                       dtype=iminfo['dtype'])
+        imsave(outputs['shading'], img)
 
         # Print a report page to pdf.
-        self.report(channel=channel)
+        self.report(outputpath=outputs['report'],
+                    channel=channel,
+                    inputs=inputs, outputs=outputs)
 
         # Delete planes
         for npzfile in npzs:
             os.remove(npzfile)
+
+    def postprocess(self, **kwargs):
+        """Merge reports."""
+
+        arglist = self._prep_step('postprocess', kwargs)
+        with multiprocessing.Pool(processes=self._n_workers) as pool:
+            pool.starmap(self._postprocess, arglist)
+
+    def _postprocess(self, foo=0):
+        """Merge reports."""
+
+        inputs = self._prep_paths(self.inputs)
+        outputs = self._prep_paths(self.outputs)
+
+        pdfs = glob(inputs['report'])
+        pdfs.sort()
+        self._merge_reports(pdfs, outputs['report'])
 
     def apply(self, **kwargs):
         """Apply zstack shading correction for all channels.
@@ -278,41 +340,28 @@ class Deshader(Stapl3r):
         write_to_tif=True,
         """
 
-        self.set_parameters('apply', kwargs)
-        arglist = self._get_arglist(['stacks'])
-        self.set_n_workers(len(arglist))
-
-        # Set derived parameter defaults.  # TODO: move to method: derive_defaults
-        if not self.shadingpat:
-            stem = self.format_([self.dataset, self.suffix, self._suffix_formats['c']])
-            self.shadingpat = os.path.join(self.directory, '{}.tif'.format(stem))
-
-        pars = self.dump_parameters(step=self.step)
-        self._logstep(pars)
-
-        with multiprocessing.Pool(processes=self.n_workers) as pool:
+        arglist = self._prep_step('apply', kwargs)
+        with multiprocessing.Pool(processes=self._n_workers) as pool:
             pool.starmap(self._apply_stack, arglist)
 
     def _apply_stack(self, stack=0):
         """Apply zstack shading correction for a channel."""
 
-        postfix_st = self._suffix_formats['s'].format(stack)
-        basename = self.format_([self.dataset, self.suffix, postfix_st])
-        outstem = os.path.join(self.directory, basename)
+        inputs = self._prep_paths(self.inputs)
+        outputs = self._prep_paths(self.outputs)
 
         iminfo = get_image_info(self.image_in)
-
         out = create_output(None, iminfo['zstack_shape'], iminfo['dtype'])
 
         # Get stack data (CZYX)  # TODO/FIXME: timepoint / assumes T is squeezed
         c_axis = 0
-        data = np.squeeze(read_zstack(self.image_in, stack, out))
+        data = np.squeeze(read_zstack(inputs['data'], stack, out))
 
         if self.clipping_mask:
             clip_mask = create_clipping_mask(data, axis=c_axis)
 
         if self.correct:
-            data = correct_zstack(data, c_axis, self.shadingpat)
+            data = correct_zstack(data, c_axis, inputs['shading'])
 
         if self.clipping_mask:
             data = np.append(data, clip_mask.astype(data.dtype), axis=c_axis)
@@ -330,35 +379,38 @@ class Deshader(Stapl3r):
             props['shape'] = props['shape'][:3]
             props['elsize'] = props['elsize'][:3]
 
-            for ch in range(0, data.shape[c_axis]):
-                postfix_ch = self._suffix_formats['c'].format(ch)
-                basename = self.format_([self.dataset, self.suffix, postfix_ch, postfix_st])
-                outputpath = os.path.join(self.directory, '{}.tif'.format(basename))
+            for channel in range(0, data.shape[c_axis]):
 
-                mo = Image(outputpath, **props)
+                outpath = outputs['stacks'].format(c=channel, s=stack)
+                mo = Image(outpath, **props)
                 mo.create()
                 slcs = [slc for slc in mo.slices]
-                slcs.insert(c_axis, slice(ch, ch+1))
+                slcs.insert(c_axis, slice(channel, channel + 1))
                 mo.write(data[tuple(slcs)])
                 mo.close()
 
+        # else:
+        #
+        #     outpath = self._outputs[0].format(stack)
+        #
+        #     idxs = [1, 2, 3, 0]  # czyx to zyxc
+        #     data = np.transpose(data, axes=idxs)
+        #     mo = Image(outpath, **props)
+        #     mo.create()
+        #     mo.write(data)
+        #     mo.close()
+
+    def _get_info_dict(self, **kwargs):
+
+        if 'parameters' in kwargs.keys():
+            p = kwargs['parameters']
         else:
+            p = self.load_dumped_pars()
+            kwargs['parameters'] = p
 
-            idxs = [1, 2, 3, 0]  # czyx to zyxc
-            data = np.transpose(data, axes=idxs)
-            mo = Image("{}{}.h5/data".format(outstem, postfix_st), **props)
-            mo.create()
-            mo.write(data)
-            mo.close()
+        kwargs['clip_threshold'] = 0.75
 
-    def _get_info_dict(self, filestem, info_dict={}, channel=None):
-
-        info_dict['parameters'] = self.load_dumped_pars()
-        info_dict['filestem'] = filestem
-        info_dict['clip_threshold'] = 0.75
-        info_dict['res'] = 10000
-
-        return info_dict
+        return kwargs
 
     def _gen_subgrid(self, f, gs, channel=None):
         """Generate the axes for printing the report."""
@@ -436,7 +488,7 @@ class Deshader(Stapl3r):
         clip_threshold = info_dict['clip_threshold']
         clipped = self._clipped_colormap(clip_threshold, clip_color, n_colors)
 
-        img = imread('{}.tif'.format(info_dict['filestem']))
+        img = imread(info_dict['outputs']['shading'])
         infun = np.iinfo if img.dtype.kind in 'ui' else np.finfo
         img = img.transpose() / int(infun(img.dtype).max)  # TODO: img_as_float?
 
@@ -456,8 +508,7 @@ class Deshader(Stapl3r):
         """Plot graphs with profiles."""
 
         for dim, c in {'X': 'g', 'Y': 'b'}.items():
-            npzfile = '{}_{}.npz'.format(info_dict['filestem'], dim)
-            ddict = np.load(npzfile)
+            ddict = np.load(info_dict['outputs'][f'profile_{dim}'])
             self._plot_profile(ddict, axdict, dim, c, info_dict['clip_threshold'], fac)
 
     def _plot_profile(self, ddict, axdict, dim='X', c='r', clip_threshold=0.75, fac=0.05):
@@ -511,6 +562,7 @@ class Deshader(Stapl3r):
         for i in z_sel:
             ax.axvline(i, ymin=yd[dim][0], ymax=yd[dim][1], color=c, linewidth=0.5, linestyle='-')
         ax.axvspan(min(z_sel), max(z_sel), alpha=0.1, color='k')
+
 
 def read_tiled_plane(image_in, channel, plane):
     """Read a plane of a tiled czi/lif file."""
@@ -609,7 +661,7 @@ def correct_zstack(data, c_axis=0, shadingpat=''):
     shadingdata = []
 
     for ch in range(data.shape[c_axis]):
-        filepath_shading = shadingpat.format(ch)
+        filepath_shading = shadingpat.format(c=ch)
         shading_img = img_as_float(imread(filepath_shading))
         shadingdata.append(np.tile(shading_img, (data.shape[1], 1, 1)))
 
@@ -691,7 +743,7 @@ def get_image_info(image_in):
 
         iminfo['stack_offsets'] = v_offsets
 
-    elif image_in.endswith('.ims'):
+    elif image_in.endswith('.ims') or image_in.endswith('.bdv'):
 
         from stapl3d import get_imageprops
         props = get_imageprops(image_in)
@@ -722,13 +774,9 @@ def czi_get_elsize(czi):
     data = segment.data().data()
     md = etree.fromstring(data.encode('utf-8'))
 
-    # FIXME: use find() method on etree items
-    try:
-        elsize_x = float(md[0][3][0][0][0].text) * 1e6
-        elsize_y = float(md[0][3][0][1][0].text) * 1e6
-        elsize_z = float(md[0][3][0][2][0].text) * 1e6
-    except IndexError:
-        elsize_x, elsize_y, elsize_z = 1, 1, 1
+    elsize_x = float(md.findall('.//ScalingX')[0].text) * 1e6
+    elsize_y = float(md.findall('.//ScalingY')[0].text) * 1e6
+    elsize_z = float(md.findall('.//ScalingZ')[0].text) * 1e6
 
     return [elsize_z, elsize_y, elsize_x]
 
