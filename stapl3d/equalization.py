@@ -51,8 +51,6 @@ from skimage.color import label2rgb
 from skimage.filters import threshold_otsu
 from skimage.morphology import remove_small_objects
 
-from sklearn.mixture import GaussianMixture
-
 from stapl3d import parse_args, Stapl3r, Image, transpose_props, get_imageprops, get_paths
 from stapl3d.preprocessing import shading
 from stapl3d.reporting import merge_reports, get_centreslices
@@ -197,6 +195,7 @@ class Equalizer(Stapl3r):
                 'outputs': {
                     **{ods: fstring.format(fpat, ods) for ods in vols_m},
                     **{'yml': f'{fpat}_segment'},
+                    **{'stem': f'{fpat}'},
                     },
                 },
             'metrics': {
@@ -270,6 +269,8 @@ class Equalizer(Stapl3r):
         vols = {'data': data, 'smooth': data_smooth}
         for ids, out in vols.items():
             props['path'] = outputs[ids]
+            if 'nii' in self.outputformat:
+                out = np.atleast_3d(out)
             write_image(out, props)
 
     def segment(self, **kwargs):
@@ -333,6 +334,7 @@ class Equalizer(Stapl3r):
         tissue_mask &= ~clipping_mask
 
         signal_mask = data > np.quantile(data[tissue_mask], self.segment_quantile)
+        signal_mask[~tissue_mask] = False
         signal_mask &= ~clipping_mask
         remove_small_objects(signal_mask, min_size=self.segment_min_size,
                              in_place=True)
@@ -363,17 +365,18 @@ class Equalizer(Stapl3r):
         def get_cnr(image, noise_mask, sigval, bgval):
             noise = np.ravel(image[noise_mask])
             if noise.size > 0:
-                cnr = (sigval - bgval) / np.std(noise)
+                noise_sd = np.std(noise)
+                cnr = (sigval - bgval) / noise_sd
             else:
-                cnr = 0
-            return cnr
+                cnr, noise_sd = 0, 0
+            return cnr, noise_sd
 
         def q_base(image, quantiles, segpath):
             """Simple quantiles."""
             data = np.ravel(image)
             vals, score = get_measures(data, quantiles)
-            cnr = None
-            return pd.DataFrame([vals[0], vals[1], score, cnr]).T
+            cnr, noise_sd = None, None
+            return pd.DataFrame([vals[0], vals[1], score, cnr, noise_sd]).T
 
         def q_clip(image, quantiles, segpath):
             """Simple quantiles of non-clipping."""
@@ -382,8 +385,8 @@ class Equalizer(Stapl3r):
                                   image < infun(image.dtype).max)
             data = np.ravel(image[mask])
             vals, score = get_measures(data, quantiles)
-            cnr = None
-            return pd.DataFrame([vals[0], vals[1], score, cnr]).T
+            cnr, noise_sd = None, None
+            return pd.DataFrame([vals[0], vals[1], score, cnr, noise_sd]).T
 
         def q_mask(image, quantiles, segpath):
             """Simple quantiles of image[tissue_mask]."""
@@ -392,37 +395,19 @@ class Equalizer(Stapl3r):
             infun = np.iinfo if image.dtype.kind in 'ui' else np.finfo
             mask = np.logical_and(tissue_mask, image < infun(image.dtype).max)
             data = np.ravel(image[mask])
-            mode = stats.mode(data)[0][0]
+            #mode = stats.mode(data)[0][0]
             vals, score = get_measures(data, quantiles)
-            # noise_mask = ~tissue_mask
-            noise_mask, _ = load_image(outputpat.format('noise_mask'))
-            noise_mask = noise_mask.astype('bool')
-            cnr = get_cnr(image, noise_mask, vals[1], vals[0])
-            return pd.DataFrame([vals[0], vals[1], score, cnr]).T
-
-        def gmm(image, quantiles, segpath):
-            """Two-comp GMM of segmentation image[tissue_mask]."""
-            segmentation, _ = load_image(segpath)
-            tissue_mask = segmentation >= 2
-            X_train = np.ravel(image[tissue_mask])
-            X_train = X_train.reshape(-1, 1)
-            gmm = GaussianMixture(n_components=2, max_iter=100, verbose=0,
-                                  covariance_type="full")
-            gmm.fit(X_train)
-            means = [gmm.means_[0][0], gmm.means_[1][0]]
-            vals = np.sort(means)
-            score = vals[1] / vals[0]
-            cnr = get_cnr(image, noise_mask, vals[1], vals[0])
-            return pd.DataFrame([vals[0], vals[1], score, cnr]).T
+            cnr, noise_sd = get_cnr(image, segmentation==1, vals[1], vals[0])
+            return pd.DataFrame([vals[0], vals[1], score, cnr, noise_sd]).T
 
         def seg(image, quantiles, segpath):
             """Three-comp segmentation."""
             segmentation, _ = load_image(segpath)
-            vals = [np.median(np.ravel(image[segmentation==2])),
-                    np.median(np.ravel(image[segmentation==3]))]
-            score = vals[1] / vals[0]
-            cnr = get_cnr(image, segmentation==3, vals[1], vals[0])
-            return pd.DataFrame([vals[0], vals[1], score, cnr]).T
+            signal = np.median(np.ravel(image[segmentation==2]))
+            tissue = np.median(np.ravel(image[segmentation==3]))
+            contrast = tissue / signal
+            cnr, noise_sd = get_cnr(image, segmentation==1, tissue, signal)
+            return pd.DataFrame([signal, tissue, contrast, cnr, noise_sd]).T
 
         filestem = os.path.splitext(os.path.basename(filepath))[0]
         inputs = self._prep_paths(self.inputs, reps={'f': filestem})
@@ -432,9 +417,8 @@ class Equalizer(Stapl3r):
         smooth, props = load_image(inputs['smooth'])
 
         df = pd.DataFrame()
-        metrics = ['q1', 'q2', 'contrast', 'cnr']
-        meths = {'q_base': q_base, 'q_clip': q_clip, 'q_mask': q_mask,
-                 'gmm': gmm, 'seg': seg}
+        metrics = ['q1', 'q2', 'contrast', 'cnr', 'noise_sd']
+        meths = {'q_base': q_base, 'q_clip': q_clip, 'q_mask': q_mask, 'seg': seg}
         for method, fun in meths.items():
             if method in self.methods:
                 df0 = fun(data, self.quantiles, inputs['segmentation'])
@@ -573,7 +557,6 @@ class Equalizer(Stapl3r):
         # p = info_dict['parameters']
         t = ['noise', 'tissue', 'otsu']
         thresholds = [info_dict['threshold_{}'.format(k)] for k in t]
-        print(thresholds)
 
         # image with scalebar
         x_idx = 2; y_idx = 1;  # FIXME
@@ -624,7 +607,6 @@ class Equalizer(Stapl3r):
         ax.set_xlim([0, dmax])
 
         mets = ['cnr', 'contrast', 'median_fg', 'median_bg']
-        print(info_dict['cnr'])
         labs = ['{} = {}'.format(k, '{0: >8.2f}'.format(info_dict[k])) for k in mets]
         lab = '\n'.join(labs)
         ax.annotate(
@@ -650,6 +632,20 @@ class Equalizer(Stapl3r):
 
         return info_dict
 
+    def view_with_napari(self, filepath='', idss=['data', 'smooth'], ldss=['noise_mask', 'tissue_mask', 'segmentation']):
+
+        if not filepath:
+            filestem = os.path.splitext(os.path.basename(self.filepaths[0]))[0]
+            outputs = self._prep_paths(self.outputpaths['segment'], reps={'f': filestem})
+            input = outputs['stem']
+            filepath = f'{input}.h5'
+        elif filepath.endswith('.czi'):
+            filestem = os.path.splitext(os.path.basename(filepath))[0]
+            outputs = self._prep_paths(self.outputpaths['segment'], reps={'f': filestem})
+            input = outputs['stem']
+            filepath = f'{input}.h5'
+
+        super().view_with_napari(filepath, idss, ldss)
 
 def load_image(inputpath):
     im = Image(inputpath)
@@ -710,6 +706,7 @@ def merge_parameters(ymls, outputpath, **kwargs):
             yaml.dump(cfg_out, f, default_flow_style=False)
 
     return yaml.dump(cfg_out, default_flow_style=False)
+
 
 if __name__ == "__main__":
     main(sys.argv[1:])
