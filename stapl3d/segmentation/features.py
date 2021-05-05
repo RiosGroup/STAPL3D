@@ -372,7 +372,7 @@ def get_nuclearmask(block_label):
         mask_sauvola_im.slices[3] = slice(0, 1, None)
 
     labelfile_blocks = False # FIXME: as argument
-    from wmem import MaskImage
+    from stapl3d import MaskImage
     #datadir = '/hpc/pmc_rios/Kidney/190910_rl57_fungi_16bit_25x_125um_corr-stitching'
     datadir = 'G:\\mkleinnijenhuis\\PMCdata\Kidney\\190910_rl57_fungi_16bit_25x_125um_corr-stitching'
     dataset = '190910_rl57_fungi_16bit_25x_125um_corr-stitching'
