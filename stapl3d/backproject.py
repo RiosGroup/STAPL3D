@@ -4,158 +4,239 @@
 
 """
 
+import os
 import sys
 import argparse
+import logging
+import pickle
+import shutil
+import multiprocessing
 
-import os
+# import yaml
+
+# from glob import glob
+
+import matplotlib
+import matplotlib.pyplot as plt
+import matplotlib.gridspec as gridspec
+
 import numpy as np
 import pandas as pd
 from random import shuffle
 
-from stapl3d import (
-    Image,
-    LabelImage,
-    wmeMPI,
-    transpose_props,
-    )
-from stapl3d.segmentation.segment import gen_outpath
+# from tifffile import create_output
+# from xml.etree import cElementTree as etree
+
+# from skimage import img_as_float
+# from skimage.io import imread, imsave
+
+# import czifile
+
+from stapl3d import parse_args, Stapl3r, Image, LabelImage, wmeMPI, transpose_props
+
+#from stapl3d.segmentation.segment import gen_outpath
+
+logger = logging.getLogger(__name__)
 
 
 def main(argv):
     """Write segment backprojection."""
 
-    parser = argparse.ArgumentParser(
-        description=__doc__,
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter
-        )
-    parser.add_argument(
-        'seg_path',
-        help='path to segments file',
-        )
-    parser.add_argument(
-        'csv_path',
-        help='path to feature file',
-        )
-    parser.add_argument(
-        '--labelkey',
-        default='Id',
-        help='the header of the label value column in the csv file',
-        )
-    parser.add_argument(
-        '--key',
-        default='pseudotime',
-        help='the column in the csv file',
-        )
-    parser.add_argument(
-        '--name',
-        default='',
-        help='a name for new Imaris channel',
-        )
-    parser.add_argument(
-        '--maxlabel',
-        type=int,
-        default=0,
-        help='the maximum label in the dataset',
-        )
-    parser.add_argument(
-        '--normalize',
-        action='store_true',
-        help='apply min-max scaling'
-        )
-    parser.add_argument(
-        '--scale_uint16',
-        action='store_true',
-        help='multiply by 65535'
-        )
-    parser.add_argument(
-        '--replace_nan',
-        action='store_true',
-        help='run forward map through np.nan_to_num'
-        )
-    parser.add_argument(
-        '--channel',
-        type=int,
-        default=-1,
-        help='imaris channel to write the key to [-1 appends a new channel]',
-        )
-    parser.add_argument(
-        '--blocksize',
-        nargs=3,
-        type=int,
-        default=[],
-        help='imaris channel to write the key to [-1 appends a new channel]',
-        )
-    parser.add_argument(
-        '--outpath',
-        help='path to output file',
-        )
+    steps = ['backproject']
+    args = parse_args('backproject', steps, *argv)
 
-    args = parser.parse_args()
+    backproject3r = Backproject3r(
+        args.image_in,
+        args.parameter_file,
+        step_id=args.step_id,
+        directory=args.outputdir,
+        prefix=args.prefix,
+        max_workers=args.max_workers,
+    )
 
-    csv_to_im(
-        args.seg_path,
-        args.csv_path,
-        args.labelkey,
-        args.key,
-        args.name,
-        args.maxlabel,
-        args.normalize,
-        args.scale_uint16,
-        args.replace_nan,
-        args.channel,
-        args.blocksize,
-        args.outpath,
-        )
+    for step in args.steps:
+        backproject3r._fun_selector[step]()
 
 
-def csv_to_im(
-    image_in,
-    csv_path,
-    labelkey='label',
-    key='dapi',
-    name='',
-    maxlabel=0,
-    normalize=False,
-    scale_uint16=False,
-    replace_nan=False,
-    channel=-1,
-    blocksize=[],
-    outpath='',
-    ):
+class Backproject3r(Stapl3r):
     """Write segment backprojection."""
 
-    if isinstance(image_in, Image):
-        labels = image_in
-    else:
+    def __init__(self, image_in='', parameter_file='', **kwargs):
+
+        super(Backproject3r, self).__init__(
+            image_in, parameter_file,
+            module_id='backproject',
+            **kwargs,
+            )
+
+        self._fun_selector = {
+            'backproject': self.backproject,
+            }
+
+        self._parallelization = {
+            'backproject': ['features'],
+            }
+
+        self._parameter_sets = {
+            'backproject': {
+                'fpar': self._FPAR_NAMES,
+                'ppar': (''),
+                'spar': ('_n_workers', 'features'),
+                },
+            }
+
+        self._parameter_table = {
+            }
+
+        default_attr = {
+            'label_image': '',
+            'feature_path': '',
+            'features': {},
+            'labelkey': 'label',
+            'name': '',
+            'maxlabel': 0,
+            'normalize': False,
+            'scale_dtype': False,
+            'replace_nan': True,
+            'channel': -1,
+            'blocksize': [64, 1280, 1280],
+            'ims_ref': '',
+        }
+        for k, v in default_attr.items():
+            setattr(self, k, v)
+
+        for step in self._fun_selector.keys():
+            self.set_parameters(step)
+
+        self._init_paths()
+
+        self._init_log()
+
+    def _init_paths(self):
+
+        stem = self._build_path()
+        apat = self._build_path(suffixes=[{'a': 'p'}])
+
+        self._paths = {
+            'backproject': {
+                'inputs': {
+                    'label_image': self.label_image,
+                    'feature_path': self.feature_path,
+                    'ims_ref': self.ims_ref,
+                    },
+                'outputs': {
+                    **{ods: f'{apat}.ims' for ods in self.features},
+                    #**{ods: f'{apat}.h5/{ods}' for ods in self.features},
+                    # ims... feats as datasets ... etc
+                    },
+                },
+        }
+
+        for step in self._fun_selector.keys():
+            self.inputpaths[step]  = self._merge_paths(self._paths[step], step, 'inputs')
+            self.outputpaths[step] = self._merge_paths(self._paths[step], step, 'outputs')
+
+    def backproject(self, **kwargs):
+        """Write segment backprojection."""
+
+        arglist = self._prep_step('backproject', kwargs)
+        with multiprocessing.Pool(processes=self._n_workers) as pool:
+            pool.starmap(self._backproject_feature, arglist)
+
+    def _backproject_feature(self, key):
+        """Backproject feature values to segments."""
+
+        inputs = self._prep_paths(self.inputs)
+        image_in = inputs['label_image']
+        feat_path = inputs['feature_path']
+        ims_ref = inputs['ims_ref']
+        outputs = self._prep_paths(self.outputs, reps={'a': key})
+        outpath = outputs[key]
+
         labels = LabelImage(image_in)
         labels.load(load_data=False)
 
-    mpi = wmeMPI(usempi=False)
-    mpi.set_blocks(labels, blocksize or labels.dims)
-    mpi.scatter_series()
+        mpi = wmeMPI(usempi=False)
+        mpi.set_blocks(labels, self.blocksize or labels.dims)
+        mpi.scatter_series()
 
-    if not maxlabel:
-        labels.set_maxlabel()
-        maxlabel = labels.maxlabel
+        if not self.maxlabel:  # TODO: read maxlabel from attribute (see zipping)
+            labels.set_maxlabel()
+            self.maxlabel = labels.maxlabel
 
-    if csv_path.endswith('.csv'):
-        df = pd.read_csv(csv_path)
-        df = df.astype({labelkey: int})
-    elif csv_path.endswith('.h5ad'):
-        import scanpy as sc
-        adata = sc.read(csv_path)
-        if not csv_path.endswith('_nofilter.h5ad'):
-            adata.X = adata.raw.X
-        df = adata.obs[labelkey].astype(int)
-        df = pd.concat([df, adata[:, key].to_df()], axis=1)
+        if feat_path.endswith('.csv'):
+            df = pd.read_csv(feat_path)
+            df = df.astype({self.labelkey: int})
+        elif feat_path.endswith('.h5ad'):
+            import scanpy as sc
+            adata = sc.read(feat_path)
+            df = adata.obs[self.labelkey].astype(int)
+            df = pd.concat([df, adata[:, key].to_df()], axis=1)
 
-    # for key in keys:  # TODO
-    fw = np.zeros(maxlabel + 1, dtype='float')
-    for index, row in df.iterrows():
-        fw[int(row[labelkey])] = row[key]
+        fw = np.zeros(self.maxlabel + 1, dtype='float')
+        for index, row in df.iterrows():
+            fw[int(row[self.labelkey])] = row[key]
+
+        maxval = 65535  # uint16 for imaris. FIXME: generalize to other datatypes
+        default = {
+            'normalize': self.normalize,
+            'scale_dtype': self.scale_dtype,
+            'replace_nan': self.replace_nan,
+            }
+        featdict = {**default, **self.features[key]}
+        fw = scale_fwmap(fw, maxval, **featdict)
+
+        if outpath.endswith('.ims'):
+            if ims_ref:  # single-channel empty imaris image with the correct dimensions
+                shutil.copy2(ims_ref, outpath)
+                self.channel = 0
+            mo = Image(outpath, permission='r+')
+            mo.load(load_data=False)
+            if self.channel >= 0 and self.channel < mo.dims[3]:
+                ch = self.channel
+            else:
+                mo.create()
+                ch = mo.dims[3] - 1
+            mo.slices[3] = slice(ch, ch + 1, 1)
+            cpath = 'DataSetInfo/Channel {}'.format(ch)
+            name = self.name or key
+            mo.file[cpath].attrs['Name'] = np.array([c for c in name], dtype='|S1')
+
+        fw = list(fw)
+        for i in mpi.series:
+
+            print('processing {}: block {:03d} with coords: {}'.format(key, i, mpi.blocks[i]['id']))
+            block = mpi.blocks[i]
+            labels.slices = block['slices']
+            data = labels.slice_dataset()
+            out = labels.forward_map(fw, ds=data)
+
+            if outpath.endswith('.ims'):
+                mo.slices[:3] = block['slices']
+                mo.write(out.astype(mo.dtype))
+
+            elif outpath.endswith('.nii.gz'):
+                props = labels.get_props()
+                if not labels.path.endswith('.nii.gz'):
+                    props = transpose_props(props, outlayout='xyz')
+                    out = out.transpose()
+                mo = write_output(outpath, out, props)
+
+            else:
+                #TODO
+                #outpath = outpath or gen_outpath(labels, key)
+                mo = write_output(outpath, out, labels.get_props())
+
+        mo.close()
+
+        return mo
+
+
+def scale_fwmap(fw, maxval=65535, replace_nan=False, normalize=False, scale_dtype=False):
 
     if replace_nan:
         fw = np.nan_to_num(fw)
+
     if normalize:
         def normalize_data(data):
             """Normalize data between 0 and 1."""
@@ -165,57 +246,16 @@ def csv_to_im(
             data -= datamin
             data *= 1/(datamax-datamin)
             return data, [datamin, datamax]
-
         fw_n, fw_minmax = normalize_data(fw)
-        fw_n *= 65535
+        fw_n *= maxval
         fw = fw_n
-    elif scale_uint16:  # for e.g. pseudotime / FA / etc / any [0, 1] vars
-        fw *= 65535
+    elif scale_dtype:  # for e.g. pseudotime / FA / etc / any [0, 1] vars
+        fw *= maxval
 
-    if outpath.endswith('.ims'):
-        mo = Image(outpath, permission='r+')
-        mo.load(load_data=False)
-        if channel >= 0 and channel < mo.dims[3]:
-            ch = channel
-        else:
-            mo.create()
-            ch = mo.dims[3] - 1
-        mo.slices[3] = slice(ch, ch + 1, 1)
-        cpath = 'DataSetInfo/Channel {}'.format(ch)
-        name = name or key
-        mo.file[cpath].attrs['Name'] = np.array([c for c in name], dtype='|S1')
-
-    fw = list(fw)
-    for i in mpi.series:
-        print('processing block {:03d} with id: {}'.format(i, mpi.blocks[i]['id']))
-        block = mpi.blocks[i]
-        labels.slices = block['slices']
-        data = labels.slice_dataset()
-        out = labels.forward_map(fw, ds=data)
-
-        if outpath.endswith('.ims'):
-            mo.slices[:3] = block['slices']
-            mo.write(out.astype(mo.dtype))
-        elif outpath.endswith('.nii.gz'):
-            props = labels.get_props()
-            if not labels.path.endswith('.nii.gz'):
-                props = transpose_props(props, outlayout='xyz')
-                out = out.transpose()
-            mo = write_output(outpath, out, props)
-        else:
-            outpath = outpath or gen_outpath(labels, key)
-            mo = write_output(outpath, out, labels.get_props())
-
-    mo.close()
-
-    return mo
+    return fw
 
 
-def ulabelset(
-    image_in,
-    blocksize=[],
-    filepath='',
-    ):
+def ulabelset(image_in, blocksize=[], filepath=''):
     """Find the set of unique labels."""
 
     if isinstance(image_in, Image):

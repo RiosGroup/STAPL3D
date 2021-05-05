@@ -2988,6 +2988,10 @@ class Stapl3r(object):
                     f.visititems(extract)
             pars = [getset(pp, volumes) for pp in parallelized_pars]
 
+        elif parallelized_pars == ['features']:
+            feats = list(range(len(self.features.keys())))
+            pars = [getset(pp, feats) for pp in parallelized_pars]
+
         elif parallelized_pars == []:
             pars = [(0,)]
 
