@@ -1118,7 +1118,10 @@ class Image(object):
         """Get the dimension labels from a dataset."""
 
         if 'DIMENSION_LABELS' in self.ds.attrs.keys():
-            axlab = b''.join(self.ds.attrs['DIMENSION_LABELS']).decode("utf-8")
+            try:
+                axlab = b''.join(self.ds.attrs['DIMENSION_LABELS']).decode("utf-8")
+            except TypeError:
+                axlab = ''.join(self.ds.attrs['DIMENSION_LABELS'])
         else:
             axlab = None
 
