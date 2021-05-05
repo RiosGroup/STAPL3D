@@ -166,15 +166,19 @@ def get_paths(image_in, resolution_level=-1, channel=0, outputstem='', step='', 
 def get_centreslices(info_dict, idss=[], ch=0):
     """Get the centreslices for all dims and steps."""
 
-    h5_path = info_dict['paths']['file']
-    image_in = h5_path + info_dict['paths']['int']
-    im = Image(image_in, permission='r')
-    im.load(load_data=False)
+    fpath = info_dict['paths']['file']
     if not idss:
-        idss = [k for k in im.file.keys()]
-    im.close()
+        image_in = fpath
+        if '.h5' in fpath:
+            image_in += info_dict['paths']['int']
+            im = Image(image_in, permission='r')
+            im.load(load_data=False)
+            idss = [k for k in im.file.keys()]
+            im.close()
+#        else:
+#            idss = ['']  # FIXME
 
-    centreslices = {ids: {dim: get_centreslice(h5_path, ids, dim, ch)
+    centreslices = {ids: {dim: get_centreslice(fpath, ids, dim, ch)
                           for dim in 'zyx'}
                     for ids in idss}
 
