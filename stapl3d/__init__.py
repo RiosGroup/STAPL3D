@@ -2848,12 +2848,13 @@ class Stapl3r(object):
         """Print attributes in yml structure."""
         return self.dump_parameters()
 
-    def run(self):
+    def run(self, steps=[]):
         """Run all steps in the module."""
 
-        for step, fun in self._fun_selector.items():
+        steps = steps or self._fun_selector.keys()
+        for step in steps:
             print(f'Running {self._module_id}:{step}')
-            fun()
+            self._fun_selector[step]()
 
     def _set_suffix_formats(self):
         """Set format strings for dimension suffixes."""
