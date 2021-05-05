@@ -522,7 +522,7 @@ class Deshader(Stapl3r):
         x = np.linspace(0, data_sel.shape[1] - 1, data_sel.shape[1])
 
         y_min = self._power_rounder(0)  # FIXME
-        y_max = self._power_rounder(np.amax(data_sel))
+        y_max = self._power_rounder(np.amax(data_sel), roundfun=np.ceil)
         yticks = [y_min, y_min + 0.5 * y_max, y_max]
 
         # Plot selected profiles.
