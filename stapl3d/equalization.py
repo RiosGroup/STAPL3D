@@ -57,7 +57,84 @@ def main(argv):
 
 
 class Equaliz3r(Stapl3r):
-    """Calculate metrics for mLSR-3D equalization assay."""
+    """Calculate metrics for mLSR-3D equalization assay.
+
+    Parameters
+    ----------
+    image_in : string
+        Path to dataset.
+    parameter_file : string
+        Path to yaml parameter file.
+    module_id : string
+        Name of the STAPL3D module.
+    step_id: string
+        Identifier of the yaml parameterfile entry.
+    directory : string
+        Name of output subdirectory.
+    prefix : string
+        Output prefix.
+    max_workers : int
+        Maximal number of cores to use for processing.
+
+    Attributes
+    ----------
+    filepat : string
+        Regex to use on the data directory. [needs set_filepaths()]
+    filepaths : list
+        Paths to files to process.
+    outputformat : string
+        Format of output images, '.h5' (default) or '.nii'.
+    sigma : float
+        Kernel width for Gaussian smoothing, default 60.
+    thresholds : dict
+        Specified thresholds for each sample. k: v -> <stem>: [noise, tissue]
+    threshold_noise : float
+        Specified threshold (global) for noise regions,
+        (unused if 'thresholds' is specified).
+    threshold_noise : float
+        Specified threshold (global) for tissue regions,
+        (unused if 'thresholds' is specified).
+    otsu_factor_noise: float
+        Otsu multiplication factor for noise threshold, default 0.1,
+        (unused if 'thresholds' or 'threshold_noise' is specified).
+    otsu_factor_tissue: float
+        Otsu multiplication factor for tissue threshold, default 1.1,
+        (unused if 'thresholds' or 'threshold_tissue' is specified).
+    segment_quantile : float
+        Quantile of tissue intensities to split foreground and background,
+        default 0.99.
+    segment_min_size : int
+        Minimum size of connected components of the foreground clusters,
+        default 3.
+    methods : list
+        Quantification method, default ['seg'].
+    quantiles : list
+        Quantiles of image intensities for metric calculation,
+        not used for the default 'seg' method,
+        default [0.50, 0.99].
+
+    Examples
+    --------
+    >>> %gui qt
+
+    >>> # fetch and write some testdata
+    >>> import os
+    >>> datadir = os.path.join('.', 'eqtest')
+    >>> os.makedirs(datadir)
+    >>> from skimage import data, io
+    >>> cells3d = data.cells3d()
+    >>> ch = 1
+    >>> for slc in range(25, 35):
+    >>>     filepath = os.path.join(datadir, f'cells3d_slice{slc}.tif')
+    >>>     io.imsave(filepath, cells3d[slc, ch, ...])
+
+    >>> # run equalization
+    >>> from stapl3d import equalization
+    >>> equaliz3r = equalization.Equaliz3r(filepath)
+    >>> equaliz3r.sigma = 10
+    >>> equaliz3r.run()
+
+    """
 
     def __init__(self, image_in='', parameter_file='', **kwargs):
 
