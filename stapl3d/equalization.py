@@ -620,6 +620,13 @@ def load_image(inputpath):
     props = im.get_props()
     im.close()
 
+    if len(data.shape) == 2:
+        data = np.expand_dims(data, 0)
+        props['shape'] = [1] + props['shape']
+        props['elsize'] = [1] + props['elsize']
+        props['axlab'] = 'z' + props['axlab']
+        props['slices'] = [slice(0, 1)] + props['slices']
+
     return data, props
 
 

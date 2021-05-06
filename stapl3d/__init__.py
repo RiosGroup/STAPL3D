@@ -441,12 +441,12 @@ class Image(object):
         """Load a 3D tif dataset."""
 
         self.file = None
-        self.ds = imread(self.path)
-        self.dims = self.ds.shape
-        self.dtype = self.ds.dtype
+        data = imread(self.path)
+        self.dims = data.shape
+        self.dtype = data.dtype
 
         if load_data:
-            self.ds = imread(self.path)
+            self.ds = data
 
     def tifs_load(self, comm=None, load_data=True):
         """Load a stack of tifs."""
@@ -1247,9 +1247,10 @@ class Image(object):
     def tif_load_axlab(self):
         """Get the dimension labels from a dataset."""
 
-        axlab = 'zyxct'[:self.get_ndim()]  # FIXME: get from header?
+        # FIXME or describe: assumptions
+        al = {2: 'yx', 3: 'zyx', 4: 'zyxc', 5:'zyxct'}
 
-        return axlab
+        return al[self.get_ndim()]
 
     def tifs_load_axlab(self):
         """Get the dimension labels from a dataset."""
