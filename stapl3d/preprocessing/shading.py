@@ -743,13 +743,13 @@ def get_image_info(image_in):
 
         iminfo['stack_offsets'] = v_offsets
 
-    elif image_in.endswith('.ims') or image_in.endswith('.bdv'):
+    elif image_in.endswith('.ims') or image_in.endswith('.bdv') or image_in.endswith('.h5'):
 
         from stapl3d import get_imageprops
         props = get_imageprops(image_in)
         iminfo = {
             'nchannels': props['shape'][props['axlab'].index('c')],
-            'ntimepoints': props['shape'][props['axlab'].index('t')],
+            'ntimepoints': props['shape'][props['axlab'].index('t')] if 't' in props['axlab'] else 1,
             'nplanes': props['shape'][props['axlab'].index('z')],
             'nstacks': 1,
             }
