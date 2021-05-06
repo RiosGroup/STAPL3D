@@ -122,13 +122,9 @@ class Image(object):
         else:
             path = path_in
 
-        for ext in ['.h5', '.nii', '.dm3', '.tif', '.ims', '.bdv']:
+        for ext in ['.h5', '.nii', '.dm3', '.tif', '.ims', '.bdv', '.czi', '.lif']:
             if ext in path:
                 return ext
-
-        for ext in ['.czi', '.lif']:  # ETC
-            if ext in path:
-                return '.pbf'
 
         return '.dat'
 
@@ -397,8 +393,10 @@ class Image(object):
                    '.dm3': self.dm3_load,
                    '.ims': self.ims_load,
                    '.bdv': self.bdv_load,
+                   '.czi': self.czi_load,
+                   '.lif': self.lif_load,
                    '.pbf': self.pbf_load,
-                   '.tif': self.pbf_load,
+                   '.tif': self.tif_load,  # NOTE: may need pbf for 3D tif
                    '.tifs': self.tifs_load,
                    '.dat': self.dat_load,
                    }
@@ -482,6 +480,46 @@ class Image(object):
         ch0 = self.ds['t00000/s00/{}/cells'.format(self.reslev)]
         self.dtype = ch0.dtype
         self.chunks = list(ch0.chunks) + [1, 1]
+
+    def czi_load(self, comm=None, load_data=True):
+
+        import czifile
+        self.file = czifile.CziFile(self.path)
+
+        from tifffile import create_output
+        from stapl3d.preprocessing import shading
+        iminfo = shading.get_image_info(self.path)
+        data = create_output(None, iminfo['zstack_shape'], iminfo['dtype'])
+        data = np.squeeze(shading.read_zstack(self.path, 0, data))
+        if len(data.shape) == 2:
+            data = np.expand_dims(data, 0)
+        if len(data.shape) == 4:
+            data = np.transpose(data, axes=[1, 2, 3, 0])  # czyx to zyxc
+
+        self.ds = data
+        self.dims = data.shape
+        self.dtype = data.dtype
+        self.chunks = None
+
+    def lif_load(self, comm=None, load_data=True):
+
+        from readlif.reader import LifFile
+        self.file = LifFile(self.path).get_image(0)  # TODO: choice of image / series
+
+        from tifffile import create_output
+        from stapl3d.preprocessing import shading
+        iminfo = shading.get_image_info(self.path)
+        data = create_output(None, iminfo['zstack_shape'], iminfo['dtype'])
+        data = np.squeeze(shading.read_zstack(self.path, 0, data))
+        if len(data.shape) == 2:
+            data = np.expand_dims(data, 0)
+        if len(data.shape) == 4:
+            data = np.transpose(data, axes=[1, 2, 3, 0])  # czyx to zyxc
+
+        self.ds = data
+        self.dims = data.shape
+        self.dtype = data.dtype
+        self.chunks = None
 
     def bdv_get_dims(self, reslev=0):
 
@@ -740,10 +778,13 @@ class Image(object):
         tp_names = ['TimePoint {}'.format(i) for i in range(len(rs0_group))]
         timepoints_sorted = [(tp_name, rs0_group[tp_name]) for tp_name in tp_names]
         t_iter_slc = itertools.islice(timepoints_sorted, t_start, t_stop, t_step)
+
         for tp_idx, (_, tp) in enumerate(t_iter_slc):
+
             ch_names = ['Channel {}'.format(i) for i in range(len(tp))]
             channels_sorted = [(ch_name, tp[ch_name]) for ch_name in ch_names]
             c_iter_slc = itertools.islice(channels_sorted, c_start, c_stop, c_step)
+
             for ch_idx, (_, ch) in enumerate(c_iter_slc):
 
                 data_tmp = ch['Data'][slcs[0], slcs[1], slcs[2]]
@@ -857,23 +898,9 @@ class Image(object):
     def get_ndim(self):
         """Return the cardinality of the dataset."""
 
-        if self.format == '.h5':
-            ndim = len(self.dims)
-        elif self.format == '.nii':
+        if self.format == '.nii':
             ndim = len(self.file.header.get_data_shape())
-        elif self.format == '.tif':
-            ndim = len(self.dims)
-        elif self.format == '.tifs':
-            ndim = len(self.dims)
-        elif self.format == '.dm3':
-            ndim = len(self.dims)
-        elif self.format == '.pbf':
-            ndim = len(self.dims)
-        elif self.format == '.ims':
-            ndim = len(self.dims)
-        elif self.format == '.bdv':
-            ndim = len(self.dims)
-        elif self.format == '.dat':
+        else:
             ndim = len(self.dims)
 
         return ndim
@@ -975,6 +1002,8 @@ class Image(object):
                    '.dm3': self.dm3_load_elsize,
                    '.ims': self.ims_load_elsize,
                    '.bdv': self.bdv_load_elsize,
+                   '.czi': self.czi_load_elsize,
+                   '.lif': self.lif_load_elsize,
                    '.pbf': self.pbf_load_elsize,
                    '.tif': self.tif_load_elsize,
                    '.tifs': self.tifs_load_elsize}
@@ -1074,6 +1103,41 @@ class Image(object):
 
         return list(elsize) + [1, 1]
 
+    def czi_load_elsize(self):
+        """Get the element sizes from a dataset."""
+
+        from xml.etree import cElementTree as etree
+        import czifile
+
+        segment = czifile.Segment(self.file._fh, self.file.header.metadata_position)
+        data = segment.data().data()
+        md = etree.fromstring(data.encode('utf-8'))
+
+        elsize_z = float(md.findall('.//ScalingZ')[0].text) * 1e6
+        elsize_y = float(md.findall('.//ScalingY')[0].text) * 1e6
+        elsize_x = float(md.findall('.//ScalingX')[0].text) * 1e6
+
+        elsize = [elsize_y, elsize_x]
+        if len(self.dims) == 3:
+            elsize = [elsize_z] + elsize
+        if len(self.dims) == 4:
+            elsize += [1]
+
+        return elsize
+
+    def lif_load_elsize(self):
+        """Get the element sizes from a dataset."""
+
+        idxs = [4, 5]
+        if len(self.dims) == 3:
+            idxs = [1] + idxs
+        if len(self.dims) == 4:
+            idxs += [0]
+
+        elsize = [1./self.file.scale[idx] for idx in idxs]
+
+        return elsize
+
     def tif_load_elsize(self):
         """Get the element sizes from a dataset."""
 
@@ -1102,6 +1166,8 @@ class Image(object):
                    '.dm3': self.dm3_load_axlab,
                    '.ims': self.ims_load_axlab,
                    '.bdv': self.bdv_load_axlab,
+                   '.czi': self.czi_load_axlab,
+                   '.lif': self.lif_load_axlab,
                    '.pbf': self.pbf_load_axlab,
                    '.tif': self.tif_load_axlab,
                    '.tifs': self.tifs_load_axlab}
@@ -1138,6 +1204,28 @@ class Image(object):
         """Get the dimension labels from a dataset."""
 
         axlab = 'zyxct'[:self.get_ndim()]  # FIXME: get from header?
+
+        return axlab
+
+    def czi_load_axlab(self):
+        """Get the element sizes from a dataset."""
+
+        axlab = 'yx'
+        if len(self.dims) == 3:
+            axlab = 'z' + axlab
+        if len(self.dims) == 4:
+            axlab += 'c'
+
+        return axlab
+
+    def lif_load_axlab(self):
+        """Get the element sizes from a dataset."""
+
+        axlab = 'yx'
+        if len(self.dims) == 3:
+            axlab = 'z' + axlab
+        if len(self.dims) == 4:
+            axlab += 'c'
 
         return axlab
 

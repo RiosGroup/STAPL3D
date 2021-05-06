@@ -2,27 +2,6 @@
 
 """Calculate metrics for mLSR-3D equalization assay.
 
-    # TODO: implement other than czi (e.g. make tif a possibility here)
-    # TODO: from stapl3d import mplog
-
-    # Generate reports. [now in 'metrics' steps]
-    if self._compute_env in ['SLURM', 'SGE']:
-        self._n_workers = 1
-    arglist = [(filepath,) for filepath in self.filepaths]
-    with multiprocessing.Pool(processes=self._n_workers) as pool:
-        pool.starmap(self._postprocess_report, arglist)
-
-    def _postprocess_report(self, filepath):
-        # "Generate reports."
-
-        filestem = os.path.splitext(os.path.basename(filepath))[0]
-        inputs = self._prep_paths(self.inputs, reps={'f': filestem})
-        outputs = self._prep_paths(self.outputs, reps={'f': filestem})
-        self.report(outputpath=inputs['report'],
-                    name=filestem, filestem=filestem,
-                    inputs=inputs, outputs=outputs)
-
-
 """
 
 import os
@@ -64,7 +43,7 @@ def main(argv):
     steps = ['smooth', 'segment', 'metrics', 'postprocess']
     args = parse_args('equalization', steps, *argv)
 
-    equalizer = Equalizer(
+    equaliz3r = Equaliz3r(
         args.image_in,
         args.parameter_file,
         step_id=args.step_id,
@@ -74,15 +53,15 @@ def main(argv):
     )
 
     for step in args.steps:
-        equalizer._fun_selector[step]()
+        equaliz3r._fun_selector[step]()
 
 
-class Equalizer(Stapl3r):
+class Equaliz3r(Stapl3r):
     """Calculate metrics for mLSR-3D equalization assay."""
 
     def __init__(self, image_in='', parameter_file='', **kwargs):
 
-        super(Equalizer, self).__init__(
+        super(Equaliz3r, self).__init__(
             image_in, parameter_file,
             module_id='equalization',
             **kwargs,
@@ -138,7 +117,7 @@ class Equalizer(Stapl3r):
             }
 
         default_attr = {
-            'filepat': '*.czi',  # TODO
+            'filepat': '*.*',
             'filepaths': [],
             'outputformat': '.h5',
             'sigma': 60,
@@ -245,32 +224,18 @@ class Equalizer(Stapl3r):
         inputs = self._prep_paths(self.inputs, reps={'f': filestem})
         outputs = self._prep_paths(self.outputs, reps={'f': filestem})
 
-        # Load image => czi (/ lif? / tif?)
-        data = np.transpose(shading.read_tiled_plane(filepath, 0, 0)[0])
+        data, props = load_image(filepath)
+
         data_smooth = gaussian_filter(data.astype('float'), self.sigma)
 
-        def get_props(filepath):
-            # TODO: integrate iminfo and Image attributes
-            # FIXME: for 2D the z-axis is returned 0.0
-            iminfo = shading.get_image_info(filepath)
-            props = {}
-            props['path'] = ''
-            props['permission'] = 'r+'
-            props['axlab'] = 'zyx'
-            props['shape'] = iminfo['dims_zyxc'][:3]
-            props['elsize'] = iminfo['elsize_zyxc'][:3]
-            props['elsize'] = [es if es else 1.0 for es in props['elsize']]
-            return props
-
-        props = get_props(filepath)
         if 'nii' in self.outputformat:
             props = transpose_props(props)
+            data = np.atleast_3d(data)
+            data_smooth = np.atleast_3d(data_smooth)
 
         vols = {'data': data, 'smooth': data_smooth}
         for ids, out in vols.items():
             props['path'] = outputs[ids]
-            if 'nii' in self.outputformat:
-                out = np.atleast_3d(out)
             write_image(out, props)
 
     def segment(self, **kwargs):
@@ -336,8 +301,7 @@ class Equalizer(Stapl3r):
         signal_mask = data > np.quantile(data[tissue_mask], self.segment_quantile)
         signal_mask[~tissue_mask] = False
         signal_mask &= ~clipping_mask
-        remove_small_objects(signal_mask, min_size=self.segment_min_size,
-                             in_place=True)
+        remove_small_objects(signal_mask, min_size=self.segment_min_size, in_place=True)
 
         segmentation = np.zeros_like(tissue_mask, dtype='uint8')
         segmentation[noise_mask]  = 1
@@ -442,6 +406,7 @@ class Equalizer(Stapl3r):
             cfg = yaml.safe_load(ymlfile)
         pars = {**pars, **cfg['equalization']['segment']['params']}
 
+        # NOTE: doing this for 'seg' method only => TODO
         self.report(outputpath=outputs['report'],
                     name=filestem, filestem=filestem,
                     inputs=inputs, outputs=outputs,
@@ -454,7 +419,6 @@ class Equalizer(Stapl3r):
                     # median_bg=self._metrics[filestem]['seg-q1'][0],
                     # median_fg=self._metrics[filestem]['seg-q2'][0],
                     )
-                    # NOTE: doing this for 'seg' method only => TODO
 
     def postprocess(self, **kwargs):
 
@@ -647,16 +611,20 @@ class Equalizer(Stapl3r):
 
         super().view_with_napari(filepath, idss, ldss)
 
+
 def load_image(inputpath):
+
     im = Image(inputpath)
     im.load()
     data = im.ds[:]
     props = im.get_props()
     im.close()
+
     return data, props
 
 
 def write_image(data, props):
+
     props['dtype'] = data.dtype
     mo = Image(**props)
     mo.create()
