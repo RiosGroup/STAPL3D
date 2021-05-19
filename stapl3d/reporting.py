@@ -11,6 +11,8 @@ import os
 import numpy as np
 import pickle
 
+import h5py
+
 from glob import glob
 
 import matplotlib
@@ -163,7 +165,7 @@ def get_paths(image_in, resolution_level=-1, channel=0, outputstem='', step='', 
     return paths
 
 
-def get_centreslices(info_dict, idss=[], ch=0):
+def get_centreslices_bak(info_dict, idss=[], ch=0):
     """Get the centreslices for all dims and steps."""
 
     fpath = info_dict['paths']['file']
@@ -178,7 +180,34 @@ def get_centreslices(info_dict, idss=[], ch=0):
 #        else:
 #            idss = ['']  # FIXME
 
+    # image_in = h5_path + info_dict['paths']['int']
+    # im = Image(image_in, permission='r')
+    # im.load(load_data=False)
+    # if not idss:
+    #     idss = [k for k in im.file.keys()]
+    # im.close()
+
     centreslices = {ids: {dim: get_centreslice(fpath, ids, dim, ch)
+                          for dim in 'zyx'}
+                    for ids in idss}
+
+    return centreslices
+
+
+def get_centreslices(info_dict, idss=[], ch=0):
+    """Get the centreslices for all dims and steps."""
+
+    def extract(name, node):
+        if isinstance(node, h5py.Dataset):
+            idss.append(name)
+        return None
+
+    h5_path = info_dict['paths']['file']
+    if not idss:
+        with h5py.File(h5_path, 'r') as f:
+            f.visititems(extract)
+
+    centreslices = {ids: {dim: get_centreslice(h5_path, ids, dim, ch)
                           for dim in 'zyx'}
                     for ids in idss}
 
@@ -198,16 +227,19 @@ def get_centreslice(image_in, ids, dim='z', ch=0):
             print('dataset {} not found'.format(ids))
             return None
 
+    slcs = [slc for slc in im.slices]
+
     if len(im.dims) > 3:
         ch_idx = im.axlab.index('c')
         im.slices[ch_idx] = slice(ch, ch + 1, 1)
-
+    # elif len(im.dims) == 2:
+    #     data = im.slice_dataset()
     dim_idx = im.axlab.index(dim)
     cslc = int(im.dims[dim_idx] / 2)
-
-    slcs = [slc for slc in im.slices]
     im.slices[dim_idx] = slice(cslc, cslc+1, 1)
+
     data = im.slice_dataset()
+
     im.slices = slcs
 
     return data
