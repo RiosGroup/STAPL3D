@@ -1897,7 +1897,7 @@ class Image(object):
 
         # TODO: squeeze data?
         squeezable = ['shape', 'dims', 'elsize', 'chunks', 'slices', 'axlab']
-        print(self.axlab, dims)
+        # print(self.axlab, dims)
         for dim in dims:
             if dim not in self.axlab:
                 continue
@@ -2881,7 +2881,33 @@ def parse_args(step_id, fun_selector, *argv):
 #
 
 class Stapl3r(object):
-    """Base class for STAPL3D framework."""
+    """Base class for STAPL3D framework.
+
+    Parameters
+    ----------
+    image_in : string
+        Path to dataset.
+    parameter_file : string
+        Path to yaml parameter file.
+    module_id : string
+        Name of the STAPL3D module.
+    step_id: string
+        Identifier of the yaml parameterfile entry.
+    directory : string
+        Name of output subdirectory.
+    prefix : string
+        Output prefix.
+    max_workers : int
+        Maximal number of cores to use for processing.
+
+    Attributes
+    ----------
+
+
+    Examples
+    --------
+
+    """
 
     def __init__(self,
         image_in='',
@@ -2898,6 +2924,8 @@ class Stapl3r(object):
         self.step_id = step_id or self._module_id # yml-file entry
 
         self.image_in = image_in  # raw input image file (.czi / .lif)
+        if '.h5' in image_in:
+            image_in = image_in.split('.h5')[0]
         self.datadir = os.path.abspath(os.path.dirname(image_in))
         # self.image_in = os.path.basename(image_in)  # raw input image file (.czi / .lif)
         # self.projdir = os.path.dirname(self.datadir)
