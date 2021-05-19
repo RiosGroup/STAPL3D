@@ -3465,7 +3465,7 @@ class Stapl3r(object):
         self.inputs = self.inputpaths[self.step]
         self.outputs = self.outputpaths[self.step]
 
-    def view_with_napari(self, filepath, idss, ldss=[], slices=[]):
+    def view_with_napari(self, filepath, idss=[], ldss=[], slices=[]):
 
         import napari
         from stapl3d import Image
@@ -3478,11 +3478,12 @@ class Stapl3r(object):
                     if slc == 'ctr':
                         slc = int(im.dims[idx] / 2)
                     im.slices[idx] = slc
-            data = im.slice_dataset()
+            data = im.slice_dataset(squeeze=False)
             im.close()
             return data
 
         viewer = napari.Viewer()
+
         for ids in idss:
             viewer.add_image( get_h5_dset(filepath, ids, slices), name=ids)
         for lds in ldss:
@@ -3491,9 +3492,60 @@ class Stapl3r(object):
         im = Image('{}/{}'.format(filepath, idss[0]), permission='r')
         im.load(load_data=False)
         im.close()
-        viewer.dims.axis_labels = [al for al in im.axlab]
+
+        axlab = []
+        viewer.dims.axis_labels = [al for i, al in enumerate(im.axlab) if im.dims[i] > 1]
+
         for lay in viewer.layers:
-            lay.scale = [es for es in im.elsize]
+            lay.scale = [es for i, es in enumerate(im.elsize) if im.dims[i] > 1]
+
+        self.viewer = viewer
+
+    def view_blocks_with_napari(self, block_idxs=[], idss=[], ldss=[]):
+        """TODO: merge with view_with_napari"""
+
+        import napari
+        from stapl3d import Image
+        def get_h5_dset(filepath, ids, slices={}):
+            im = Image('{}/{}'.format(filepath, ids), permission='r')
+            im.load(load_data=False)
+            if slices:
+                for d, slc in slices.items():
+                    idx = im.axlab.index(d)
+                    if slc == 'ctr':
+                        slc = int(im.dims[idx] / 2)
+                    im.slices[idx] = slc
+            data = im.slice_dataset(squeeze=False)
+            im.close()
+            return data
+        viewer = napari.Viewer()
+
+
+        block_id0 = self._blocks[block_idxs[0]].id
+        for block_idx in block_idxs:
+
+            filepath = self._blocks[block_idx].path.replace('/{ods}', '')
+            im = Image('{}/{}'.format(filepath, (idss + ldss)[0]), permission='r')
+            im.load(load_data=False)
+            im.close()
+
+            slices = []
+
+            block = self._blocks[block_idx]
+            Tt = np.copy(block.affine)
+            for i, es in enumerate(im.elsize[:3]):
+                Tt[0, i] *= es
+            Ts = np.diag(list(im.elsize[:3]) + [1])
+            affine =  Tt @ Ts
+            for ids in idss:
+                viewer.add_image( get_h5_dset(filepath, ids, slices), name=f'{block.id}_{ids}', affine=affine)
+                viewer.layers[f'{block.id}_{ids}'].contrast_limits = viewer.layers[f'{block_id0}_{ids}'].contrast_limits
+            for lds in ldss:
+                viewer.add_labels(get_h5_dset(filepath, lds, slices), name=f'{block.id}_{lds}', affine=affine)
+
+        viewer.dims.axis_labels = [al for al in im.axlab]
+
+        self.viewer = viewer
 
     def _init_log(self):
 
