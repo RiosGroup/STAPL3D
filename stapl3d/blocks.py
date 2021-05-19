@@ -21,7 +21,6 @@ from skimage.transform import resize
 from skimage.segmentation import relabel_sequential
 
 from stapl3d import parse_args, Stapl3r, Image, LabelImage, format_, split_filename
-from stapl3d.preprocessing.biasfield import write_image, get_bias_field_block
 
 import glob
 import h5py
@@ -789,6 +788,28 @@ class Merger(Blocker):
 
         # TODO: dask array
         super().view_with_napari(filepath, idss, slices={'z': 'ctr'})
+
+
+def get_bias_field_block(bf, slices, outdims, dsfacs):
+    """Retrieve and upsample the biasfield for a datablock."""
+
+    bf.slices = [slice(int(slc.start / ds), int(slc.stop / ds), 1)
+                 for slc, ds in zip(slices, dsfacs)]
+    bf_block = bf.slice_dataset().astype('float32')
+    bias = resize(bf_block, outdims, preserve_range=True)
+
+    return bias
+
+
+def write_image(im, outputpath, data):
+    props = im.get_props2()
+    props['path'] = outputpath
+    props['permission'] = 'r+'
+    props['dtype'] = data.dtype
+    mo = Image(**props)
+    mo.create()
+    mo.write(data)
+    return mo
 
 
 def link_blocks(filepath_in, filepath_out, dset_in, dset_out, delete=True, links=True, is_unet=False):
