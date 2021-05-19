@@ -59,6 +59,21 @@ def main(argv):
 class Equaliz3r(Stapl3r):
     """Calculate metrics for mLSR-3D equalization assay.
 
+    Methods
+    ----------
+    run
+        Run all steps in the equalization module.
+    smooth
+        Smooth images with a gaussian kernel.
+    segment
+        Segment the noise and tissue region in the images.
+    metrics
+        Calculate metrics of equalization images.
+    postprocess
+        Merge outputs of individual equalization images.
+    view_with_napari
+        View equalization image and segmentations with napari.
+
     Parameters
     ----------
     image_in : string
@@ -391,12 +406,14 @@ class Equaliz3r(Stapl3r):
         return masks
 
     def metrics(self, **kwargs):
+        """Calculate metrics of equalization images."""
 
         arglist = self._prep_step('metrics', kwargs)
         with multiprocessing.Pool(processes=self._n_workers) as pool:
             pool.starmap(self._calculate_metrics_image, arglist)
 
     def _calculate_metrics_image(self, filepath):
+        """Calculate metrics of an equalization image."""
 
         def get_measures(data, quantiles=[0.5, 0.9]):
             quantiles = np.quantile(data, quantiles)
@@ -498,11 +515,13 @@ class Equaliz3r(Stapl3r):
                     )
 
     def postprocess(self, **kwargs):
+        """Merge outputs of individual equalization images."""
 
         arglist = self._prep_step('postprocess', kwargs)
         self._postprocess()
 
     def _postprocess(self, basename='equalization_assay'):
+        """Merge outputs of individual equalization images."""
 
         outputs = self._prep_paths(self.outputs)
 
@@ -674,6 +693,7 @@ class Equaliz3r(Stapl3r):
         return info_dict
 
     def view_with_napari(self, filepath='', idss=['data', 'smooth'], ldss=['noise_mask', 'tissue_mask', 'segmentation']):
+        """View equalization image and segmentations with napari."""
 
         if not filepath:
             filestem = os.path.splitext(os.path.basename(self.filepaths[0]))[0]
