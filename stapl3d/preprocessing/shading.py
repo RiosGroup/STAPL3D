@@ -2,29 +2,6 @@
 
 """Correct z-stack shading.
 
-    # TODO: generalize to other formats than czi
-    # TODO: automate threshold estimate
-    # TODO: implement more metrics
-    # TODO: implement logging throughout.
-    # TODO: write corrected output directly to bdv for Fiji BigStitcher.
-    # TODO: try getting median over 4D concatenation directly (forego xy)
-    # TODO: make file deletion optional?
-    # TODO: corrected vs non-corrected images in report
-    # TODO: clipping mask is not automatically included in the tileoffsets for the stitching procedure
-    # TODO: tif input option
-    # TODO: clean <>_X.npz and <>_Y.npz files
-    # TODO: change step_id to module_id throughout?
-
-    # TODO: generalize read-write in 'apply'
-
-    # # Save derived parameters.
-    # dpars = {'z_sel': [v.item() for v in z_sel]}
-    # with open('{}.yml'.format(outstem), 'w') as f:
-    #     yaml.dump(dpars, f, default_flow_style=False)
-
-        # attrs = vars(self)
-        # print(', '.join("%s: %s" % item for item in attrs.items()))
-
 """
 
 import os
@@ -66,7 +43,7 @@ def main(argv):
     steps = ['estimate', 'process', 'postprocess', 'apply']
     args = parse_args('shading', steps, *argv)
 
-    deshader = Deshader(
+    deshad3r = Deshad3r(
         args.image_in,
         args.parameter_file,
         step_id=args.step_id,
@@ -76,15 +53,63 @@ def main(argv):
     )
 
     for step in args.steps:
-        deshader._fun_selector[step]()
+        deshad3r._fun_selector[step]()
 
 
-class Deshader(Stapl3r):
-    """Correct z-stack shading."""
+class Deshad3r(Stapl3r):
+    """Correct z-stack shading.
+
+    Parameters
+    ----------
+    image_in : string
+        Path to dataset.
+    parameter_file : string
+        Path to yaml parameter file.
+    module_id : string
+        Name of the STAPL3D module.
+    step_id: string
+        Identifier of the yaml parameterfile entry.
+    directory : string
+        Name of output subdirectory.
+    prefix : string
+        Output prefix.
+    max_workers : int
+        Maximal number of cores to use for processing.
+
+    Attributes
+    ----------
+    channels : list []
+        List of channels indices to process, default 'all'.
+    planes : list []
+        List of plane indices to process, default 'all'.
+    noise_threshold : None
+        Threshold to discard background, default 1000.
+    metric : string 'median'
+        Metric for creating profiles, default 'median', else 'mean'.
+    quantile_threshold : float 0.8
+        Quantile at which planes are discarded, default 0.8.
+    polynomial_order : int 3
+        Order of the polynomial to fit the profile.
+    stacks : list []
+        List of stack indices to correct.
+    clipping_mask': bool False
+        Create an additional mask of pixels that clip outside the datarange,
+        default False.
+    correct : bool True
+        Apply the shading correction to the z-stacks, default True.
+    write_to_tif : bool True
+        Write the corrected z-stacks to tifs, default True.
+
+    Examples
+    --------
+    # TODO
+
+
+    """
 
     def __init__(self, image_in='', parameter_file='', **kwargs):
 
-        super(Deshader, self).__init__(
+        super(Deshad3r, self).__init__(
             image_in, parameter_file,
             module_id='shading',
             **kwargs,
