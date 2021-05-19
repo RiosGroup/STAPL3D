@@ -244,12 +244,10 @@ def get_zyx_medians(data, mask=None, thr=0, metric='median'):
     return meds
 
 
-def gen_orthoplot(f, gs):
+def gen_orthoplot(f, gs, size_xy=5, size_z=1):
     """Create axes on a subgrid to fit three orthogonal projections."""
 
     axs = []
-    size_xy = 5
-    size_z = 1
     size_t = size_xy + size_z
 
     gs_sub = gs.subgridspec(size_t, size_t)
