@@ -51,7 +51,7 @@ def main(argv):
     steps = ['estimate', 'apply', 'postprocess']
     args = parse_args('biasfield', steps, *argv)
 
-    homogenizer = Homogenizer(
+    homogeniz3r = Homogeniz3r(
         args.image_in,
         args.parameter_file,
         step_id=args.step_id,
@@ -61,15 +61,15 @@ def main(argv):
     )
 
     for step in args.steps:
-        homogenizer._fun_selector[step]()
+        homogeniz3r._fun_selector[step]()
 
 
-class Homogenizer(Stapl3r):
+class Homogeniz3r(Stapl3r):
     """Perform N4 bias field correction."""
 
     def __init__(self, image_in='', parameter_file='', **kwargs):
 
-        super(Homogenizer, self).__init__(
+        super(Homogeniz3r, self).__init__(
             image_in, parameter_file,
             module_id='biasfield',
             **kwargs,
@@ -180,6 +180,7 @@ class Homogenizer(Stapl3r):
                     'mask': maskpath,
                     },
                 'outputs': {
+                    **{'file': f'{cpat}_ds.h5'},
                     **{ods: f'{cpat}_ds.h5/{ods}' for ods in vols},
                     **{'parameters': f'{cpat}_ds'},
                     **{'report': f'{cpat}_ds.pdf'},
@@ -326,6 +327,13 @@ class Homogenizer(Stapl3r):
         for filepath in inputfiles:
             os.remove(filepath)
         """
+        # try:
+        #     import h5py
+        #     f = h5py.File(outputs['aggregate'], 'r')
+        #     f.close()
+        # except IndexError:
+        #     pass
+        # else:
         imarisfiles.h5chs_to_virtual(outputs['aggregate'], inputs['channels'], ids='data')
         for ids in ['data', 'bias', 'corr']:
             imarisfiles.h5chs_to_virtual(outputs['aggregate_ds'], inputs['channels_ds'], ids=ids)
