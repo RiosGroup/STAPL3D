@@ -35,10 +35,10 @@ def main(argv):
     steps = ['split', 'merge']
     args = parse_args('blocks', steps, *argv)
 
-    subclasses = {'split': Splitter, 'merge': Merger}
+    subclasses = {'split': Splitt3r, 'merge': Merg3r}
 
     for step in args.steps:
-        blocker = subclasses[step](
+        block3r = subclasses[step](
             args.image_in,
             args.parameter_file,
             step_id=args.step_id,
@@ -46,7 +46,7 @@ def main(argv):
             prefix=args.prefix,
             max_workers=args.max_workers,
         )
-        blocker._fun_selector[step]()
+        block3r._fun_selector[step]()
 
 
 class Block(object):
@@ -65,7 +65,7 @@ class Block(object):
         return yaml.dump(vars(self), default_flow_style=False)
 
 
-class Blocker(Stapl3r):
+class Block3r(Stapl3r):
     """Block operations."""
 
     def __init__(self, image_in='', parameter_file='', **kwargs):
@@ -73,7 +73,7 @@ class Blocker(Stapl3r):
         if 'module_id' not in kwargs.keys():
             kwargs['module_id'] = 'blocks'
 
-        super(Blocker, self).__init__(
+        super(Block3r, self).__init__(
             image_in, parameter_file,
             **kwargs,
             )
@@ -260,15 +260,15 @@ class Blocker(Stapl3r):
         return (fc, fC), (bc, bC)
 
 
-class Splitter(Blocker):
+class Splitt3r(Block3r):
     """Block splitting."""
 
     def __init__(self, image_in='', parameter_file='', **kwargs):
 
-        # if 'module_id' not in kwargs.keys():
-        #     kwargs['module_id'] = 'splitter'
+        if 'module_id' not in kwargs.keys():
+            kwargs['module_id'] = 'splitter'
 
-        super(Splitter, self).__init__(
+        super(Splitt3r, self).__init__(
             image_in, parameter_file,
             **kwargs,
             )
@@ -524,15 +524,16 @@ class Splitter(Blocker):
         super().view_with_napari(filepath, idss, ldss=[])
 
 
-class Merger(Blocker):
+
+class Merg3r(Block3r):
     """Block merging."""
 
     def __init__(self, image_in='', parameter_file='', **kwargs):
 
-        # if 'module_id' not in kwargs.keys():
-        #     kwargs['module_id'] = 'merger'
+        if 'module_id' not in kwargs.keys():
+            kwargs['module_id'] = 'merger'
 
-        super(Merger, self).__init__(
+        super(Merg3r, self).__init__(
             image_in, parameter_file,
             **kwargs,
             )
@@ -574,6 +575,7 @@ class Merger(Blocker):
             setattr(self, k, v)
 
         for step in self._fun_selector.keys():
+            step_id = 'blocks' if step=='blockinfo' else self.step_id
             self.set_parameters(step)
 
         self._init_paths_merger()
