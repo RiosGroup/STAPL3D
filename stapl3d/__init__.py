@@ -3348,6 +3348,14 @@ class Stapl3r(object):
 
         return paths
 
+    def fill_paths(self, step_id, reps={}, abs=True):
+        """Format-in reps by keywords into (absolute) in- and outputpaths."""
+
+        inpaths = self._prep_paths(self.inputpaths[step_id], reps, abs)
+        outpaths = self._prep_paths(self.outputpaths[step_id], reps, abs)
+
+        return inpaths, outpaths
+
     # def _get_prevpath(self, suf, dir, ext):
     #     stem = self.get_filestem(elements=[self.prefix, suf])
     #     return os.path.join(self.datadir, dir, f'{stem}.{ext}')
