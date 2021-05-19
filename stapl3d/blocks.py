@@ -110,11 +110,13 @@ class Block3r(Stapl3r):
             'fullsize': {},
             'blocks': [],
             '_blocks': [],
+            '_blocks0': [],
         }
         for k, v in default_attr.items():
             setattr(self, k, v)
 
         for step in self._fun_selector.keys():
+            step_id = 'blocks' if step=='blockinfo' else self.step_id
             self.set_parameters(step)
 
         print('bs', self.blocksize)
@@ -126,7 +128,9 @@ class Block3r(Stapl3r):
 
     def _init_paths(self):
 
-        bpat = self._build_path(suffixes=[{'b': 'p'}])
+        os.makedirs('blocks', exist_ok=True)
+        bpat = self._build_path(moduledir='blocks', prefixes=[self.prefix, 'blocks'], suffixes=[{'b': 'p'}])
+        # bpat = self._build_path(suffixes=[{'b': 'p'}])
 
         self._paths = {
             'blockinfo': {
@@ -140,8 +144,9 @@ class Block3r(Stapl3r):
         }
 
         for step in self._fun_selector.keys():
-            self.inputpaths[step]  = self._merge_paths(self._paths[step], step, 'inputs')
-            self.outputpaths[step] = self._merge_paths(self._paths[step], step, 'outputs')
+            step_id = 'blocks' if step=='blockinfo' else self.step_id
+            self.inputpaths[step]  = self._merge_paths(self._paths[step], step, 'inputs', step_id)
+            self.outputpaths[step] = self._merge_paths(self._paths[step], step, 'outputs', step_id)
 
     def print_blockinfo(self, **kwargs):
 
@@ -152,14 +157,22 @@ class Block3r(Stapl3r):
 
     def _prep_blocks(self):
 
-        self.set_fullsize(self.inputpaths[self.step]['data'])
+        step = 'blockinfo'  #self.step
+        self.set_fullsize(self.inputpaths[step]['data'])
         self.set_blocksize()
         self.set_blockmargin()
-        self.set_blocks(self.outputpaths[self.step]['blockfiles'])
+        if '{b}' in self.inputpaths[step]['data']:
+            self._blocks = self.set_blocks_from_files(self.inputpaths[step]['data'], self.outputpaths[step]['blockfiles'])
+            self._blocks0 = self.set_blocks_from_files(self.inputpaths[step]['data'], self.outputpaths[step]['blockfiles'], blocks0=True)
+        else:
+            self._blocks = self.set_blocks(self.outputpaths[step]['blockfiles'])
+            self._blocks0 = self.set_blocks(self.outputpaths[step]['blockfiles'], blocks0=True)
 
     def set_fullsize(self, image_in, fullsize={}):
 
         if image_in:
+            if '{b}' in image_in:
+                image_in = image_in.format(b=0)  # FIXME
             im = Image(image_in, permission='r')
             im.load(load_data=False)
             im.close()
@@ -183,7 +196,8 @@ class Block3r(Stapl3r):
 
         self.blockmargin = {**bm_im, **bm_xy, **self.blockmargin, **blockmargin}
 
-    def set_blocks(self, block_template, axlab='xyzct'):
+    def set_blocks(self, block_template, axlab='zyxct', blocks0=False):
+        # TODO: flexible axlab order
 
         axlab = [al for al in axlab if al in self.fullsize.keys()]
         imslices = {al: slice(0, self.fullsize[al]) for al in axlab}
@@ -191,7 +205,10 @@ class Block3r(Stapl3r):
         shape = {d: len(range(*slc.indices(slc.stop))) for d, slc in imslices.items()}
         blocksize = self.blocksize or shape
         blocksize = {d: bs if bs else shape[d] for d, bs in blocksize.items()}
-        margin = self.blockmargin or dict(zip(axlab, [0] * len(axlab)))
+        if blocks0 or not self.blockmargin:
+            margin = dict(zip(axlab, [0] * len(axlab)))
+        else:
+            margin = self.blockmargin
 
         starts, stops, = {}, {}
         for d in axlab:
@@ -225,7 +242,32 @@ class Block3r(Stapl3r):
         blocks = [Block(**blockdict(start, stop, axlab, b_idx))
                   for b_idx, (start, stop) in enumerate(zip(starts, stops))]
 
-        self._blocks = blocks
+        return blocks
+
+    def set_blocks_from_files(self, inputpat, block_template, axlab='zyxct', blocks0=False):
+
+        axlab = [al for al in axlab if al in self.fullsize.keys()]
+
+        stops = []
+        for idx in [1, 2]:  # FIXME: glob files
+            from stapl3d.preprocessing import shading
+            iminfo = shading.get_image_info(inputpat.format(b=idx))
+            stops.append(iminfo['dims_zyxc'])
+
+        # starts = [dict(zip(axlab, [0] * len(axlab))) for imsize in imsizes]
+        # stops = [dict(zip(axlab, imsize)) for imsize in imsizes]
+        starts = [[0] * len(stop) for stop in stops]
+
+        def blockdict(start, stop, axlab, b_idx):
+            slcs = [slice(sta, sto) for sta, sto in zip(start, stop)]
+            id = self._suffix_formats['b'].format(b=b_idx)
+            bpat = block_template.format(b=b_idx) + '/{ods}'  # TODO: filename or h5-path pattern?
+            return {'slices': slcs, 'id': id, 'path': bpat, 'idx': b_idx}
+
+        blocks = [Block(**blockdict(start, stop, axlab, b_idx))
+                  for b_idx, (start, stop) in enumerate(zip(starts, stops))]
+
+        return blocks
 
     def _get_blockbounds(self, offset, shape, blocksize, margin):
         """Get the block range for a dimension."""
@@ -261,6 +303,19 @@ class Block3r(Stapl3r):
             fC -= margin
 
         return (fc, fC), (bc, bC)
+
+    def _get_filepaths(self, blocks=[]):
+
+        if not blocks:
+            blocks = list(range(len(self.blocks)))
+
+        filepaths = []
+        for block in blocks:
+            block = self._blocks[block[0]]
+            outputs = self._prep_paths(self.outputs, reps={'b': block.idx})
+            filepaths.append(outputs['blockfiles'])
+
+        return filepaths
 
 
 class Splitt3r(Block3r):
