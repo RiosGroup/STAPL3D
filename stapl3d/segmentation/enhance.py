@@ -2,6 +2,7 @@
 
 """Enhance the membrane with ACME.
 
+    # FIXME: results to to block subfolder, logs go to enhance subfolder
     # TODO: reports
 """
 
@@ -22,7 +23,7 @@ import numpy as np
 from glob import glob
 
 from stapl3d import parse_args, Stapl3r, Image, h5_nii_convert
-from stapl3d.blocks import Blocker
+from stapl3d.blocks import Block3r
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +34,7 @@ def main(argv):
     steps = ['estimate']
     args = parse_args('membrane_enhancement', steps, *argv)
 
-    enhancer = Enhancer(
+    enhanc3r = Enhanc3r(
         args.image_in,
         args.parameter_file,
         step_id=args.step_id,
@@ -43,10 +44,10 @@ def main(argv):
     )
 
     for step in args.steps:
-        enhancer._fun_selector[step]()
+        enhanc3r._fun_selector[step]()
 
 
-class Enhancer(Blocker):
+class Enhanc3r(Block3r):
     """Enhance the membrane with ACME."""
 
     def __init__(self, image_in='', parameter_file='', **kwargs):
@@ -54,7 +55,7 @@ class Enhancer(Blocker):
         if 'module_id' not in kwargs.keys():
             kwargs['module_id'] = 'membrane_enhancement'
 
-        super(Enhancer, self).__init__(
+        super(Enhanc3r, self).__init__(
             image_in, parameter_file,
             **kwargs,
             )
@@ -84,6 +85,9 @@ class Enhancer(Blocker):
 
         default_attr = {
             'ACMEdir': '',
+            'ids_membrane': 'memb/mean',
+            'ods_preprocess': 'memb/ACME_preprocess',
+            'ods_planarity': 'memb/ACME_planarity',
             'median_filter_par': 0.5,
             'membrane_filter_par': 1.1,
             'cleanup': True,
@@ -92,44 +96,52 @@ class Enhancer(Blocker):
             setattr(self, k, v)
 
         for step in self._fun_selector.keys():
-            self.set_parameters(step)
+            step_id = 'blocks' if step=='blockinfo' else self.step_id
+            self.set_parameters(step, step_id=step_id)
 
-        self._init_paths()
+        self._init_paths_enhancer()
 
         self._init_log()
 
-        # image_in = self._paths['blockinfo']['inputs']['data']
-        # block_formatter = self._paths['blockinfo']['outputs']['blockfiles']
-        # self.set_blocksize(image_in)
-        # self.set_blockmargin()
-        # self.set_blocks(image_in, block_formatter)
+        self._prep_blocks()
 
         self.ACMEdir = self.ACMEdir or os.environ.get('ACME')
 
-    def _init_paths(self):
+    def _init_paths_enhancer(self):
 
         # FIXME: moduledir (=step_id?) can vary
+        # prev_path = {
+        #     'moduledir': 'blocks', 'module_id': 'blocks',
+        #     'step_id': 'blocks', 'step': 'split',
+        #     'ioitem': 'outputs', 'output': 'blockfiles',
+        #     }
         prev_path = {
-            'moduledir': 'blocks', 'module_id': 'blocks',
-            'step_id': 'blocks', 'step': 'split',
+            'moduledir': 'splitter', 'module_id': 'splitter',
+            'step_id': 'splitter', 'step': 'split',
             'ioitem': 'outputs', 'output': 'blockfiles',
             }
         bpat = self._get_inpath(prev_path)
-        bpat = self._build_path(
-            moduledir=prev_path['moduledir'],
-            prefixes=[self.prefix, prev_path['module_id']],
-            suffixes=[{'b': 'p'}],
-            ext='h5',
-            )
+        if bpat == 'default':
+            # bpat = self._build_path(
+            #     moduledir=prev_path['moduledir'],
+            #     prefixes=[self.prefix, prev_path['module_id']],
+            #     suffixes=[{'b': 'p'}],
+            #     ext='h5',
+            #     )
+            os.makedirs('blocks', exist_ok=True)
+            bpat = self._build_path(moduledir='blocks', prefixes=[self.prefix, 'blocks'], suffixes=[{'b': 'p'}])
+            # bpat = self._build_path(suffixes=[{'b': 'p'}])
 
         self._paths.update({
             'estimate': {
                 'inputs': {
-                    'membrane': f'{bpat}/memb/mean',
+                    'blockfiles': f'{bpat}',
+                    'membrane': f'{bpat}/{self.ids_membrane}',
                     },
                 'outputs': {
-                    'preprocess': f"{bpat}/memb/ACME_preprocess",
-                    'planarity': f"{bpat}/memb/ACME_planarity",
+                    'blockfiles': f'{bpat}',
+                    'preprocess': f"{bpat}/{self.ods_preprocess}",
+                    'planarity': f"{bpat}/{self.ods_planarity}",
                     # 'eigen': f"{bpat}.h5/memb/ACME_eigen",
                     # 'tv': f"{bpat}.h5/memb/ACME_tv",
                     # 'segment': f"{bpat}.h5/memb/ACME_segment",
@@ -137,9 +149,10 @@ class Enhancer(Blocker):
                 },
             })
 
-        for step in ['estimate']:  #self._fun_selector.keys():
-            self.inputpaths[step]  = self._merge_paths(self._paths[step], step, 'inputs')
-            self.outputpaths[step] = self._merge_paths(self._paths[step], step, 'outputs')
+        for step in self._fun_selector.keys():  #['estimate']:  #self._fun_selector.keys():
+            step_id = 'blocks' if step=='blockinfo' else self.step_id
+            self.inputpaths[step]  = self._merge_paths(self._paths[step], step, 'inputs', step_id)
+            self.outputpaths[step] = self._merge_paths(self._paths[step], step, 'outputs', step_id)
 
     def estimate(self, **kwargs):
         """Perform planarity estimation.
