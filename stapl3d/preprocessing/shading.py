@@ -768,7 +768,7 @@ def get_image_info(image_in):
 
         iminfo['stack_offsets'] = v_offsets
 
-    elif image_in.endswith('.ims') or image_in.endswith('.bdv') or image_in.endswith('.h5'):
+    elif image_in.endswith('.ims') or image_in.endswith('.bdv') or '.h5' in image_in:
 
         from stapl3d import get_imageprops
         props = get_imageprops(image_in)
