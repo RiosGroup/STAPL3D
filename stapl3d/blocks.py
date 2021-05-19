@@ -60,6 +60,9 @@ class Block(object):
         self.slices = slices
         self.shape = {}
         self.margin = {}
+        self.affine = np.eye(4)
+        for i, slc in enumerate(slices[:3]):  # TODO: zyx selection
+            self.affine[i, 3] = slc.start
 
     def __str__(self):
         return yaml.dump(vars(self), default_flow_style=False)
