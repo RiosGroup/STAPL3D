@@ -540,8 +540,11 @@ class Splitt3r(Block3r):
         if not filepath:
             filepath = self._abs(self.outputpaths['split']['blockfiles'].format(b=block_idx))
 
-        super().view_with_napari(filepath, idss, ldss=[])
+        super().view_with_napari(filepath, idss, ldss)
 
+    def view_blocks_with_napari(self, block_idxs=[0, 1], idss=['mean', 'memb/mean', 'nucl/mean'], ldss=[]):
+
+        super().view_blocks_with_napari(block_idxs, idss, ldss)
 
 
 class Merg3r(Block3r):
