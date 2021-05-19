@@ -388,10 +388,13 @@ def find_downsample_factors(image_in, rl0_idx, rl1_idx):
         dsfacs = np.around(np.array(dims0) / np.array(dims1)).astype('int')
     elif im.format == '.bdv':
         dsfacs = im.file['s00/resolutions'][rl1_idx, :][::-1]
+    else:
+        dsfacs = [1, 1, 1]
 
     im.close()
 
     return dsfacs
+
 
 
 def aggregate_hdf5(outputfile, inputpat, vol='data', xml_ref=''):
