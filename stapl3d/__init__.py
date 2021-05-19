@@ -3604,10 +3604,10 @@ class Stapl3r(object):
         self._plot_images(f, axdict, info_dict)
         self._plot_profiles(f, axdict, info_dict)
 
-        outputpath = outputpath or self._build_path(suffixes=[suf])
-
         f.suptitle(figtitle, fontsize=14, fontweight='bold')
-        f.savefig(outputpath, format='pdf')
+        if outputpath is not None:
+            outputpath = outputpath or self._build_path(suffixes=[suf])
+            f.savefig(outputpath, format='pdf')
         if ioff:
             plt.close(f)
 
