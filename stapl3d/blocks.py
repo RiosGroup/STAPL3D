@@ -342,34 +342,17 @@ class Splitt3r(Block3r):
         self._parameter_sets.update({
             'split': {
                 'fpar': self._FPAR_NAMES,
-                'ppar': ('memb_idxs', 'memb_weights',
-                         'nucl_idxs', 'nucl_weights',
-                         'mean_idxs', 'mean_weights',
-                         'output_channels', 'output_ND',
-                         'datatype', 'chunksize',
-                         ),
+                'ppar': ('outputvolumes', 'output_ND', 'datatype', 'chunksize'),
                 'spar': ('_n_workers', 'blocksize', 'blockmargin', 'blocks'),
                 },
             })
 
         self._parameter_table.update({
-            'memb_idxs': 'Membrane channel indices',
-            'memb_weights': 'Membrane channel weights',
-            'nucl_idxs': 'Nuclear channel indices',
-            'nucl_weights': 'Nuclear channel weights',
-            'mean_idxs': 'Channel indices for global mean',
-            'mean_weights': 'Channel weights for global mean',
             })
 
         default_attr = {
-            'memb_idxs': None,
-            'memb_weights': [],
-            'nucl_idxs': None,
-            'nucl_weights': [],
-            'mean_idxs': None,
-            'mean_weights': [],
-            'output_channels': None,
-            'output_ND': True,
+            'outputvolumes': {},
+            'output_ND': False,
             'datatype': '',
             'chunksize': [],
         }
@@ -377,7 +360,8 @@ class Splitt3r(Block3r):
             setattr(self, k, v)
 
         for step in self._fun_selector.keys():
-            self.set_parameters(step)
+            step_id = 'blocks' if step=='blockinfo' else self.step_id
+            self.set_parameters(step, step_id=step_id)
 
         self._init_paths_splitter()
 
@@ -415,15 +399,11 @@ class Splitt3r(Block3r):
                 ext='h5',
                 )
 
-        vols = []
-        vols += ['mean'] if self.mean_idxs is not None else []
-        vols += ['memb/mean'] if self.memb_idxs is not None else []
-        vols += ['nucl/mean'] if self.nucl_idxs is not None else []
-        if self.output_channels is not None:
-            vols += [f'chan/ch{chan:02d}' for chan in self.output_channels]
+        vols = list(self.outputvolumes.keys())
         vols += ['data'] if self.output_ND else []
 
-        bpat = self._build_path(suffixes=[{'b': 'p'}])
+        os.makedirs('blocks', exist_ok=True)
+        bpat = self._build_path(moduledir='blocks', prefixes=[self.prefix, 'blocks'], suffixes=[{'b': 'p'}])
 
         self._paths.update({
             'split': {
@@ -438,30 +418,13 @@ class Splitt3r(Block3r):
                 },
             })
 
-        for step in ['split']:  # self._fun_selector.keys():
-            self.inputpaths[step]  = self._merge_paths(self._paths[step], step, 'inputs')
-            self.outputpaths[step] = self._merge_paths(self._paths[step], step, 'outputs')
+        for step in self._fun_selector.keys():
+            step_id = 'blocks' if step=='blockinfo' else self.step_id
+            self.inputpaths[step]  = self._merge_paths(self._paths[step], step, 'inputs', step_id)
+            self.outputpaths[step] = self._merge_paths(self._paths[step], step, 'outputs', step_id)
 
     def split(self, **kwargs):
-        """Average membrane and nuclear channels and write as blocks.
-
-        blocksize=[],
-        blockmargin=[],
-        blocks=[],
-        memb_idxs=None,
-        memb_weights=[],
-        nucl_idxs=None,
-        nucl_weights=[],
-        mean_idxs=None,
-        mean_weights=[],
-        output_channels=None,
-        output_ND=False,
-        bias_image='',
-        bias_dsfacs=[1, 64, 64, 1],
-        datatype='',
-        chunksize=[],
-        outputtemplate='',
-        """
+        """Average membrane and nuclear channels and write as blocks."""
 
         arglist = self._prep_step('split', kwargs)
         with multiprocessing.Pool(processes=self._n_workers) as pool:
@@ -470,13 +433,17 @@ class Splitt3r(Block3r):
     def _split_with_combinechannels(self, block):
         """Average membrane and nuclear channels and write as blocks."""
 
-        inputs = self._prep_paths(self.inputs)
+        reps = {'b': block} if '{b}' in self.inputs else {}
+        inputs = self._prep_paths(self.inputs, reps=reps)
         outputs = self._prep_paths(self.outputs, reps={'b': block})
+
+        # INPUT
+        infile = inputs['data'].format(b=block)
 
         block = self._blocks[block]
         print('Writing block with id {} to {}'.format(block.id, block.path))
 
-        im = Image(inputs['data'], permission='r')
+        im = Image(infile, permission='r')
         im.load()
 
         bf = None
@@ -487,11 +454,12 @@ class Splitt3r(Block3r):
                                  im.elsize[im.axlab.index(dim)])
                            for dim in bf.axlab]
 
+        # OUTPUTS Image, 3D and ND
         props = im.get_props2()
         props['path'] = block.path.format(ods='data')
         props['permission'] = 'r+'
         props['dtype'] = self.datatype or props['dtype']
-        props['chunks'] = self.chunksize or [self.blockmargin[d] if d in 'xy' else s for d, s in zip(im.axlab, im.dims)]
+        props['chunks'] = self.chunksize or [max(64, self.blockmargin[d]) if d in 'xy' else s for d, s in zip(im.axlab, im.dims)]  # FIXME: if blockmargin is 0
         props['shape'] = list(im.slices2shape(list(block.slices)))
         props['dims'] = list(im.slices2shape(list(block.slices)))
         props['slices'] = None
@@ -501,55 +469,46 @@ class Splitt3r(Block3r):
                 mo_ND.create()
         except KeyError:
             pass
+
+        props['shape'] = list(im.slices2shape(list(block.slices[:3])))
+        props['dims'] = list(im.slices2shape(list(block.slices[:3])))
         mo_3D = Image(**props)
         mo_3D.squeeze('ct')
 
-        c_axis = im.axlab.index('c')
-        channel_list = [i for i in range(im.dims[c_axis])]
 
-        ch_idxs = [self.memb_idxs, self.nucl_idxs, self.mean_idxs]
-        ch_weights = [self.memb_weights, self.nucl_weights, self.mean_weights]
-        ch_out = ['memb/mean', 'nucl/mean', 'mean']
-        ch_ids = ['memb', 'nucl', 'mean']
+        ## 3D or 4D or 5D input?...
 
-        output_channels = self.output_channels
-        if output_channels is not None:
 
-            if output_channels == [-1]:
-                output_channels = channel_list
+        if 'c' in im.axlab:
+            c_axis = im.axlab.index('c')
+            idxs = [i for i in range(im.dims[c_axis])]
+        else:
+            c_axis = None
+            idxs = []
 
-            ids = ["ch{:02d}".format(ch) for ch in output_channels]
-            ch_idxs += [[ch] for ch in output_channels]
-            ch_weights += [[1.0]] * len(output_channels)
-            ch_out += ['chan/{}'.format(ch_id) for ch_id in ids]
-            ch_ids += ids
+        for k, ov in self.outputvolumes.items():
 
-        outputs = {}
-        for key, idxs, weights, ods in zip(ch_ids, ch_idxs, ch_weights, ch_out):
-
-            if idxs is None:
-                continue
-            elif idxs == [-1]:
-                idxs = [i for i in range(im.dims[c_axis])]
-
-            if weights == [-1]:
-                weights = [1] * len(idxs)
-
-            outputs[key] = {
+            default = {
+                'ods': k,
                 'idxs': idxs,
-                'weights': weights,
-                'ods': ods,
+                'weights': [1] * len(idxs),
                 'dtype': mo_3D.dtype,
                 'data': np.zeros(mo_3D.shape, dtype='float'),
                 }
+            self.outputvolumes[k] = {**default, **ov}
 
         im.slices = block.slices
 
-        idxs_set = set([l for k, v in outputs.items() for l in v['idxs']])
+        idxs_set = set([l for k, v in self.outputvolumes.items() for l in v['idxs']])
         for volnr in idxs_set:
+            print('volnr', volnr)
 
-            im.slices[c_axis] = slice(volnr, volnr + 1, 1)
+            if c_axis is not None:
+                im.slices[c_axis] = slice(volnr, volnr + 1, 1)
+
             data = im.slice_dataset(squeeze=False).astype('float')
+            print(data.shape)
+
             if bf is not None:
                 print('Performing bias field correction.')
                 bias = get_bias_field_block(bf, im.slices, data.shape, bias_dsfacs)
@@ -559,18 +518,20 @@ class Splitt3r(Block3r):
 
             # FIXME: not written if idxs_set is empty
             if self.output_ND:
-                mo_ND.slices[c_axis] = slice(volnr, volnr + 1, 1)
+                if c_axis is not None:
+                    mo_ND.slices[c_axis] = slice(volnr, volnr + 1, 1)
                 mo_ND.write(data.astype(mo_ND.dtype))
 
-            for name, output in outputs.items():
+            for name, output in self.outputvolumes.items():
                 if volnr in output['idxs']:
                     idx = output['idxs'].index(volnr)
                     data *= output['weights'][idx]
+                    print(data.shape)
                     output['data'] += np.squeeze(data)
 
         mo_ND.close()
 
-        for name, output in outputs.items():
+        for name, output in self.outputvolumes.items():
             output['data'] /= len(output['idxs'])
             write_image(mo_3D, block.path.format(ods=output['ods']), output['data'].astype(mo_3D.dtype))
 
