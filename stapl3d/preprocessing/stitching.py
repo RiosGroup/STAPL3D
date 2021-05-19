@@ -1,16 +1,6 @@
 #!/usr/bin/env python
 
-"""Stitching helper functions.
-
-    # TODO: passing stitching arguments from parfile to ijm
-    # TODO: report
-    # TODO: logging
-    # TODO: cleanup shading stacks after converting to bdv
-    # TODO: check if tileoffsets order needs to be switched after ch<=>tile order switch
-    # TODO: check on data stitchability (i.e. mostly for ntiles=1)
-    # TODO: outstem not used for ijm
-
-    # FIXME: VoxelSize unit upon fuse is in pixels, not um
+"""Stitch z-stacks with FiJi BigStitcher.
 
 """
 
@@ -28,9 +18,6 @@ import yaml
 import numpy as np
 
 import xml.etree.ElementTree as ET
-
-import czifile
-from readlif.reader import LifFile
 
 from stapl3d import parse_args, Stapl3r, Image
 from stapl3d import imarisfiles
@@ -74,7 +61,7 @@ def main(argv):
     stepmap, single_chan = step_splitter('4step')
     args = parse_args('stitching', list(stepmap.keys()), *argv)
 
-    stitcher = Stitcher(
+    stitch3r = Stitch3r(
         args.image_in,
         args.parameter_file,
         step_id=args.step_id,
@@ -84,15 +71,95 @@ def main(argv):
     )
 
     for step in args.steps:
-        stitcher._fun_selector[step]()
+        stitch3r._fun_selector[step]()
 
 
-class Stitcher(Stapl3r):
-    """Stitch z-stacks with FiJi BigStitcher."""
+class Stitch3r(Stapl3r):
+    """Stitch z-stacks with FiJi BigStitcher.
+
+    Methods
+    ----------
+    run
+        Run all steps in the stitcher module.
+    prep
+        Read stack positions from metadata and write to BigStitcher format.
+    load
+        Create BigDataViewer dataset.
+    calc
+        Calculate pairwise shifts, filter and do global optimization.
+    fuse
+        Fuse stacks to volume.
+    postprocess
+        Merge the channels into symlinked file.
+
+    Parameters
+    ----------
+    image_in : string
+        Path to dataset.
+    parameter_file : string
+        Path to yaml parameter file.
+    module_id : string
+        Name of the STAPL3D module.
+    step_id: string
+        Identifier of the yaml parameterfile entry.
+    directory : string
+        Name of output subdirectory.
+    prefix : string
+        Output prefix.
+    max_workers : int
+        Maximal number of cores to use for processing.
+
+    Attributes
+    ----------
+    stitch_steps : list of int []
+        List of indices of stitching steps to perform:
+        'prep': [0],
+        'define_dataset': [1],
+        'load_tile_positions': [2],
+        'calculate_shifts': [3],
+        'filter_shifts': [4],
+        'global_optimization': [5],
+        'fuse_dataset': [6],
+        'postprocess': [7],
+    channels : list of int []
+        List of channel indices.
+    stacks : list of int []
+        List of stack indices.
+    channel_ref : int 0
+        Reference channel index.
+    FIJI : string ''
+        Path to Fiji executable.
+    inputstem : string ''
+        TODO
+    z_shift : float 0
+        Add a global shift in z.
+    elsize : list of floats []
+        Voxel sizes (zyxc).
+    downsample : list of int [1, 2, 2]
+        Downsampling factors for pairwise shift calculation (zyx).
+    r : list of float [0.7, 1.0]
+        Limits for correlation coefficients between pairs.
+    max_shift : list of float [0, 0, 0]
+        Limits for translation distance over (zyx).
+    max_displacement : float 0
+        Limit for total displacement.
+    relative_shift : float 2.5
+        Relative error threshold for global optimization.
+    absolute_shift : float 3.5
+        Absolute error threshold for global optimization.
+
+    Examples
+    --------
+    >>> from stapl3d.preprocessing import stitching
+    >>> stitcher = stitching.Stitcher(image_in, parameter_file, prefix=dataset)
+    >>> stitcher.FIJI = '/Applications/Fiji.app/Contents/MacOS/ImageJ-macosx'
+    >>> stitcher.run()
+
+    """
 
     def __init__(self, image_in='', parameter_file='', **kwargs):
 
-        super(Stitcher, self).__init__(
+        super(Stitch3r, self).__init__(
             image_in, parameter_file,
             module_id='stitching',
             **kwargs,
@@ -287,22 +354,7 @@ class Stitcher(Stapl3r):
         self._link_channels()
 
     def estimate(self, step='', **kwargs):
-        """Stitch dataset.
-
-        # channels=[],
-        # FIJI='',
-        # inputstem='',
-        # channel_ref=0,
-        # z_shift=0,
-        # elsize=[],
-        # downsample=[1, 2, 2],
-        # r=[0.7, 1.0],
-        # max_shift=[0, 0, 0],
-        # max_displacement=0,
-        # relative_shift=2.5,
-        # absolute_shift=3.5,
-        # ):
-        """
+        """Stitch dataset with Fiji BigStitcher."""
 
         self.stitch_steps = self._stepmap[step]
         arglist = self._prep_step(step, kwargs)
@@ -310,7 +362,7 @@ class Stitcher(Stapl3r):
             pool.starmap(self._estimate_channel, arglist)
 
     def _estimate_channel(self, channel):
-        """Stitch dataset with fiji BigStitcher."""
+        """Stitch dataset with Fiji BigStitcher."""
 
         inputs = self._prep_paths(self.inputs, reps={'c': channel}, abs=False)
         outputs = self._prep_paths(self.outputs, reps={'c': channel}, abs=False)
