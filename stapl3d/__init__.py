@@ -3017,7 +3017,7 @@ class Stapl3r(object):
 
         return arglist
 
-    def set_parameters(self, step):  # , kwargs={}
+    def set_parameters(self, step, step_id=''):  # , kwargs={}
         """Set parameters for a processing step."""
 
         # if kwargs:
@@ -3026,20 +3026,22 @@ class Stapl3r(object):
         # else:
             # DONE FIXME: this may overwrite things set on objects with parfile pars if no kwargs are given on method call;
             # NB: this should only be done from __init__ methods, not from _prep_step
+        step_id = step_id or self.step_id
         pars = {'step': step}
         try:
-            pars.update(self._cfg[self.step_id][step])
+            pars.update(self._cfg[step_id][step])
         except TypeError:
             pass
         except KeyError:
             pass
         self.__dict__.update(pars)
 
-    def _merge_paths(self, paths, step, key='inputs'):
+    def _merge_paths(self, paths, step, key='inputs', step_id=''):
         """Merge default paths with paths from parameterfile[=leading]."""
 
+        step_id = step_id or self.step_id
         try:
-            par_paths = self._cfg[self.step_id][step][key]
+            par_paths = self._cfg[step_id][step][key]
         except (KeyError, TypeError):
             par_paths = {}
             # print(f'No {key} specified for step {step}:')
