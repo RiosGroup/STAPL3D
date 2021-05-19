@@ -2,6 +2,8 @@
 
 """Segment cells from membrane and nuclear channels.
 
+    # TODO: make python=3.7 a requirement (we want OrderedDict)
+
 """
 
 import os
@@ -45,22 +47,11 @@ from skimage.morphology import (
     disk,
     )
 
-from stapl3d import (
-    parse_args_common,
-    get_outputdir,
-    get_params,
-    get_blockfiles,
-    get_n_workers,
-    Image,
-    LabelImage,
-    MaskImage,
-    wmeMPI,
-    get_image,
-    split_filename,
-    )
-
+from stapl3d import parse_args, Stapl3r, Image, LabelImage, MaskImage, wmeMPI, transpose_props
+from stapl3d.blocks import Block3r
+from stapl3d import get_paths  # TODO: into Image/Stapl3r
 from stapl3d.reporting import (
-    # gen_orthoplot,
+    gen_orthoplot,
     load_parameters,
     get_centreslice,
     get_centreslices,
@@ -72,100 +63,318 @@ logger = logging.getLogger(__name__)
 
 
 def main(argv):
-    """"Segment cells from membrane and nuclear channels.
-
-    """
-
-    step_ids = ['segmentation', 'subsegment']
-    fun_selector = {
-        'estimate': estimate,
-        'subsegment': subsegment,
-        }
-
-    args, mapper = parse_args_common(step_ids, fun_selector, *argv)
-
-    for step, step_id in mapper.items():
-        fun_selector[step](
-            args.image_in,
-            args.parameter_file,
-            step_id,
-            args.outputdir,
-            args.n_workers,
-            )
-
-
-def estimate(
-    image_in,
-    parameter_file,
-    step_id='segmentation',
-    outputdir='',
-    n_workers=0,
-    blocks=[],
-    ):
     """Segment cells from membrane and nuclear channels."""
 
-    outputdir = get_outputdir(image_in, parameter_file, outputdir, step_id, fallback='blocks')
+    steps = ['estimate']  # , 'subsegment'
+    args = parse_args('segmentation', steps, *argv)
 
-    params = get_params(locals().copy(), parameter_file, step_id)
-    subparams = get_params(locals().copy(), parameter_file, step_id, 'submit')
+    segment3r = Segment3r(
+        args.image_in,
+        args.parameter_file,
+        step_id=args.step_id,
+        directory=args.outputdir,
+        prefix=args.prefix,
+        max_workers=args.max_workers,
+    )
 
-    filepaths, blocks = get_blockfiles(image_in, outputdir, params['blocks'])
-
-    arglist = [(filepath, params, True) for filepath in filepaths]
-
-    n_workers = get_n_workers(len(blocks), subparams)
-    with multiprocessing.Pool(processes=n_workers) as pool:
-        pool.starmap(cell_segmentation, arglist)
+    for step in args.steps:
+        segment3r._fun_selector[step]()
 
 
-def cell_segmentation(
-    filepath,
-    params,
-    save_steps=True,
-    ):
+class Segment3r(Block3r):
+    """Segment cells from membrane and nuclear channels."""
 
-    logging.basicConfig(filename='{}.log'.format(filepath), level=logging.INFO)
-    report = {'parameters': locals()}
+    def __init__(self, image_in='', parameter_file='', **kwargs):
 
-    # FIXME: makes sure this is an ordered dict or handle otherwise
-    # TODO: make python=3.7 a requirement
-    """ https://stackoverflow.com/questions/5121931/in-python-how-can-you-load-yaml-mappings-as-ordereddicts
-    Update: In python 3.6+ you probably don't need OrderedDict at all due to the new dict implementation that has been in use in pypy for some time (although considered CPython implementation detail for now).
-    Update: In python 3.7+, the insertion-order preservation nature of dict objects has been declared to be an official part of the Python language spec, see What's New In Python 3.7.
-    #for step_key in ["prep_mean", "mask_mean", "prep_nucl", "mask_nucl", "prep_memb", "mask_memb", "combine_masks", "seed", "segment"]:
-        pars = params[step_key]
-        print(step_key)
-        if step_key not in params.keys():
-            continue
-    """
+        if 'module_id' not in kwargs.keys():
+            kwargs['module_id'] = 'segmentation'
 
-    dpar = ['image_in', 'parameter_file', 'step_id', 'outputdir', 'n_workers', 'blocks']
-    for p in dpar:
-        del params[p]
+        super(Segment3r, self).__init__(
+            image_in, parameter_file,
+            **kwargs,
+            )
 
-    for step_key, pars in params.items():
+        self._fun_selector.update({
+            'estimate': self.estimate,
+            })
 
-        t = time.time()
+        self._parallelization.update({
+            'estimate': ['blocks'],
+            })
 
-        if step_key.startswith('prep'):
-            im = prep_volume(filepath, step_key, pars, save_steps)
-        elif step_key.startswith('mask'):
-            im = mask_volume(filepath, step_key, pars, save_steps)
-        elif step_key.startswith('combine'):
-            im = combine_volumes(filepath, step_key, pars, save_steps)
-        elif step_key == 'seed':
-            im = seed_volume(filepath, step_key, pars, save_steps)
-        elif step_key == 'segment':
-            im = segment_volume(filepath, step_key, pars, save_steps)
-        elif step_key == 'filter':
-            im = filter_segments(filepath, step_key, pars, save_steps)
+        self._parameter_sets.update({
+            'estimate': {
+                'fpar': self._FPAR_NAMES,
+                'ppar': (),
+                'spar': ('_n_workers', 'blocks'),
+                },
+            })
 
-        elapsed = time.time() - t
-        print('{} took {:1f} s'.format(step_key, elapsed))
+        # TODO
+        self._parameter_table.update({
+            })
+
+        # TODO
+        default_attr = {
+        }
+        for k, v in default_attr.items():
+            setattr(self, k, v)
+
+        for step in self._fun_selector.keys():
+            step_id = 'blocks' if step=='blockinfo' else self.step_id
+            self.set_parameters(step, step_id=step_id)
+
+        self._init_paths_segmenter()
+
+        self._init_log()
+
+        self._prep_blocks()
+
+    def _init_paths_segmenter(self):
+
+        prev_path = {
+            'moduledir': 'membrane_enhancement', 'module_id': 'membrane_enhancement',
+            'step_id': 'membrane_enhancement', 'step': 'estimate',
+            'ioitem': 'outputs', 'output': 'blockfiles',
+            }
+        bpat = self._get_inpath(prev_path)
+        if bpat == 'default':
+            os.makedirs('blocks', exist_ok=True)
+            bpat = self._build_path(moduledir='blocks', prefixes=[self.prefix, 'blocks'], suffixes=[{'b': 'p'}], ext='h5')
+
+        self._paths.update({
+            'estimate': {
+                'inputs': {
+                    'blockfiles': f'{bpat}',
+                    },
+                'outputs': {
+                    'blockfiles': f'{bpat}',
+                    'report': f'{bpat}'.replace('.h5', '.pdf'),
+                    }
+                },
+            })
+
+        for step in self._fun_selector.keys():
+            step_id = 'blocks' if step=='blockinfo' else self.step_id
+            self.inputpaths[step]  = self._merge_paths(self._paths[step], step, 'inputs', step_id)
+            self.outputpaths[step] = self._merge_paths(self._paths[step], step, 'outputs', step_id)
+
+    def estimate(self, **kwargs):
+        """Segment cells from membrane and nuclear channels."""
+
+        arglist = self._prep_step('estimate', kwargs)
+        with multiprocessing.Pool(processes=self._n_workers) as pool:
+            pool.starmap(self._estimate_block, arglist)
+
+    def _estimate_block(self, block):
+        """Segment cells from membrane and nuclear channels."""
+
+        block = self._blocks[block]
+        inputs = self._prep_paths(self.inputs, reps={'b': block.idx})
+        outputs = self._prep_paths(self.outputs, reps={'b': block.idx})
+
+        step = 'estimate'
+        params = self._cfg[self.step_id][step]
+
+        filepath = inputs['blockfiles']
+        save_steps = True
+
+        fundict = {
+            'prep': prep_volume,
+            'mask': mask_volume,
+            'combine': combine_volumes,
+            'seed': seed_volume,
+            'segment': segment_volume,
+            'filter': filter_segments,
+            'iterative_split': resegment_largelabels,
+        }
+
+        for step_key, pars in params.items():
+
+            t = time.time()
+
+            # im = fundict[](filepath, step_key, pars, save_steps)
+            if step_key.startswith('prep'):
+                im = prep_volume(filepath, step_key, pars, save_steps)
+            elif step_key.startswith('mask'):
+                im = mask_volume(filepath, step_key, pars, save_steps)
+            elif step_key.startswith('combine'):
+                im = combine_volumes(filepath, step_key, pars, save_steps)
+            elif step_key == 'seed':
+                im = seed_volume(filepath, step_key, pars, save_steps)
+            elif step_key == 'segment':
+                im = segment_volume(filepath, step_key, pars, save_steps)
+            elif step_key == 'filter':
+                im = filter_segments(filepath, step_key, pars, save_steps)
+            elif step_key == 'iterative_split':
+                im = resegment_largelabels(filepath, step_key, pars, save_steps)
+
+            elapsed = time.time() - t
+            print('{} took {:1f} s'.format(step_key, elapsed))
+
+        # self.dump_parameters(self.step, outputs['parameters'])
+        self.report(outputs['report'], inputs=inputs, outputs=outputs)
+
+    def _get_info_dict(self, **kwargs):
+
+        if 'parameters' in kwargs.keys():
+            p = kwargs['parameters']
+        else:
+            p = self.load_dumped_pars()
+            kwargs['parameters'] = p
+
+        filepath = kwargs['outputs']['blockfiles']
+        # kwargs['props'] = get_imageprops(filepath)
+        kwargs['paths'] = get_paths(f'{filepath}/mean')
+        kwargs['centreslices'] = get_centreslices(kwargs)
+
+        return kwargs
+
+    def _gen_subgrid(self, f, gs, channel=None):
+        """Generate the axes for printing the report."""
+
+        axdict, titles = {}, {}
+        gs0 = gs.subgridspec(2, 1, height_ratios=[1, 10])
+        axdict['p'] = self._report_axes_pars(f, gs0[0])
+
+        gs01 = gs0[1].subgridspec(4, 2)
+
+        # TODO: see what is available in info_dict, or force saving intermediates, or gather cslcs in over the process
+        t = [
+            'nucl', 'memb',
+            'nucl_mask', 'memb_mask',
+            'seeds_mask', 'seeds_mask_dil',
+            'segm_seeds', 'segm',
+            ]
+        voldict = {name: {'idx': i, 'title': name} for i, name in enumerate(t)}
+
+        for k, vd in voldict.items():
+            titles[k] = (vd['title'], 'lcm', 0)
+            axdict[k] = gen_orthoplot(f, gs01[vd['idx']], 5, 1)
+
+        self._add_titles(axdict, titles)
+
+        return axdict
+
+    def _plot_images(self, f, axdict, info_dict={}):
+        """Plot graph with shading image."""
+
+        def plot_imgs(img, labels, axdict, axkey, axidx, aspect, cmap='gray', alpha=0.3, colors=None):
+
+            ax = axdict[axkey][axidx]
+            ax.axis('off')
+
+            if img is None and labels is None:
+                return
+            elif img is None:
+                img = np.zeros(labels.shape)
+
+            if dim == 'x':
+                img = img.transpose()
+
+            if labels is not None:
+                if dim == 'x':
+                    labels = labels.transpose()
+                data = label2rgb(labels, image=img, alpha=alpha, bg_label=0, colors=colors)
+            else:
+                data = img
+
+            ax.imshow(data, aspect=aspect, cmap=cmap)
+
+        def get_data(prefered, fallback, dimfac):
+            try:
+                slc = centreslices[prefered][dim] * dimfac
+                return slc
+            except (TypeError, KeyError):
+                print('{} not found: falling back to {}'.format(prefered, fallback))
+                try:
+                    slc = centreslices[fallback][dim] * dimfac
+                    return slc
+                except (TypeError, KeyError):
+                    print('{} not found: falling back to empty'.format(fallback))
+                    # TODO: empty image of correct dim
+                    return None
+
+        centreslices = info_dict['centreslices']
+
+        # aspects = ['equal', 'equal', 'equal']
+        aspects = ['equal', 'auto', 'auto']
+        for i, (dim, aspect) in enumerate(zip('zyx', aspects)):
+
+            data_nucl = get_data('nucl/prep', 'chan/ch00', dimfac=3)
+            data_memb = get_data('memb/prep', 'memb/mean', dimfac=5)
+
+            plot_imgs(data_nucl, None, axdict, 'nucl', i, aspect, 'gray')
+            plot_imgs(data_memb, None, axdict, 'memb', i, aspect, 'gray')
+
+            # segmentation:mask_dset:ods_mask
+            # segmentation:mask_nucl:ods_mask
+            try:
+                labels = centreslices['mask'][dim].astype('uint8')
+                labels[centreslices['nucl/mask'][dim]] = 2
+                plot_imgs(data_nucl, labels, axdict, 'nucl_mask', i, aspect, None, 0.5, colors=[[1, 0, 0], [0, 1, 0]])
+            except (TypeError, KeyError):
+                ax = axdict['nucl_mask'][i]
+                ax.axis('off')
+
+            # segmentation:mask_dset:ods_mask
+            # segmentation:mask_memb:ods_mask
+            try:
+                labels = centreslices['mask'][dim].astype('uint8')
+                labels[centreslices['memb/mask'][dim]] = 2
+                plot_imgs(data_memb, labels, axdict, 'memb_mask', i, aspect, None, 0.5, colors=[[1, 0, 0], [0, 1, 0]])
+            except (TypeError, KeyError):
+                ax = axdict['memb_mask'][i]
+                ax.axis('off')
+
+            # segmentation:seed:ids_mask
+            try:
+                labels = centreslices['segm/seeds_mask'][dim].astype('uint8')
+                labels[centreslices['segm/seeds_mask_dil'][dim]] = 2
+                plot_imgs(data_nucl, labels, axdict, 'seeds_mask', i, aspect, None, 0.5, colors=[[1, 0, 0], [0, 1, 0]])
+            except (TypeError, KeyError):
+                ax = axdict['seeds_mask'][i]
+                ax.axis('off')
+
+            try:
+                data_edt = centreslices['segm/seeds_mask_edt'][dim]
+                labels = centreslices['segm/seeds_mask_dil'][dim]
+                plot_imgs(data_edt, labels, axdict, 'seeds_mask_dil', i, aspect, None, 0.5, colors=None)
+            except (TypeError, KeyError):
+                ax = axdict['seeds_mask_dil'][i]
+                ax.axis('off')
+
+            # segmentation:seed:ods_labels
+            try:
+                labels = centreslices['segm/labels_edt'][dim]
+                plot_imgs(data_nucl, labels, axdict, 'segm_seeds', i, aspect, None, 0.7, colors=None)
+            except (TypeError, KeyError):
+                ax = axdict['segm_seeds'][i]
+                ax.axis('off')
+
+            # segmentation:filter:ods_labels
+            try:
+                labels = centreslices['segm/labels'][dim]
+                plot_imgs(data_memb, labels, axdict, 'segm', i, aspect, None, 0.3, colors=None)
+            except (TypeError, KeyError):
+                ax = axdict['segm'][i]
+                ax.axis('off')
+
+    def view_with_napari(self, filepath='', idss=['nucl/prep', 'memb/prep'], ldss=['segm/labels_edt', 'segm/labels'], block_idx=0):
+
+        if not filepath:
+            filepath = self._abs(self.outputpaths['estimate']['blockfiles'].format(b=block_idx))
+
+        super().view_with_napari(filepath, idss, ldss)
+
+    def view_blocks_with_napari(self, block_idxs=[0, 1], idss=['nucl/prep', 'memb/prep'], ldss=['segm/labels_edt', 'segm/labels']):
+
+        super().view_blocks_with_napari(block_idxs, idss, ldss)
 
 
 def prep_volume(filepath, step_key, pars, save_steps=True):
 
+    print(filepath, pars['ids_image'])
     image_in = '{}/{}'.format(filepath, pars['ids_image'])
     im = Image(image_in)
     im.load()
@@ -340,12 +549,14 @@ def seed_volume(filepath, step_key, pars, save_steps=True):
     mask = im.slice_dataset().astype('bool')
     im.close()
 
+    elsize = np.absolute(im.elsize)
+
     try:
         p = pars['edt']
     except KeyError:
         pass
     else:
-        edt = distance_transform_edt(mask, sampling=np.absolute(im.elsize))
+        edt = distance_transform_edt(mask, sampling=elsize)
         # mask = im.ds[:].astype('uint32')
         # edt = edt.edt(mask, anisotropy=im.elsize, black_border=True, order='F', parallel=1)
         # TODO?: leverage parallel
@@ -362,7 +573,7 @@ def seed_volume(filepath, step_key, pars, save_steps=True):
     except KeyError:
         pass
     else:
-        dog = smooth_dog(data, im.elsize, p['sigma1'], p['sigma2'])
+        dog = smooth_dog(data, elsize, p['sigma1'], p['sigma2'])
         edt *= normalize_data(dog, a=p['min'], b=p['max'])[0]
         if 'postfix' in p.keys(): write(dog, image_in, p['postfix'], im, 'Image')  # edt and/or dog?
 
@@ -416,7 +627,84 @@ def seed_volume(filepath, step_key, pars, save_steps=True):
     return im
 
 
+def seed_volume_data(pars, data, mask, elsize):
+    # TODO: unduplicate
+
+    try:
+        p = pars['edt']
+    except KeyError:
+        pass
+    else:
+        edt = distance_transform_edt(mask, sampling=elsize)
+        try:
+            threshold = p['threshold']
+        except KeyError:
+            pass
+        else:
+            edt[edt > threshold] = 0
+
+    try:
+        p = pars['modulate']
+    except KeyError:
+        pass
+    else:
+        dog = smooth_dog(data, elsize, p['sigma1'], p['sigma2'])
+        edt *= normalize_data(dog, a=p['min'], b=p['max'])[0]
+
+    try:
+        p = pars['edt_threshold']
+    except KeyError:
+        pass
+    else:
+        mask = edt > pars['edt_threshold']
+
+    try:
+        p = pars['peaks']
+    except KeyError:
+        pass
+    else:
+        mask = find_local_maxima(edt, p['window'], p['threshold'])
+        try:
+            footprint = p['dilate']['footprint']
+        except KeyError:
+            pass
+        else:
+            footprint = create_footprint(footprint)
+            mask_dil = binary_dilation(mask, selem=footprint)
+
+    try:
+        p = pars['label']
+    except KeyError:
+        pass
+    else:
+        seeds = ndi.label(mask)[0]
+
+    try:
+        p = pars['seeds']
+    except KeyError:
+        pass
+    else:
+        if 'threshold' in p.keys():
+            thr = p['threshold']
+        elif 'threshold' in pars['seeds'].keys():
+            thr = pars['seeds']['threshold']
+        else:
+            thr = 0
+        seeds = watershed(-edt, seeds, mask=edt > thr)
+
+    return seeds
+
+
 def segment_volume(filepath, step_key, pars, save_steps=True):
+
+    if 'ids_mask' in pars.keys():
+        image_in = '{}/{}'.format(filepath, pars['ids_mask'])
+        im = Image(image_in)
+        im.load()
+        mask = im.slice_dataset()
+        im.close()
+    else:
+        mask = None
 
     image_in = '{}/{}'.format(filepath, pars['ids_image'])
     im = Image(image_in)
@@ -430,38 +718,15 @@ def segment_volume(filepath, step_key, pars, save_steps=True):
     seeds = im.slice_dataset()
     im.close()
 
+    elsize = np.absolute(im.elsize)
+
     try:
         p = pars['watershed']
     except KeyError:
         pass
     else:
-        if 'ids_mask' in p.keys():
-            image_in = '{}/{}'.format(filepath, p['ids_mask'])
-            im = Image(image_in)
-            im.load()
-            mask = im.slice_dataset()
-            im.close()
-        else:
-            mask = None
 
-        if 'invert_data' in p.keys():
-            data = -data
-
-        if 'voxel_spacing' in p.keys():
-            spacing = p['voxel_spacing']
-        else:
-            spacing = im.elsize
-
-        if 'compactness' in p.keys():
-            compactness = p['compactness']
-        else:
-            compactness = 0.0
-
-        try:
-            ws = watershed(data, seeds, mask=mask, compactness=compactness, spacing=spacing)
-        except TypeError:
-            print('WARNING: possibly not using correct spacing for compact watershed')
-            ws = watershed(data, seeds, mask=mask, compactness=compactness)
+        ws = segment_volume_data(pars, data, seeds, mask, elsize)
 
         if 'ids_mask_post' in p.keys():
             image_in = '{}/{}'.format(filepath, p['ids_mask_post'])
@@ -476,6 +741,36 @@ def segment_volume(filepath, step_key, pars, save_steps=True):
     im = write(ws, '{}/'.format(filepath), pars['ods_labels'], im, 'Label')
 
     return im
+
+
+def segment_volume_data(pars, data, seeds, mask, elsize):
+
+    try:
+        p = pars['watershed']
+    except KeyError:
+        pass
+    else:
+
+        if 'invert_data' in p.keys():
+            data = -data
+
+        if 'voxel_spacing' in p.keys():
+            spacing = p['voxel_spacing']
+        else:
+            spacing = elsize
+
+        if 'compactness' in p.keys():
+            compactness = p['compactness']
+        else:
+            compactness = 0.0
+
+        try:
+            ws = watershed(data, seeds, mask=mask, compactness=compactness, spacing=spacing)
+        except TypeError:
+            print('WARNING: possibly not using correct spacing for compact watershed')
+            ws = watershed(data, seeds, mask=mask, compactness=compactness)
+
+        return ws
 
 
 def filter_segments(filepath, step_key, pars, save_steps=True):
@@ -510,9 +805,155 @@ def filter_segments(filepath, step_key, pars, save_steps=True):
 
     im = write(ws, '{}/'.format(filepath), pars['ods_labels'], im, 'Label')
 
-    generate_report('{}/mean'.format(filepath, 'mean'))
+    # generate_report('{}/mean'.format(filepath, 'mean'))
 
     return im
+
+
+def resegment_largelabels(filepath, step_key, pars, save_steps=True):
+
+    image_in = '{}/{}'.format(filepath, pars['ids_labels'])
+    im = Image(image_in)
+    im.load()
+    labels = im.slice_dataset()
+    im.close()
+
+    try:
+        p = pars['thresholds']
+    except KeyError:
+        pass
+    else:
+
+        thresholds = p
+        elsize = np.absolute(im.elsize)
+
+        if 'ero_distances_1' in pars.keys():
+            ero_distances = pars['ero_distances_1']
+            dil_distances = [ero_dist - elsize[im.axlab.index('z')] for ero_dist in ero_distances]
+            labels = iterative_label_splitter(labels, elsize, thresholds, ero_distances, dil_distances)
+
+        if 'ids_memb' in pars.keys():
+            ids_memb = pars['ids_memb']
+            ero_thresholds = pars['ero_thresholds']
+            dil_distances = pars['dil_distances']
+            labels = iterative_label_splitter(labels, elsize, thresholds, ero_thresholds, dil_distances, filepath, ids_memb)
+
+        if 'ero_distances_2' in pars.keys():
+            ero_distances = pars['ero_distances_2']
+            dil_distances = [ero_dist - elsize[im.axlab.index('z')] for ero_dist in ero_distances]
+            labels = iterative_label_splitter(labels, elsize, thresholds, ero_distances, dil_distances)
+
+        # if 'postfix' in p.keys(): write(ws, image_in, p['postfix'], im, 'Mask')
+
+    im = write(labels, '{}/'.format(filepath), pars['ods_labels'], im, 'Label')
+
+    return im
+
+
+def iterative_label_splitter(labels, elsize, thresholds, ero_distances, dil_distances, filepath='', ids=''):
+
+    for ero_dist, dil_dist in zip(ero_distances, dil_distances):
+
+        labels, labels_large = split_labels(labels, thresholds[1], thresholds[2])
+
+        mask = reduced_mask(labels_large, elsize, ero_dist, filepath, ids)
+        relabeled = ndi.label(mask)[0]
+        relabeled = remove_small_objects(relabeled, thresholds[0])
+        relabeled = expand_labels(relabeled, elsize, dil_dist)
+
+        mask = relabeled.astype('bool')
+        relabeled[mask] += np.amax(labels)
+        labels[mask] = relabeled[mask]
+
+    return labels
+
+
+def split_labels(labels, threshold_small, threshold_large):
+    """Split labels in normal-sized and large-sized; discard small."""
+
+    labels = remove_small_objects(labels, threshold_small)
+    labels_large = remove_small_objects(labels, threshold_large)
+    labels[labels_large.astype('bool')] = 0
+    return labels, labels_large
+
+
+def reduced_mask(labels, elsize, ero_val, filepath='', ids=''):
+    if filepath:  # ero_val is membrane threshold
+        mask_memb = read_vol(filepath, ids) > ero_val
+        mask = np.logical_and(labels.astype('bool'), ~mask_memb)
+    else:  # ero_val is distance
+        fp_zyx = dist_to_extent(ero_val, elsize)
+        print('fp_extent', fp_zyx)
+        selem = create_footprint(fp_zyx)
+        mask = binary_erosion(labels.astype('bool'), selem=selem)
+    return mask
+
+
+def dist_to_extent(dist, elsize):
+    ero_vox = [np.ceil(dist / es) * 2 for es in elsize]
+    ero_vox_odd = [int(np.floor(ev / 2) * 2 + 1) for ev in ero_vox]
+    return ero_vox_odd
+
+
+# def get_distances(fp_size_z, elsize):
+#     anis_fac = np.floor(elsize['z'] / elsize['x'])
+#     print('anis_fac', anis_fac)
+#     extent = [int(fp_size_z), int(fp_size_z * anis_fac), int(fp_size_z * anis_fac)]
+#     distance = ( (extent[2] - anis_fac * 2) / 2) * elsize['x']
+#     # FIXME: may not be general: choose distance a bit smaller than erosion footprint
+#     return extent, distance
+
+
+# def seg_large(mask, elsize, dil_dist, thresholds=[50, 3000, 50000]):
+#     seeds = ndi.label(mask)[0]  # relabel
+#     seeds = remove_small_objects(seeds, thresholds[0])  # remove specks
+#     seeds = expand_labels(seeds, elsize, dil_dist)  # refill mask
+#     seeds, labels_large = split_labels(seeds, thresholds[1], thresholds[2])  # split normal / large
+#     return seeds#, labels_large
+
+
+# def add_labels(labels, labels_new):
+#     """Add new labels to a label_image."""
+#     mask = labels_new.astype('bool')
+#     labels_new[mask] += np.amax(labels)
+#     labels[mask] = labels_new[mask]
+#     return labels
+
+
+def read_vol(filepath, ids):
+    im = Image('{}/{}'.format(filepath, ids), permission='r')
+    im.load()
+    vol = im.slice_dataset()
+    im.close()
+    return vol
+
+
+# def write(vol, filepath, ids, props):
+#     im = Image('{}/{}'.format(filepath, ids), permission='r+', **props)
+#     im.create()
+#     im.write(vol)
+#     im.close()
+
+
+def expand_labels(label_image, sampling, distance=1):
+    # adapted for anisotropy from scikit-image expand_labels
+    import numpy as np
+    from scipy.ndimage import distance_transform_edt
+    distances, nearest_label_coords = distance_transform_edt(
+        label_image == 0, sampling=sampling, return_indices=True
+    )
+    labels_out = np.zeros_like(label_image)
+    dilate_mask = distances <= distance
+    # build the coordinates to find nearest labels,
+    # in contrast to [1] this implementation supports label arrays
+    # of any dimension
+    masked_nearest_label_coords = [
+        dimension_indices[dilate_mask]
+        for dimension_indices in nearest_label_coords
+    ]
+    nearest_labels = label_image[tuple(masked_nearest_label_coords)]
+    labels_out[dilate_mask] = nearest_labels
+    return labels_out
 
 
 def normalize_data(data, a=1.00, b=1.01):
@@ -682,6 +1123,7 @@ def upsample_to_block(mask_ds, block_us, dsfacs=[1, 16, 16, 1], order=0):
     """Upsample a low-res mask to a full-res block."""
 
     comps = block_us.split_path()
+    from stapl3d import split_filename
     block_info = split_filename(comps['file'])[0]
     slices_us = [slice(block_info['z'], block_info['Z'], None),
                  slice(block_info['y'], block_info['Y'], None),
@@ -758,303 +1200,283 @@ def csol_mask(labels, mask_nucl, mask_memb):
     return mask_csol
 
 
-def subsegment(
-    image_in,
-    parameter_file,
-    step_id='subsegment',
-    outputdir='',
-    n_workers=0,
-    blocks=[],
-    ids_labels='segm/labels_zip',
-    ids_nucl_mask='nucl/mask',
-    ids_memb_mask='',
-    ids_csol_mask='',
-    ods_full='',
-    ods_memb='',
-    ods_nucl='',
-    ods_csol='',
-    footprint_memb=None,
-    ):
-    """Perform N4 bias field correction."""
+class Subsegment3r(Block3r):
+    """Subdivide cells in compartments."""
 
-    outputdir = get_outputdir(image_in, parameter_file, outputdir, step_id, 'blocks')
+    def __init__(self, image_in='', parameter_file='', **kwargs):
 
-    params = get_params(locals().copy(), parameter_file, step_id)
-    subparams = get_params(locals().copy(), parameter_file, step_id, 'submit')
+        if 'module_id' not in kwargs.keys():
+            kwargs['module_id'] = 'subsegmentation'
 
-    filepaths, blocks = get_blockfiles(image_in, outputdir, params['blocks'])
+        super(Subsegment3r, self).__init__(
+            image_in, parameter_file,
+            **kwargs,
+            )
 
-    arglist = [
-        (
-            filepath,
-            params['ids_labels'],
-            params['ids_nucl_mask'],
-            params['ids_memb_mask'],
-            params['ids_csol_mask'],
-            params['ods_full'],
-            params['ods_memb'],
-            params['ods_nucl'],
-            params['ods_csol'],
-            params['footprint_memb'],
-            step_id,
-            outputdir,
-        )
-        for block_idx, filepath in zip(blocks, filepaths)]
+        self._fun_selector.update({
+            'estimate': self.estimate,
+            })
 
-    n_workers = get_n_workers(len(blocks), subparams)
-    with multiprocessing.Pool(processes=n_workers) as pool:
-        pool.starmap(split_segments, arglist)
+        self._parallelization.update({
+            'estimate': ['blocks'],
+            })
 
+        self._parameter_sets.update({
+            'estimate': {
+                'fpar': self._FPAR_NAMES,
+                'ppar': (),
+                'spar': ('_n_workers', 'blocks'),
+                },
+            })
 
-def split_segments(
-    inputfile,
-    ids_labels='segm/labels_zip',
-    ids_nucl_mask='nucl/mask',
-    ids_memb_mask='',
-    ids_csol_mask='',
-    ods_full='',
-    ods_memb='',
-    ods_nucl='',
-    ods_csol='',
-    footprint_memb=None,
-    step_id='subsegment',
-    outputdir='',
-    ):
+        # TODO
+        self._parameter_table.update({
+            })
 
-    label_im = LabelImage('{}/{}'.format(inputfile, ids_labels))
-    label_im.load(load_data=False)
-    try:
-        del label_im.file[ods_full]
-    except KeyError:
-        pass
-    label_im.file[ods_full] = label_im.file[ids_labels]
-    labels = label_im.slice_dataset()
-    label_im.close()
+        default_attr = {
+            'ids_labels': 'segm/labels_zip',
+            'ids_nucl_mask': 'nucl/mask',
+            'ids_memb_mask': '',
+            'ids_csol_mask': '',
+            'ods_full': '',
+            'ods_memb': '',
+            'ods_nucl': '',
+            'ods_csol': '',
+            'footprint_memb': None,
+        }
+        for k, v in default_attr.items():
+            setattr(self, k, v)
 
-    def read_mask(inputfile, ids):
-        im = MaskImage('{}/{}'.format(inputfile, ids), permission='r')
-        im.load()
-        mask = im.slice_dataset().astype('bool')
-        im.close()
-        return mask
+        for step in self._fun_selector.keys():
+            step_id = 'blocks' if step=='blockinfo' else self.step_id
+            self.set_parameters(step, step_id=step_id)
 
-    def write_masked(label_im, inputfile, ods, labels, mask):
-        outstem = '{}/{}'.format(inputfile, ods)
-        labs = np.copy(labels)
-        labs[~mask.astype('bool')] = 0
-        write(labs, outstem, '', label_im, imtype='Label')
+        self._init_paths_subsegmenter()
 
-    if ods_memb:
-        if ids_memb_mask:
-            mask_memb = read_mask(inputfile, ids_memb_mask)
-        else:
-            mask_memb = memb_mask(labels, footprint_memb)
-        write_masked(label_im, inputfile, ods_memb, labels, mask_memb)
+        self._init_log()
 
-    if ods_nucl:
-        if ids_nucl_mask:
-            mask_nucl = read_mask(inputfile, ids_nucl_mask)
-        else:
-            mask_nucl = nucl_mask(labels)
-        write_masked(label_im, inputfile, ods_nucl, labels, mask_nucl)
+        self._prep_blocks()
 
-    if ods_csol:
-        if ids_csol_mask:
-            mask_csol = read_mask(inputfile, ids_csol_mask)
-        else:
-            mask_csol = csol_mask(labels, mask_nucl, mask_memb)
-        write_masked(label_im, inputfile, ods_csol, labels, mask_csol)
+    def _init_paths_subsegmenter(self):
 
+        prev_path = {
+            'moduledir': 'zipping', 'module_id': 'zipping',
+            'step_id': 'zipping', 'step': 'estimate',
+            'ioitem': 'outputs', 'output': 'blockfiles',
+            }
+        bpat = self._get_inpath(prev_path)
+        if bpat == 'default':
+            os.makedirs('blocks', exist_ok=True)
+            bpat = self._build_path(moduledir='blocks', prefixes=[self.prefix, 'blocks'], suffixes=[{'b': 'p'}])
 
-def plot_images(axs, info_dict={}):
-    """Show images in report."""
+        self._paths.update({
+            'estimate': {
+                'inputs': {
+                    'blockfiles': f'{bpat}',
+                    },
+                'outputs': {
+                    'blockfiles': f'{bpat}',
+                    'report': f'{bpat}_subsegment.pdf',  # TODO: take out .h5 from filename
+                    }
+                },
+            })
 
-    def get_data(prefered, fallback, dimfac):
+        for step in self._fun_selector.keys():
+            step_id = 'blocks' if step=='blockinfo' else self.step_id
+            self.inputpaths[step]  = self._merge_paths(self._paths[step], step, 'inputs', step_id)
+            self.outputpaths[step] = self._merge_paths(self._paths[step], step, 'outputs', step_id)
 
+    def estimate(self, **kwargs):
+        """Subdivide cells in compartments."""
+
+        arglist = self._prep_step('estimate', kwargs)
+        with multiprocessing.Pool(processes=self._n_workers) as pool:
+            pool.starmap(self._estimate_block, arglist)
+
+    def _estimate_block(self, block):
+        """Subdivide cells in compartments."""
+
+        block = self._blocks[block]
+        inputs = self._prep_paths(self.inputs, reps={'b': block.idx})
+        outputs = self._prep_paths(self.outputs, reps={'b': block.idx})
+
+        inputfile = inputs['blockfiles'].format(b=block)
+
+        label_im = LabelImage('{}/{}'.format(inputfile, self.ids_labels))
+        label_im.load(load_data=False)
         try:
-            slc = centreslices[prefered][dim] * dimfac
-            return slc
-        except (TypeError, KeyError):
-            print('{} not found: falling back to {}'.format(prefered, fallback))
+            del label_im.file[self.ods_full]
+        except KeyError:
+            pass
+        label_im.file[self.ods_full] = label_im.file[self.ids_labels]
+        labels = label_im.slice_dataset()
+        label_im.close()
+
+        def read_mask(inputfile, ids):
+            im = MaskImage('{}/{}'.format(inputfile, ids), permission='r')
+            im.load()
+            mask = im.slice_dataset().astype('bool')
+            im.close()
+            return mask
+
+        def write_masked(label_im, inputfile, ods, labels, mask):
+            outstem = '{}/{}'.format(inputfile, ods)
+            labs = np.copy(labels)
+            labs[~mask.astype('bool')] = 0
+            write(labs, outstem, '', label_im, imtype='Label')
+
+        if self.ods_memb:
+            if self.ids_memb_mask:
+                mask_memb = read_mask(inputfile, self.ids_memb_mask)
+            else:
+                mask_memb = memb_mask(labels, self.footprint_memb)
+            write_masked(label_im, inputfile, self.ods_memb, labels, mask_memb)
+
+        if self.ods_nucl:
+            if self.ids_nucl_mask:
+                mask_nucl = read_mask(inputfile, self.ids_nucl_mask)
+            else:
+                mask_nucl = nucl_mask(labels)
+            write_masked(label_im, inputfile, self.ods_nucl, labels, mask_nucl)
+
+        if self.ods_csol:
+            if self.ids_csol_mask:
+                mask_csol = read_mask(inputfile, self.ids_csol_mask)
+            else:
+                mask_csol = csol_mask(labels, mask_nucl, mask_memb)
+            write_masked(label_im, inputfile, self.ods_csol, labels, mask_csol)
+
+        # self.dump_parameters(self.step, outputs['parameters'])
+        self.report(outputs['report'], inputs=inputs, outputs=outputs)
+
+    def _get_info_dict(self, **kwargs):
+
+        if 'parameters' in kwargs.keys():
+            p = kwargs['parameters']
+        else:
+            p = self.load_dumped_pars()
+            kwargs['parameters'] = p
+
+        filepath = kwargs['outputs']['blockfiles']
+        # kwargs['props'] = get_imageprops(filepath)
+        kwargs['paths'] = get_paths(f'{filepath}/mean')
+        kwargs['centreslices'] = get_centreslices(kwargs)
+
+        return kwargs
+
+    def _gen_subgrid(self, f, gs, channel=None):
+        """Generate the axes for printing the report."""
+
+        axdict, titles = {}, {}
+        gs0 = gs.subgridspec(2, 1, height_ratios=[1, 10])
+        axdict['p'] = self._report_axes_pars(f, gs0[0])
+
+        gs01 = gs0[1].subgridspec(4, 2)
+
+        t = [
+            'nucl', 'memb',
+            'nucl_mask', 'memb_mask',
+            'seeds_mask', 'seeds_mask_dil',
+            'segm_seeds', 'segm',
+            ]
+        voldict = {name: {'idx': i, 'title': name} for i, name in enumerate(t)}
+
+        for k, vd in voldict.items():
+            titles[k] = (vd['title'], 'lcm', 0)
+            axdict[k] = gen_orthoplot(f, gs01[vd['idx']], 5, 1)
+
+        self._add_titles(axdict, titles)
+
+        return axdict
+
+    def _plot_images(self, f, axdict, info_dict={}):
+        """Plot graph with shading image."""
+
+        def plot_imgs(img, labels, axdict, axkey, axidx, aspect, cmap='gray', alpha=0.3, colors=None):
+
+            if dim == 'x':
+                img = img.transpose()
+
+            if labels is not None:
+                if dim == 'x':
+                    labels = labels.transpose()
+                data = label2rgb(labels, image=img, alpha=alpha, bg_label=0, colors=colors)
+            else:
+                data = img
+
+            ax = axdict[axkey][axidx]
+            ax.imshow(data, aspect=aspect, cmap=cmap)
+            ax.axis('off')
+
+        def get_data(prefered, fallback, dimfac):
             try:
-                slc = centreslices[fallback][dim] * dimfac
+                slc = centreslices[prefered][dim] * dimfac
                 return slc
             except (TypeError, KeyError):
-                print('{} not found: falling back to empty'.format(fallback))
-                # TODO: empty image of correct dim
-                return None
+                print('{} not found: falling back to {}'.format(prefered, fallback))
+                try:
+                    slc = centreslices[fallback][dim] * dimfac
+                    return slc
+                except (TypeError, KeyError):
+                    print('{} not found: falling back to empty'.format(fallback))
+                    # TODO: empty image of correct dim
+                    return None
 
-    centreslices = info_dict['centreslices']
-    meds = info_dict['medians']
-    vmax = info_dict['plotinfo']['vmax']
+        centreslices = info_dict['centreslices']
 
-    aspects = ['equal', 'equal', 'equal']
-    aspects = ['equal', 'auto', 'auto']
-    for i, (dim, aspect) in enumerate(zip('zyx', aspects)):
+        # aspects = ['equal', 'equal', 'equal']
+        aspects = ['equal', 'auto', 'auto']
+        for i, (dim, aspect) in enumerate(zip('zyx', aspects)):
 
-        data_nucl = get_data('nucl/prep', 'chan/ch00', dimfac=3)
-        data_memb = get_data('memb/prep', 'memb/mean', dimfac=5)
-        if data_memb is None:
-            data_memb = np.zeros(data_nucl.shape)
+            data_nucl = get_data('nucl/prep', 'chan/ch00', dimfac=3)
+            data_memb = get_data('memb/prep', 'memb/mean', dimfac=5)
+            if data_memb is None:
+                data_memb = np.zeros(data_nucl.shape)
 
-        if dim == 'x':
-            data_nucl = data_nucl.transpose()
-            data_memb = data_memb.transpose()
+            plot_imgs(data_nucl, None, axdict, 'nucl', i, aspect, 'gray')
+            plot_imgs(data_memb, None, axdict, 'memb', i, aspect, 'gray')
 
-        axs[0][i].imshow(data_nucl, aspect=aspect, cmap='gray')
-        axs[4][i].imshow(data_memb, aspect=aspect, cmap='gray')
+            try:
 
-        try:
+                data_edt = centreslices['segm/seeds_mask_edt'][dim]
 
-            data_edt = centreslices['segm/seeds_mask_edt'][dim]
+                labels = centreslices['mask'][dim].astype('uint8')
+                labels[centreslices['nucl/mask'][dim]] = 2
+                plot_imgs(data_nucl, labels, axdict, 'nucl_mask', i, aspect, None, 0.5, colors=[[1, 0, 0], [0, 1, 0]])
 
-            if dim == 'x':
-                data_edt = data_edt.transpose()
+                labels = centreslices['mask'][dim].astype('uint8')
+                labels[centreslices['memb/mask'][dim]] = 2
+                plot_imgs(data_memb, labels, axdict, 'memb_mask', i, aspect, None, 0.5, colors=[[1, 0, 0], [0, 1, 0]])
 
-            # labels = centreslices['nucl/mask'][dim]
-            labels = centreslices['mask'][dim].astype('uint8')
-            labels[centreslices['nucl/mask'][dim]] = 2
-            if dim == 'x':
-                labels = labels.transpose()
-            clabels = label2rgb(labels, image=data_nucl, alpha=0.5, bg_label=0, colors=[[1, 0, 0], [0, 1, 0]])
-            axs[1][i].imshow(clabels, aspect=aspect)
+                labels = centreslices['segm/seeds_mask'][dim].astype('uint8')
+                labels[centreslices['segm/seeds_mask_dil'][dim]] = 2
+                plot_imgs(data_nucl, labels, axdict, 'seeds_mask', i, aspect, None, 0.5, colors=[[1, 0, 0], [0, 1, 0]])
 
-            # labels = centreslices['memb/mask'][dim]
-            labels = centreslices['mask'][dim].astype('uint8')
-            labels[centreslices['memb/mask'][dim]] = 2
-            if dim == 'x':
-                labels = labels.transpose()
-            clabels = label2rgb(labels, image=data_memb, alpha=0.5, bg_label=0, colors=[[1, 0, 0], [0, 1, 0]])
-            axs[5][i].imshow(clabels, aspect=aspect)
+                labels = centreslices['segm/seeds_mask_dil'][dim]
+                plot_imgs(data_edt, labels, axdict, 'seeds_mask_dil', i, aspect, None, 0.5, colors=None)
 
-            labels = centreslices['segm/seeds_mask'][dim].astype('uint8')
-            labels[centreslices['segm/seeds_mask_dil'][dim]] = 2
-            if dim == 'x':
-                labels = labels.transpose()
-            clabels = label2rgb(labels, image=data_nucl, alpha=0.5, bg_label=0, colors=[[1, 0, 0], [0, 1, 0]])
-            axs[2][i].imshow(clabels, aspect=aspect)
+                labels = centreslices['segm/labels_edt'][dim]
+                plot_imgs(data_nucl, labels, axdict, 'segm_seeds', i, aspect, None, 0.7, colors=None)
 
-            labels = centreslices['segm/seeds_mask_dil'][dim]
-            if dim == 'x':
-                labels = labels.transpose()
-            clabels = label2rgb(labels, image=data_edt, alpha=0.5, bg_label=0, colors=None)
-            axs[6][i].imshow(clabels, aspect=aspect)
+                labels = centreslices['segm/labels'][dim]
+                plot_imgs(data_memb, labels, axdict, 'segm', i, aspect, None, 0.3, colors=None)
 
-            labels = centreslices['segm/labels_edt'][dim]
-            if dim == 'x':
-                labels = labels.transpose()
-            clabels = label2rgb(labels, image=data_nucl, alpha=0.7, bg_label=0, colors=None)
-            axs[3][i].imshow(clabels, aspect=aspect)
+            except (TypeError, KeyError):
+                print('not all steps were found: generating simplified report')
 
-            labels = centreslices['segm/labels'][dim]
-            if dim == 'x':
-                labels = labels.transpose()
-            clabels = label2rgb(labels, image=data_memb, alpha=0.3, bg_label=0, colors=None)
-            axs[7][i].imshow(clabels, aspect=aspect)
+                labels = centreslices['segm/labels'][dim]
+                plot_imgs(data_memb, labels, axdict, 'segm', i, aspect, None, 0.3, colors=None)
 
-        except (TypeError, KeyError):
-            print('not all steps were found: generating simplified report')
+    def view_with_napari(self, filepath='', idss=['nucl/prep'], ldss=['segm/labels_full', 'segm/labels_nucl', 'segm/labels_memb', 'segm/labels_csol'], block_idx=0):
 
-            labels = centreslices['segm/labels'][dim]
-            if dim == 'x':
-                labels = labels.transpose()
-            clabels = label2rgb(labels, image=data_memb, alpha=0.3, bg_label=0)
-            axs[7][i].imshow(clabels, aspect=aspect)
+        if not filepath:
+            filepath = self._abs(self.outputpaths['estimate']['blockfiles'].format(b=block_idx))
 
-        for a in axs:
-            a[i].axis('off')
+        super().view_with_napari(filepath, idss, ldss)
 
+    def view_blocks_with_napari(self, block_idxs=[0, 1], idss=['nucl/prep'], ldss=['segm/labels_full', 'segm/labels_nucl', 'segm/labels_memb', 'segm/labels_csol']):
 
-def add_titles(axs, info_dict):
-    """Add plot titles to upper row of plot grid."""
-
-    # TODO
-    return
-
-
-def gen_orthoplot(f, gs):
-    """Create axes on a subgrid to fit three orthogonal projections."""
-
-    axs = []
-    size_xy = 5
-    size_z = 5
-    size_t = size_xy + size_z
-
-    gs_sub = gs.subgridspec(size_t, size_t)
-
-    # central: yx-image
-    axs.append(f.add_subplot(gs_sub[:size_xy, :size_xy]))
-    # middle-bottom: zx-image
-    axs.append(f.add_subplot(gs_sub[size_xy:, :size_xy], sharex=axs[0]))
-    # right-middle: zy-image
-    axs.append(f.add_subplot(gs_sub[:size_xy, size_xy:], sharey=axs[0]))
-
-    return axs
-
-
-def generate_report(image_in, info_dict={}, ioff=True):
-    """Generate a QC report of the segmentation process."""
-
-    report_type = 'seg'
-
-    # Turn interactive plotting on/off.
-    if ioff:
-        plt.ioff()
-    else:
-        plt.ion()
-
-    # Get paths from image if info_dict not provided.
-    if not info_dict:
-        im = Image(image_in)
-        info_dict['paths'] = im.split_path()  # FIXME: out_base
-        info_dict['paths']['out_base'] = info_dict['paths']['base']
-        im.close()
-        info_dict['parameters'] = load_parameters(info_dict['paths']['out_base'])
-        info_dict['centreslices'] = get_centreslices(info_dict, idss=[
-            'mask',
-            'chan/ch00',
-            'memb/mask',
-            'memb/mean',
-            'memb/prep',
-            'nucl/mask',
-            'nucl/prep',
-            'segm/seeds_mask',
-            'segm/seeds_mask_edt',
-            'segm/seeds_mask_dil',
-            'segm/labels',
-            'segm/labels_edt',
-            'segm/labels_edt_ws0',
-            ])
-        info_dict['medians'] = {}
-
-
-    # Create the axes.
-    figsize = (18, 9)
-    gridsize = (2, 4)
-    f = plt.figure(figsize=figsize, constrained_layout=False)
-    gs0 = gridspec.GridSpec(gridsize[0], gridsize[1], figure=f)
-    axs = [gen_orthoplot(f, gs0[j, i]) for j in range(0, 2) for i in range(0, 4)]
-
-    # Plot the images and graphs. vmaxs = [15000] + [5000] * 7
-    info_dict['plotinfo'] = {'vmax': 10000}
-    plot_images(axs, info_dict)
-
-    # Add annotations and save as pdf.
-    header = 'mLSR-3D Quality Control'
-    figtitle = '{}: {} \n {}'.format(
-        header,
-        report_type,
-        info_dict['paths']['fname']
-        )
-    figpath = '{}_{}.pdf'.format(
-        info_dict['paths']['out_base'],
-        report_type
-        )
-    f.suptitle(figtitle, fontsize=14, fontweight='bold')
-    add_titles(axs, info_dict)
-    f.savefig(figpath)
-
-    info_dict.clear()
+        super().view_blocks_with_napari(block_idxs, idss, ldss)
 
 
 if __name__ == "__main__":
