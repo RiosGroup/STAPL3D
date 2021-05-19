@@ -150,6 +150,7 @@ class Masker(Stapl3r):
                 'outputs': {
                     **{ods: f'{stem}.h5/{ods}' for ods in vols},
                     **{'report': f'{stem}.pdf'},
+                    **{'file': f'{stem}.h5'},
                     },
                 },
             }
@@ -373,6 +374,13 @@ class Masker(Stapl3r):
         ax.plot(info_dict['parameters']['thresholds_slicewise'],
                 color='k', linewidth=1, linestyle='-')
         ax.set_xlabel('section index', fontsize=7, loc='right')
+
+    def view_with_napari(self, filepath='', idss=['mean', 'smooth'], ldss=['mask']):
+
+        if not filepath:
+            filepath = self._abs(self.outputpaths['estimate']['file'])
+
+        super().view_with_napari(filepath, idss, ldss)
 
 
 def extract_resolution_level(image_in, resolution_level=-1):
