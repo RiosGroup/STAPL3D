@@ -235,6 +235,18 @@ class Enhanc3r(Block3r):
                 except FileNotFoundError:
                     pass
 
+    def view_with_napari(self, filepath='', idss=['memb/mean', 'memb/ACME_preprocess', 'memb/ACME_planarity'], ldss=[], block_idx=0):
+
+        # TODO: self.ids_membrane etc
+        if not filepath:
+            filepath = self._abs(self.outputpaths['estimate']['blockfiles'].format(b=block_idx))
+
+        super().view_with_napari(filepath, idss, ldss)
+
+    def view_blocks_with_napari(self, block_idxs=[0, 1], idss=['memb/mean', 'memb/ACME_preprocess', 'memb/ACME_planarity'], ldss=[]):
+
+        super().view_blocks_with_napari(block_idxs, idss, ldss)
+
 
 if __name__ == "__main__":
     main(sys.argv[1:])
