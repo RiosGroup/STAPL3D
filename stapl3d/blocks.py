@@ -92,8 +92,8 @@ class Block3r(Stapl3r):
         self._parameter_sets = {
             'blockinfo': {
                 'fpar': self._FPAR_NAMES,
-                'ppar': ('blocksize_xy', 'blockmargin_xy', 'fullsize'),
-                'spar': ('_n_workers', 'blocksize', 'blockmargin', 'blocks'),
+                'ppar': ('fullsize', 'blocksize', 'blockmargin'),  # 'blocksize_xy', 'blockmargin_xy',
+                'spar': ('_n_workers', 'blocks'),
                 },
             }
 
@@ -103,8 +103,6 @@ class Block3r(Stapl3r):
         }
 
         default_attr = {
-            'blocksize_xy': 640,
-            'blockmargin_xy': 64,
             'blocksize': {},
             'blockmargin': {},
             'fullsize': {},
@@ -119,12 +117,14 @@ class Block3r(Stapl3r):
             step_id = 'blocks' if step=='blockinfo' else self.step_id
             self.set_parameters(step)
 
-        print('bs', self.blocksize)
         self._init_paths()
 
         self._init_log()
 
         self._prep_blocks()
+
+        self._images = []
+        self._labels = []
 
     def _init_paths(self):
 
@@ -153,7 +153,8 @@ class Block3r(Stapl3r):
         arglist = self._prep_step('blockinfo', kwargs)
         for i, block in enumerate(self._blocks):
             if i in self.blocks:
-                print(f'Block {i:05d} with id {block.id} refers to region {block.slices}')
+                pass
+                # print(f'Block {i:05d} with id {block.id} refers to region {block.slices}')
 
     def _prep_blocks(self):
 
@@ -184,17 +185,16 @@ class Block3r(Stapl3r):
 
     def set_blocksize(self, blocksize={}):
 
-        bs_xy = {d: self.blocksize_xy for d in 'xy' if self.blocksize_xy}
-
-        self.blocksize = {**self.fullsize, **bs_xy, **self.blocksize, **blocksize}
+        # bs_xy = {d: self.blocksize_xy for d in 'xy' if self.blocksize_xy}
+        # self.blocksize = {**self.fullsize, **bs_xy, **self.blocksize, **blocksize}
+        self.blocksize = {**self.fullsize, **self.blocksize, **blocksize}
 
     def set_blockmargin(self, blockmargin={}):
 
         bm_im = {d: 0 for d in self.blocksize.keys()}
-
-        bm_xy = {d: self.blockmargin_xy for d in 'xy' if self.blockmargin_xy}
-
-        self.blockmargin = {**bm_im, **bm_xy, **self.blockmargin, **blockmargin}
+        # bm_xy = {d: self.blockmargin_xy for d in 'xy' if self.blockmargin_xy}
+        # self.blockmargin = {**bm_im, **bm_xy, **self.blockmargin, **blockmargin}
+        self.blockmargin = {**bm_im, **self.blockmargin, **blockmargin}
 
     def set_blocks(self, block_template, axlab='zyxct', blocks0=False):
         # TODO: flexible axlab order
@@ -317,6 +317,19 @@ class Block3r(Stapl3r):
 
         return filepaths
 
+    def view(self, input=[], images=[], labels=[], settings={}):
+
+        images = images or self._images
+
+        if isinstance(input, str):
+            super().view(input, images, labels, settings)
+        elif type(input) == int or float:
+            filepath = self._abs(self.outputpaths['blockinfo']['blockfiles'].format(b=input))
+            super().view(filepath, images, labels, settings)
+        else:
+            input = input or [0, 1]
+            super().view_blocks(input, images, labels, settings)
+
 
 class Splitt3r(Block3r):
     """Block splitting."""
@@ -342,7 +355,7 @@ class Splitt3r(Block3r):
         self._parameter_sets.update({
             'split': {
                 'fpar': self._FPAR_NAMES,
-                'ppar': ('outputvolumes', 'output_ND', 'datatype', 'chunksize'),
+                'ppar': ('volumes', 'output_ND', 'datatype', 'chunksize'),
                 'spar': ('_n_workers', 'blocksize', 'blockmargin', 'blocks'),
                 },
             })
@@ -351,7 +364,7 @@ class Splitt3r(Block3r):
             })
 
         default_attr = {
-            'outputvolumes': {},
+            'volumes': {},
             'output_ND': False,
             'datatype': '',
             'chunksize': [],
@@ -368,6 +381,9 @@ class Splitt3r(Block3r):
         self._init_log()
 
         self._prep_blocks()
+
+        self._images = ['mean', 'memb/mean', 'nucl/mean']
+        self._labels = []
 
     def _init_paths_splitter(self):
 
@@ -399,7 +415,7 @@ class Splitt3r(Block3r):
                 ext='h5',
                 )
 
-        vols = list(self.outputvolumes.keys())
+        vols = list(self.volumes.keys())
         vols += ['data'] if self.output_ND else []
 
         os.makedirs('blocks', exist_ok=True)
@@ -486,7 +502,7 @@ class Splitt3r(Block3r):
             c_axis = None
             idxs = []
 
-        for k, ov in self.outputvolumes.items():
+        for k, ov in self.volumes.items():
 
             default = {
                 'ods': k,
@@ -495,11 +511,11 @@ class Splitt3r(Block3r):
                 'dtype': mo_3D.dtype,
                 'data': np.zeros(mo_3D.shape, dtype='float'),
                 }
-            self.outputvolumes[k] = {**default, **ov}
+            self.volumes[k] = {**default, **ov}
 
         im.slices = block.slices
 
-        idxs_set = set([l for k, v in self.outputvolumes.items() for l in v['idxs']])
+        idxs_set = set([l for k, v in self.volumes.items() for l in v['idxs']])
         for volnr in idxs_set:
             print('volnr', volnr)
 
@@ -522,7 +538,7 @@ class Splitt3r(Block3r):
                     mo_ND.slices[c_axis] = slice(volnr, volnr + 1, 1)
                 mo_ND.write(data.astype(mo_ND.dtype))
 
-            for name, output in self.outputvolumes.items():
+            for name, output in self.volumes.items():
                 if volnr in output['idxs']:
                     idx = output['idxs'].index(volnr)
                     data *= output['weights'][idx]
@@ -531,20 +547,33 @@ class Splitt3r(Block3r):
 
         mo_ND.close()
 
-        for name, output in self.outputvolumes.items():
+        for name, output in self.volumes.items():
             output['data'] /= len(output['idxs'])
             write_image(mo_3D, block.path.format(ods=output['ods']), output['data'].astype(mo_3D.dtype))
 
-    def view_with_napari(self, filepath='', idss=['mean', 'memb/mean', 'nucl/mean'], ldss=[], block_idx=0):
+    def view(self, input=[], images=[], labels=[], settings={}):
 
-        if not filepath:
-            filepath = self._abs(self.outputpaths['split']['blockfiles'].format(b=block_idx))
+        images = images or self._images
 
-        super().view_with_napari(filepath, idss, ldss)
+        if isinstance(input, str):
+            super().view(input, images, labels, settings)
+        elif type(input) == int or float:
+            filepath = self._abs(self.outputpaths['split']['blockfiles'].format(b=input))
+            super().view(filepath, images, labels, settings)
+        else:
+            input = input or [0, 1]
+            super().view_blocks(input, images, labels, settings)
 
-    def view_blocks_with_napari(self, block_idxs=[0, 1], idss=['mean', 'memb/mean', 'nucl/mean'], ldss=[]):
-
-        super().view_blocks_with_napari(block_idxs, idss, ldss)
+    # def view(self, filepath='', images=['mean', 'memb/mean', 'nucl/mean'], labels=[], block_idx=0, settings={}):
+    #
+    #     if not filepath:
+    #         filepath = self._abs(self.outputpaths['split']['blockfiles'].format(b=block_idx))
+    #
+    #     super().view(filepath, images, labels, settings)
+    #
+    # def view_blocks(self, block_idxs=[0, 1], images=['mean', 'memb/mean', 'nucl/mean'], labels=[], settings={}):
+    #
+    #     super().view_blocks(block_idxs, images, labels, settings)
 
 
 class Merg3r(Block3r):
@@ -587,7 +616,6 @@ class Merg3r(Block3r):
 
         default_attr = {
             'volumes': [],
-            'fullsize': [],
             'datatype': '',
             'elsize': [],
             'inlayout': '',
@@ -598,7 +626,7 @@ class Merg3r(Block3r):
 
         for step in self._fun_selector.keys():
             step_id = 'blocks' if step=='blockinfo' else self.step_id
-            self.set_parameters(step)
+            self.set_parameters(step, step_id=step_id)
 
         self._init_paths_merger()
 
@@ -606,11 +634,15 @@ class Merg3r(Block3r):
 
         self._prep_blocks()
 
+        self._images = []
+        self._labels = []
+
     def _init_paths_merger(self):
 
         bpat = self._build_path(suffixes=[{'b': 'p'}])
         bmat = self._build_path(suffixes=[{'b': '?'}])
 
+        # I don't think this used: blockfiles are used
         self._paths.update({
             'merge': {
                 'inputs': {
@@ -637,16 +669,9 @@ class Merg3r(Block3r):
             self.outputpaths[step] = self._merge_paths(self._paths[step], step, 'outputs')
 
     def merge(self, **kwargs):
-        """
+        """Merge blocks of data into a single hdf5 file.
 
-        volumes=[],
-        suffix='',
-        fullsize=[],
-        datatype='',
-        elsize=[],
-        inlayout='',
-        squeeze='',
-        is_labelimage=False,
+        Volumes are processed in parallel.
         """
 
         arglist = self._prep_step('merge', kwargs)
@@ -777,7 +802,8 @@ class Merg3r(Block3r):
         f = h5py.File(tgt_file, 'w')
         for volume in self.volumes:
             ids = list(volume.keys())[0]
-            linked_path = os.path.relpath(inputs[ids], tgt_dir)
+            # linked_path = inputs[ids]  # absolute path
+            linked_path = os.path.relpath(inputs[ids], tgt_dir)  # relative path
             ext_file = pathlib.Path(linked_path).as_posix()
             create_ext_link(f, ids, ext_file, ids)
 
@@ -801,17 +827,41 @@ class Merg3r(Block3r):
 
         return outputpath
 
-    def view_with_napari(self, filepath='', idss=[], ldss=[], vol_idx=0):
+    def view(self, input=[], images=[], labels=[], settings={}):
 
-        idss = idss or [list(volume.keys())[0] for volume in self.volumes]
+        images = images or self._images
+        labels = labels or self._labels
 
-        if not filepath:
-            basename = self.format_([self.dataset, self.suffix])
-            outstem = os.path.join(self.directory, basename)
-            filepath = '{}.h5'.format(outstem)
+        if isinstance(input, str):
+            super().view(input, images, labels, settings)
+        elif type(input) == int or type(input) == float:
+            filepath = self._abs(self.outputpaths['merge']['blockfiles'].format(b=input))
+            # if not filepath:
+            #     basename = self.format_([self.dataset, self.suffix])
+            #     outstem = os.path.join(self.directory, basename)
+            #     filepath = '{}.h5'.format(outstem)
+            super().view(filepath, images, labels, settings)
+        else:
+            input = input or [0, 1]
+            super().view_blocks(input, images, labels, settings)
+
+    # def view(self, filepath='', images=[], labels=[], vol_idx=0, settings={}):
+
+        # idss = idss or [list(volume.keys())[0] for volume in self.volumes]
+
+        # if not filepath:
+        #     filestem = os.path.join(self.directory, self.format_())
+        #     filepath = f'{filestem}_ds.h5'
+        # if not filepath:
+        #     filepath = self._abs(self.outputpaths['estimate']['file'])
+        # if not filepath:
+        #     basename = self.format_([self.dataset, self.suffix])
+        #     outstem = os.path.join(self.directory, basename)
+        #     filepath = '{}.h5'.format(outstem)
 
         # TODO: dask array
-        super().view_with_napari(filepath, idss, slices={'z': 'ctr'})
+        # super().view(filepath, images, labels, settings)
+        # super().view_with_napari(filepath, idss, slices={'z': 'ctr'})
 
 
 def get_bias_field_block(bf, slices, outdims, dsfacs):
