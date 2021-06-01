@@ -3465,13 +3465,15 @@ class Stapl3r(object):
         self.inputs = self.inputpaths[self.step]
         self.outputs = self.outputpaths[self.step]
 
-    def view_with_napari(self, filepath, idss=[], ldss=[], slices=[]):
+    def view(self, filepath='', images=[], labels=[], settings={}):
 
         import napari
         from stapl3d import Image
+
         def get_h5_dset(filepath, ids, slices={}):
             im = Image('{}/{}'.format(filepath, ids), permission='r')
             im.load(load_data=False)
+
             if slices:
                 for d, slc in slices.items():
                     idx = im.axlab.index(d)
@@ -3482,14 +3484,21 @@ class Stapl3r(object):
             im.close()
             return data
 
+        # TODO
+        # if not filepath:
+        #     filepath = self._abs(self.outputpaths['estimate']['blockfiles'].format(b=block_idx))
+        images = images or self._images
+        labels = labels or self._labels
+        slices = settings['slices'] if 'slices' in settings.keys() else {}
+
         viewer = napari.Viewer()
 
-        for ids in idss:
+        for ids in images:
             viewer.add_image( get_h5_dset(filepath, ids, slices), name=ids)
-        for lds in ldss:
+        for lds in labels:
             viewer.add_labels(get_h5_dset(filepath, lds, slices), name=lds)
 
-        im = Image('{}/{}'.format(filepath, idss[0]), permission='r')
+        im = Image('{}/{}'.format(filepath, (images + labels)[0]), permission='r')
         im.load(load_data=False)
         im.close()
 
@@ -3501,11 +3510,14 @@ class Stapl3r(object):
 
         self.viewer = viewer
 
-    def view_blocks_with_napari(self, block_idxs=[], idss=[], ldss=[]):
+        self.set_view(settings)
+
+    def view_blocks(self, block_idxs=[], images=[], labels=[], settings={}):
         """TODO: merge with view_with_napari"""
 
         import napari
         from stapl3d import Image
+
         def get_h5_dset(filepath, ids, slices={}):
             im = Image('{}/{}'.format(filepath, ids), permission='r')
             im.load(load_data=False)
@@ -3518,6 +3530,10 @@ class Stapl3r(object):
             data = im.slice_dataset(squeeze=False)
             im.close()
             return data
+
+        images = images or self._images
+        labels = labels or self._labels
+
         viewer = napari.Viewer()
 
 
@@ -3525,7 +3541,7 @@ class Stapl3r(object):
         for block_idx in block_idxs:
 
             filepath = self._blocks[block_idx].path.replace('/{ods}', '')
-            im = Image('{}/{}'.format(filepath, (idss + ldss)[0]), permission='r')
+            im = Image('{}/{}'.format(filepath, (images + labels)[0]), permission='r')
             im.load(load_data=False)
             im.close()
 
@@ -3536,16 +3552,40 @@ class Stapl3r(object):
             for i, es in enumerate(im.elsize[:3]):
                 Tt[0, i] *= es
             Ts = np.diag(list(im.elsize[:3]) + [1])
-            affine =  Tt @ Ts
-            for ids in idss:
+            # affine =  Tt @ Ts
+            affine =  Ts @ Tt
+            for ids in images:
                 viewer.add_image( get_h5_dset(filepath, ids, slices), name=f'{block.id}_{ids}', affine=affine)
                 viewer.layers[f'{block.id}_{ids}'].contrast_limits = viewer.layers[f'{block_id0}_{ids}'].contrast_limits
-            for lds in ldss:
+            for lds in labels:
                 viewer.add_labels(get_h5_dset(filepath, lds, slices), name=f'{block.id}_{lds}', affine=affine)
 
         viewer.dims.axis_labels = [al for al in im.axlab]
 
         self.viewer = viewer
+
+        self.set_view(settings)
+
+    def set_view(self, settings={}):
+        """Viewer settings functions."""
+
+        # Set the window title bar.
+        if 'title' in settings.keys():
+            self.viewer.title = settings['title']
+        # Move scrollbars to centreslices.
+        if 'crosshairs' in settings.keys():
+            self.viewer.dims.current_step = settings['crosshairs']
+        # Show/hide axes.
+        if 'axes_visible' in settings.keys():
+            self.viewer.axes.visible = settings['axes_visible']
+        # Set equal contrast limits.
+        if 'clim' in settings.keys():
+            for lay in self.viewer.layers:
+                lay.contrast_limits = settings['clim']
+        # Set the layer opacity.
+        if 'opacity' in settings.keys():
+            for lay in self.viewer.layers:
+                lay.opacity = settings['opacity']
 
     def _init_log(self):
 

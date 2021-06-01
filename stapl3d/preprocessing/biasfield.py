@@ -2,10 +2,6 @@
 
 """Perform N4 bias field correction.
 
-    # TODO: biasfield report is poorly scaled for many datasets => implement autoscaling
-    # TODO: use mask in plotted bias field image if it was used; make sure it is used for calculating medians/means
-    # from ruamel import yaml
-
 """
 
 import os
@@ -138,6 +134,9 @@ class Homogeniz3r(Stapl3r):
 
         self._init_log()
 
+        self._images = ['data', 'bias', 'corr']
+        self._labels = []
+
     def _init_paths(self):
 
         # FIXME: moduledir (=step_id?) can vary
@@ -217,16 +216,7 @@ class Homogeniz3r(Stapl3r):
         self.set_downsample_factors(self.inputpaths['estimate']['data'])
 
     def estimate(self, **kwargs):
-        """Perform N4 bias field correction.
-
-        channels=[],
-        resolution_level=-1,
-        mask_in='',
-        downsample_factors=[],
-        n_iterations=50,
-        n_fitlevels=4,
-        n_bspline_cps={'z': 5, 'y': 5, 'x': 5},
-        """
+        """Perform N4 bias field correction."""
 
         arglist = self._prep_step('estimate', kwargs)
         # NOTE: ITK is already multithreaded => n_workers = 1
@@ -236,15 +226,7 @@ class Homogeniz3r(Stapl3r):
             pool.starmap(self._estimate_channel, arglist)
 
     def _estimate_channel(self, channel):
-        """Estimate the x- and y-profiles for a channel in a czi file.
-
-        channel
-        inputpath
-        - 3D/4D
-        - direct/derived[auto]/derived[specified]/image_in/...
-        [mask_in]
-        [downsample_factors]
-        """
+        """Estimate the x- and y-profiles for a channel in a czi file."""
 
         inputs = self._prep_paths(self.inputs, reps={'c': channel})
         outputs = self._prep_paths(self.outputs, reps={'c': channel})
@@ -370,11 +352,7 @@ class Homogeniz3r(Stapl3r):
             mo = stack_channels(images_in, outputpath=outputpath)
 
     def apply(self, **kwargs):
-        """Apply N4 bias field correction.
-
-        channels=[],
-        blocksize_xy=1280,
-        """
+        """Apply N4 bias field correction."""
 
         arglist = self._prep_step('apply', kwargs)
         with multiprocessing.Pool(processes=self._n_workers) as pool:
@@ -642,13 +620,16 @@ class Homogeniz3r(Stapl3r):
                 ax.legend(['original', 'corrected'], fontsize=7,
                           loc='lower center', frameon=False)
 
-    def view_with_napari(self, filepath='', idss=['data', 'bias', 'corr'], ldss=[]):
+    def view(self, input=[], images=[], labels=[], settings={}):
 
-        if not filepath:
+        images = images or self._images
+        labels = labels or self._labels
+
+        if not input:
             filestem = os.path.join(self.directory, self.format_())
-            filepath = f'{filestem}_ds.h5'
+            input = f'{filestem}_ds.h5'
 
-        super().view_with_napari(filepath, idss, ldss=[])
+        super().view(input, images, labels, settings)
 
 
 def downsample_channel(inputpath, resolution_level, channel, downsample_factors, ismask, outputpath):

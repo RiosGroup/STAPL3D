@@ -107,6 +107,9 @@ class Enhanc3r(Block3r):
 
         self.ACMEdir = self.ACMEdir or os.environ.get('ACME')
 
+        self._images = [self.ids_membrane, self.ods_preprocess, self.ods_planarity]
+        self._labels = []
+
     def _init_paths_enhancer(self):
 
         # FIXME: moduledir (=step_id?) can vary
@@ -235,17 +238,19 @@ class Enhanc3r(Block3r):
                 except FileNotFoundError:
                     pass
 
-    def view_with_napari(self, filepath='', idss=['memb/mean', 'memb/ACME_preprocess', 'memb/ACME_planarity'], ldss=[], block_idx=0):
+    def view(self, input=[], images=[], labels=[], settings={}):
 
-        # TODO: self.ids_membrane etc
-        if not filepath:
-            filepath = self._abs(self.outputpaths['estimate']['blockfiles'].format(b=block_idx))
+        images = images or [self.ids_membrane, self.ods_preprocess, self.ods_planarity]
 
-        super().view_with_napari(filepath, idss, ldss)
+        if isinstance(input, str):
+            super().view(input, images, labels, settings)
+        elif type(input) == int or float:
+            filepath = self._abs(self.outputpaths['estimate']['blockfiles'].format(b=input))
+            super().view(filepath, images, labels, settings)
+        else:
+            input = input or [0, 1]
+            super().view_blocks(input, images, labels, settings)
 
-    def view_blocks_with_napari(self, block_idxs=[0, 1], idss=['memb/mean', 'memb/ACME_preprocess', 'memb/ACME_planarity'], ldss=[]):
-
-        super().view_blocks_with_napari(block_idxs, idss, ldss)
 
 
 if __name__ == "__main__":

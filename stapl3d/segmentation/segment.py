@@ -130,6 +130,9 @@ class Segment3r(Block3r):
 
         self._prep_blocks()
 
+        self._images = ['nucl/prep']
+        self._labels = ['segm/labels_full', 'segm/labels_nucl', 'segm/labels_memb', 'segm/labels_csol']
+
     def _init_paths_segmenter(self):
 
         prev_path = {
@@ -360,16 +363,19 @@ class Segment3r(Block3r):
                 ax = axdict['segm'][i]
                 ax.axis('off')
 
-    def view_with_napari(self, filepath='', idss=['nucl/prep', 'memb/prep'], ldss=['segm/labels_edt', 'segm/labels'], block_idx=0):
+    def view(self, input=[], images=[], labels=[], settings={}):
 
-        if not filepath:
-            filepath = self._abs(self.outputpaths['estimate']['blockfiles'].format(b=block_idx))
+        images = images or self._images
+        labels = labels or self._labels
 
-        super().view_with_napari(filepath, idss, ldss)
-
-    def view_blocks_with_napari(self, block_idxs=[0, 1], idss=['nucl/prep', 'memb/prep'], ldss=['segm/labels_edt', 'segm/labels']):
-
-        super().view_blocks_with_napari(block_idxs, idss, ldss)
+        if isinstance(input, str):
+            super().view(input, images, labels, settings)
+        elif type(input) == int or type(input) == float:
+            filepath = self._abs(self.outputpaths['estimate']['blockfiles'].format(b=input))
+            super().view(filepath, images, labels, settings)
+        else:
+            input = input or [0, 1]
+            super().view_blocks(input, images, labels, settings)
 
 
 def prep_volume(filepath, step_key, pars, save_steps=True):
@@ -1257,6 +1263,9 @@ class Subsegment3r(Block3r):
 
         self._prep_blocks()
 
+        self._images = ['nucl/prep']
+        self._labels = ['segm/labels_full', 'segm/labels_nucl', 'segm/labels_memb', 'segm/labels_csol']
+
     def _init_paths_subsegmenter(self):
 
         prev_path = {
@@ -1467,16 +1476,30 @@ class Subsegment3r(Block3r):
                 labels = centreslices['segm/labels'][dim]
                 plot_imgs(data_memb, labels, axdict, 'segm', i, aspect, None, 0.3, colors=None)
 
-    def view_with_napari(self, filepath='', idss=['nucl/prep'], ldss=['segm/labels_full', 'segm/labels_nucl', 'segm/labels_memb', 'segm/labels_csol'], block_idx=0):
+    def view(self, input=[], images=[], labels=[], settings={}):
 
-        if not filepath:
-            filepath = self._abs(self.outputpaths['estimate']['blockfiles'].format(b=block_idx))
+        images = images or self._images
 
-        super().view_with_napari(filepath, idss, ldss)
+        if isinstance(input, str):
+            super().view(input, images, labels, settings)
+        elif type(input) == int or float:
+            if not input:
+                filepath = self._abs(self.outputpaths['estimate']['blockfiles'].format(b=input))
+            super().view(filepath, images, labels, settings)
+        else:
+            input = input or [0, 1]
+            super().view_blocks(input, images, labels, settings)
 
-    def view_blocks_with_napari(self, block_idxs=[0, 1], idss=['nucl/prep'], ldss=['segm/labels_full', 'segm/labels_nucl', 'segm/labels_memb', 'segm/labels_csol']):
-
-        super().view_blocks_with_napari(block_idxs, idss, ldss)
+    # def view(self, filepath='', idss=['nucl/prep'], ldss=['segm/labels_full', 'segm/labels_nucl', 'segm/labels_memb', 'segm/labels_csol'], block_idx=0, settings={}):
+    #
+    #     if not filepath:
+    #         filepath = self._abs(self.outputpaths['estimate']['blockfiles'].format(b=block_idx))
+    #
+    #     super().view(filepath, idss, ldss, settings)
+    #
+    # def view_blocks(self, block_idxs=[0, 1], idss=['nucl/prep'], ldss=['segm/labels_full', 'segm/labels_nucl', 'segm/labels_memb', 'segm/labels_csol'], settings={}):
+    #
+    #     super().view_blocks(block_idxs, idss, ldss, settings)
 
 
 if __name__ == "__main__":
