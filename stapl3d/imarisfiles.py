@@ -572,6 +572,11 @@ def h5chs_to_virtual(outputfile, inputpat, ids='data'):
     inputfiles = glob(inputpat)
     inputfiles.sort()
 
+    try:
+        f = h5py.File(inputfiles[0], 'r')
+    except IndexError:
+        return
+
     f = h5py.File(inputfiles[0], 'r')
     shape = f[ids].shape + (len(inputfiles),)
     dtype = f[ids].dtype
