@@ -3045,11 +3045,22 @@ class Stapl3r(object):
 
         step_id = step_id or self.step_id
         try:
-            par_paths = self._cfg[step_id][step][key]
+            self._cfg[step_id][step][key]
         except (KeyError, TypeError):
             par_paths = {}
             # print(f'No {key} specified for step {step}:')
             # print(f'   ... using default file structures.')
+        else:
+            par_paths = {}
+            for k, v in self._cfg[step_id][step][key].items():
+                if v == 'image_in':
+                    par_paths[k] = self.image_in
+                elif v is None:
+                    par_paths[k] = ''
+                else:
+                    par_paths[k] = self._cfg[step_id][step][key][k]
+            print(f'Parameter file specified {key} for step "{step}":')
+            print(f'   ... using {par_paths}.')
         return {**paths[key], **par_paths}
 
     def _get_arglist(self, parallelized_pars=[]):
@@ -3386,7 +3397,7 @@ class Stapl3r(object):
                 inpath = self._cfg[prev_path['step_id']][prev_path['step']][prev_path['ioitem']][prev_path['output']]
             except (KeyError, TypeError):
                 print(f"Could not determine inputpath from {prev_path['module_id']}:{prev_path['step']}")
-                print(f"Trying default path")
+                # print(f"Trying default path")
                 inpath = 'default'
 
         return inpath
