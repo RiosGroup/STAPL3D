@@ -1118,9 +1118,11 @@ class Image(object):
         elsize_x = float(md.findall('.//ScalingX')[0].text) * 1e6
 
         elsize = [elsize_y, elsize_x]
-        if len(self.dims) == 3:
+        if len(self.dims) > 2:
             elsize = [elsize_z] + elsize
-        if len(self.dims) == 4:
+        if len(self.dims) > 3:
+            elsize += [1]
+        if len(self.dims) > 4:
             elsize += [1]
 
         return elsize
@@ -1211,10 +1213,12 @@ class Image(object):
         """Get the element sizes from a dataset."""
 
         axlab = 'yx'
-        if len(self.dims) == 3:
+        if len(self.dims) > 2:
             axlab = 'z' + axlab
-        if len(self.dims) == 4:
+        if len(self.dims) > 3:
             axlab += 'c'
+        if len(self.dims) > 4:
+            axlab += 't'
 
         return axlab
 
