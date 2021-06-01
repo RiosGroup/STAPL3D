@@ -405,7 +405,7 @@ class Homogeniz3r(Stapl3r):
                 bf.slices[bf.axlab.index('c')] = slice(channel, channel + 1)
 
         # Set up the blocks
-        blocksize = im.dims
+        blocksize = list(im.dims)
         blockmargin = [0] * len(blocksize)
         if self.blocksize_xy:
             for dim in 'xy':
