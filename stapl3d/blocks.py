@@ -265,10 +265,10 @@ class Block3r(Stapl3r):
 
         axlab = [al for al in axlab if al in self.fullsize.keys()]
 
+        from stapl3d.preprocessing import shading
         stops = []
-        for idx in [1, 2]:  # FIXME: glob files
-            from stapl3d.preprocessing import shading
-            iminfo = shading.get_image_info(inputpat.format(b=idx))
+        for filepath in self.filepaths:
+            iminfo = shading.get_image_info(filepath)
             stops.append(iminfo['dims_zyxc'])
 
         # starts = [dict(zip(axlab, [0] * len(axlab))) for imsize in imsizes]
