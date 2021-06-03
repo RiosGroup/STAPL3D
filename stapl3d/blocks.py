@@ -162,7 +162,7 @@ class Block3r(Stapl3r):
         self.set_fullsize(self.inputpaths[step]['data'])
         self.set_blocksize()
         self.set_blockmargin()
-        if '{b}' in self.inputpaths[step]['data']:
+        if '{b' in self.inputpaths[step]['data']:
             self._blocks = self.set_blocks_from_files(self.inputpaths[step]['data'], self.outputpaths[step]['blockfiles'])
             self._blocks0 = self.set_blocks_from_files(self.inputpaths[step]['data'], self.outputpaths[step]['blockfiles'], blocks0=True)
         else:
@@ -172,8 +172,8 @@ class Block3r(Stapl3r):
     def set_fullsize(self, image_in, fullsize={}):
 
         if image_in:
-            if '{b}' in image_in:
-                image_in = image_in.format(b=0)  # FIXME
+            if '{b' in image_in:
+                image_in = self.filepaths[0]
             im = Image(image_in, permission='r')
             im.load(load_data=False)
             im.close()
@@ -449,12 +449,15 @@ class Splitt3r(Block3r):
     def _split_with_combinechannels(self, block):
         """Average membrane and nuclear channels and write as blocks."""
 
-        reps = {'b': block} if '{b}' in self.inputs else {}
+        reps = {'b': block} if '{b' in self.image_in else {}
         inputs = self._prep_paths(self.inputs, reps=reps)
         outputs = self._prep_paths(self.outputs, reps={'b': block})
 
         # INPUT
-        infile = inputs['data'].format(b=block)
+        if '{b' in self.image_in:
+            infile = self.filepaths[block]
+        else:
+            infile = inputs['data'].format(b=block)
 
         block = self._blocks[block]
         print('Writing block with id {} to {}'.format(block.id, block.path))
