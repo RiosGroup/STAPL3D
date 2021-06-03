@@ -159,6 +159,23 @@ class Block3r(Stapl3r):
     def _prep_blocks(self):
 
         step = 'blockinfo'  #self.step
+
+        # find filepaths if a pattern is provided
+        # ==> files are to be interpreted as blocks already
+        # TODO: using self.image_in as switch, maybe change to self.inputs
+        if '{b' in self.image_in:
+            if '.h5' in self.image_in:
+                pat, ids = self.image_in.split('.h5')
+                pat += '.h5'
+            else:
+                pat = self.image_in
+            s = pat.replace(pat[pat.find("{"):pat.find("}")+1], '*')
+            directory = os.path.abspath(os.path.dirname(self.image_in))
+            p = os.path.join(directory, s)
+            self.filepaths = sorted(glob.glob(p))
+            if '.h5' in self.image_in:
+                self.filepaths = [f'{fp}{ids}' for fp in self.filepaths]
+
         self.set_fullsize(self.inputpaths[step]['data'])
         self.set_blocksize()
         self.set_blockmargin()
