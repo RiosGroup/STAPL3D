@@ -124,6 +124,9 @@ class Masker(Stapl3r):
 
         self._init_log()
 
+        self._images = ['mean', 'smooth']
+        self._labels = ['mask']
+
     def _init_paths(self):
 
         # FIXME: moduledir (=step_id?) can vary
@@ -375,12 +378,15 @@ class Masker(Stapl3r):
                 color='k', linewidth=1, linestyle='-')
         ax.set_xlabel('section index', fontsize=7, loc='right')
 
-    def view_with_napari(self, filepath='', idss=['mean', 'smooth'], ldss=['mask']):
+    def view(self, input=[], images=[], labels=[], settings={}):
 
-        if not filepath:
-            filepath = self._abs(self.outputpaths['estimate']['file'])
+        images = images or self._images
+        labels = labels or self._labels
 
-        super().view_with_napari(filepath, idss, ldss)
+        if not input:
+            input = self._abs(self.outputpaths['estimate']['file'])
+
+        super().view(input, images, labels, settings)
 
 
 def extract_resolution_level(image_in, resolution_level=-1):
