@@ -2965,6 +2965,9 @@ class Stapl3r(object):
             'verticalalignment': 'baseline',
             }
 
+        self._images = []
+        self._labels = []
+
     def __str__(self):
         """Print attributes in yml structure."""
         return self.dump_parameters()
