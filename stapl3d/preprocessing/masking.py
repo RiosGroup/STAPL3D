@@ -54,7 +54,7 @@ def main(argv):
     steps = ['estimate']
     args = parse_args('mask', steps, *argv)
 
-    masker = Masker(
+    mask3r = Mask3r(
         args.image_in,
         args.parameter_file,
         step_id=args.step_id,
@@ -64,15 +64,15 @@ def main(argv):
     )
 
     for step in args.steps:
-        masker._fun_selector[step]()
+        mask3r._fun_selector[step]()
 
 
-class Masker(Stapl3r):
+class Mask3r(Stapl3r):
     """Generate a mask that covers the tissue."""
 
     def __init__(self, image_in='', parameter_file='', **kwargs):
 
-        super(Masker, self).__init__(
+        super(Mask3r, self).__init__(
             image_in, parameter_file,
             module_id='mask',
             **kwargs,
@@ -110,7 +110,7 @@ class Masker(Stapl3r):
             'use_median_thresholds': True,
             'median_factor': 3,
             'abs_threshold': 0,
-            'distance_to_edge': True,
+            'distance_to_edge': False,
             'thresholds': [],
             'thresholds_slicewise': [],
         }
@@ -315,7 +315,6 @@ class Masker(Stapl3r):
         clim_mean = self._get_clim(cslcs['mean'])
         if 'dist2edge' in cslcs.keys():
             clim_d2e = self._get_clim(cslcs['dist2edge'])
-        # print([clim_mean, clim_d2e])
 
         for k, v in cslcs.items():
             cslcs[k]['x'] = cslcs[k]['x'].transpose()
@@ -341,14 +340,12 @@ class Masker(Stapl3r):
 
                 if k == 'contours':
                     thrs = info_dict['parameters']['thresholds']
-                    print(thrs)
                     im = ax.imshow(cslcs['mean'][d], cmap=cmap, aspect=aspect)
                     cs = ax.contour(cslcs['smooth'][d], thrs, cmap=plt.cm.rainbow)
                     # cs = ax.contour(cslcs['mean'][d], thrs, cmap=plt.cm.rainbow)
                     if d == 'z':  # add labels to xy-slice
                         ax.clabel(cs, inline=1, fontsize=7)
                         labels = ['thr={}'.format(thr) for thr in thrs]
-                        print(labels, len(cs.collections))
                         for i in range(len(labels)):
                             cs.collections[i].set_label(labels[i])
                 elif k == 'mask':
