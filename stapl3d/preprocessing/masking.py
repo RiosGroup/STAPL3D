@@ -2,22 +2,6 @@
 
 """Generate a mask that covers the tissue.
 
-    # TODO: logging
-    # logging.basicConfig(filename='{}.log'.format(outputstem), level=logging.INFO)
-
-    # TODO: calculated parameters (thresholds) to yml instead of pickle
-    # TODO: report: thresholds to values, not indices.
-    # TODO: plot thresholds as contours
-    # TODO: plot gradient image as background?
-    # TODO: add otsu auto-threshold; as in equalization
-
-    # TODO?
-    # self._image_rl = None
-    # self._image_mean = None
-    # self._image_smooth = None
-    # self._image_mask = None
-    # self._image_dist = None
-
 """
 
 import os
@@ -51,7 +35,7 @@ logger = logging.getLogger(__name__)
 def main(argv):
     """Generate a mask that covers the tissue."""
 
-    steps = ['estimate']
+    steps = ['extract_mean', 'extract_smooth', 'extract_mask', 'postprocess']
     args = parse_args('mask', steps, *argv)
 
     mask3r = Mask3r(
@@ -79,21 +63,41 @@ class Mask3r(Stapl3r):
             )
 
         self._fun_selector = {
-            'estimate': self.estimate,
+            'extract_mean': self.extract_mean,
+            'extract_smooth': self.extract_smooth,
+            'extract_mask': self.extract_mask,
+            'postprocess': self.postprocess,
             }
 
         self._parallelization = {
-            'estimate': [],
+            'extract_mean': [],
+            'extract_smooth': [],
+            'extract_mask': [],
+            'postprocess': [],
             }
 
         self._parameter_sets = {
-            'estimate': {
+            'extract_mean': {
                 'fpar': self._FPAR_NAMES + ('resolution_level',),
-                'ppar': ('sigma', 'use_median_thresholds', 'median_factor',
-                         'abs_threshold', 'thresholds', 'thresholds_slicewise',
-                         'distance_to_edge'),
+                'ppar': (),
                 'spar': ('_n_workers',),
-                }
+                },
+            'extract_smooth': {
+                'fpar': self._FPAR_NAMES + ('resolution_level',),
+                'ppar': ('sigma',),
+                'spar': ('_n_workers',),
+                },
+            'extract_mask': {
+                'fpar': self._FPAR_NAMES + ('resolution_level',),
+                'ppar': ('use_median_thresholds', 'median_factor',
+                         'abs_threshold', 'thresholds', 'thresholds_slicewise'),
+                'spar': ('_n_workers',),
+                },
+            'postprocess': {
+                'fpar': self._FPAR_NAMES + ('resolution_level',),
+                'ppar': ('distance_to_edge', 'thresholds_slicewise'),
+                'spar': ('_n_workers',),
+                },
             }
 
         self._parameter_table = {
@@ -106,10 +110,13 @@ class Mask3r(Stapl3r):
 
         default_attr = {
             'resolution_level': -1,
+            'channels': [],
+            'keep_dtype': True,
             'sigma': 48.0,
             'use_median_thresholds': True,
             'median_factor': 3,
             'abs_threshold': 0,
+            'fill_holes': True,
             'distance_to_edge': False,
             'thresholds': [],
             'thresholds_slicewise': [],
@@ -143,17 +150,48 @@ class Mask3r(Stapl3r):
                 ext='bdv',
                 )
 
-        vols = ['mean', 'smooth', 'mask', 'dist2edge']
         stem = self._build_path()
         self._paths = {
-            'estimate': {
+            'extract_mean': {
                 'inputs': {
                     'data': datapath,
                     },
                 'outputs': {
-                    **{ods: f'{stem}.h5/{ods}' for ods in vols},
-                    **{'report': f'{stem}.pdf'},
-                    **{'file': f'{stem}.h5'},
+                    'file': f'{stem}.h5',
+                    'mean': f'{stem}.h5/mean',
+                    'meds': f'{stem}_medians.npy',
+                    },
+                },
+            'extract_smooth': {
+                'inputs': {
+                    'mean': f'{stem}.h5/mean',
+                    },
+                'outputs': {
+                    'file': f'{stem}.h5',
+                    'smooth': f'{stem}.h5/smooth',
+                    },
+                },
+            'extract_mask': {
+                'inputs': {
+                    'data': datapath,
+                    'meds': f'{stem}_medians.npy',
+                    'smooth': f'{stem}.h5/smooth',
+                    },
+                'outputs': {
+                    'file': f'{stem}.h5',
+                    'mask': f'{stem}.h5/mask',
+                    },
+                },
+            'postprocess': {
+                'inputs': {
+                    'data': datapath,
+                    'meds': f'{stem}_medians.npy',
+                    'mask': f'{stem}.h5/mask',
+                    },
+                'outputs': {
+                    'file': f'{stem}.h5',
+                    'dist2edge': f'{stem}.h5/dist2edge',
+                    'report': f'{stem}.pdf',
                     },
                 },
             }
@@ -161,60 +199,92 @@ class Mask3r(Stapl3r):
             self.inputpaths[step]  = self._merge_paths(self._paths[step], step, 'inputs')
             self.outputpaths[step] = self._merge_paths(self._paths[step], step, 'outputs')
 
-        datapath = self.inputpaths['estimate']['data']
+        datapath = self.inputpaths['extract_mean']['data']
         if ('.ims' in datapath or '.bdv' in datapath):
             if self.resolution_level == -1:
                 self.resolution_level = find_resolution_level(datapath)
 
-    def estimate(self, **kwargs):
-        """Generate a mask that covers the tissue.
+    def extract_mean(self, **kwargs):
+        """Calculate mean over channels and slicewise medians."""
 
-        # resolution_level=-1,
-        # sigma=48.0,
-        # use_median_thresholds=True,
-        # median_factor=3,
-        # abs_threshold=0,
-        # thresholds=[],
-        # distance_to_edge=True,
-        """
+        arglist = self._prep_step('extract_mean', kwargs)
+        self._extract_mean()
+        self.dump_parameters(step='extract_mean')
 
-        arglist = self._prep_step('estimate', kwargs)
-        self._generate_dataset_mask()
+    def _extract_mean(self):
+        """Calculate mean over channels and slicewise medians."""
 
-    def _generate_dataset_mask(self):
+        inputs = self._prep_paths(self.inputs)
+        outputs = self._prep_paths(self.outputs)
+
+        meds = calculate_mean(inputs['data'],
+                              self.resolution_level,
+                              self.keep_dtype,
+                              self.channels,
+                              outputpath=outputs['mean'])
+
+        np.save(outputs['meds'], np.array(meds))
+
+    def extract_smooth(self, **kwargs):
+        """Smooth image."""
+
+        arglist = self._prep_step('extract_smooth', kwargs)
+        self._extract_smooth()
+        self.dump_parameters(step='extract_smooth')
+
+    def _extract_smooth(self):
+        """Smooth image."""
+
+        inputs = self._prep_paths(self.inputs)
+        outputs = self._prep_paths(self.outputs)
+
+        smooth_image(inputs['mean'], self.sigma, self.keep_dtype, outputs['smooth'])
+
+    def extract_mask(self, **kwargs):
+        """Generate a mask that covers the tissue."""
+
+        arglist = self._prep_step('extract_mask', kwargs)
+        self._extract_mask()
+        self.dump_parameters(step='extract_mask')
+
+    def _extract_mask(self):
         """Generate a mask that covers the tissue."""
 
         inputs = self._prep_paths(self.inputs)
         outputs = self._prep_paths(self.outputs)
 
-        im_data = extract_resolution_level(inputs['data'], self.resolution_level)
-        # dsfacs = find_downsample_factors(image_in, 0, self.resolution_level)
+        self.set_thresholds(self.thresholds, inputs)
+        postproc_masks(inputs['smooth'], self.thresholds_slicewise, self.fill_holes, outputs['mask'])
 
-        im_mean, meds = extract_mean(im_data, 'c', True, outputs['mean'])
+    def postprocess(self, **kwargs):
+        """Calculate distance to edge and generate report."""
 
-        im_smooth = extract_smooth(im_mean, self.sigma, True, outputs['smooth'])
+        arglist = self._prep_step('postprocess', kwargs)
+        self._postprocess()
+        self.dump_parameters(step='postprocess')
 
-        n_planes = im_data.dims[im_data.axlab.index('z')]
-        self.set_thresholds(self.thresholds, meds, n_planes, im_data.dtype)
+    def _postprocess(self):
+        """Calculate distance to edge and generate report."""
 
-        im_mask = postproc_masks(im_smooth, self.thresholds_slicewise, True, outputs['mask'])
+        inputs = self._prep_paths(self.inputs)
+        outputs = self._prep_paths(self.outputs)
+
+        if not self.thresholds_slicewise:
+            self.set_thresholds(self.thresholds, inputs)
 
         if self.distance_to_edge:
-            im_edt = calculate_distance_to_edge(im_mask, outputs['dist2edge'])
+            im_edt = calculate_distance_to_edge(inputs['mask'], outputs['dist2edge'])
             im_edt.close()
 
-        im_data.close()
-        im_mean.close()
-        im_smooth.close()
-        im_mask.close()
+        self.report(outputpath=outputs['report'], inputs=inputs, outputs=outputs)
 
-        self.dump_parameters(step=self.step)
-        self.report(outputpath=outputs['report'],
-                    inputs=inputs, outputs=outputs)
+    def set_thresholds(self, thrs, inputs, facs=[0.01, 0.1, 0.2, 0.5, 1.0, 2.0]):
+        """Set thresholds for each dataset slice."""
+        # TODO: otsu? (as in equalization module)
 
-    def set_thresholds(self, thrs, meds, n_planes, dtype, facs=[0.01, 0.1, 0.2, 0.5, 1.0, 2.0]):
-
-        # TODO: otsu?
+        meds = np.load(inputs['meds'])
+        props = get_image_props(inputs['data'], self.resolution_level)
+        n_planes = props['shape'][props['axlab'].index('z')]
 
         if not thrs:
             thrs = [max(meds) * fac for fac in facs]
@@ -233,7 +303,7 @@ class Mask3r(Stapl3r):
     def _get_info_dict(self, **kwargs):
 
         # self._prep_step('estimate', kwargs)  # TODO: independent of estimate
-        self.step = 'estimate'
+        self.step = 'postprocess'
         self._set_paths_step()
         inputs = self._prep_paths(self.inputs)
         outputs = self._prep_paths(self.outputs)
@@ -245,9 +315,9 @@ class Mask3r(Stapl3r):
             kwargs['parameters'] = p
 
         if 'outputs' in kwargs.keys():
-            filepath = self._abs(kwargs['outputs']['mean'])
+            filepath = self._abs(kwargs['inputs']['mask'])
         else:
-            filepath = self._abs(kwargs['parameters']['outputs']['mean'])
+            filepath = self._abs(kwargs['parameters']['inputs']['mask'])
 
         kwargs['props'] = get_imageprops(filepath)
         kwargs['paths'] = get_paths(filepath)
@@ -376,72 +446,76 @@ class Mask3r(Stapl3r):
         ax.set_xlabel('section index', fontsize=7, loc='right')
 
     def view(self, input=[], images=[], labels=[], settings={}):
+        # TODO: specifying eg labels as empty will reset the labels to default: undesired
+        # solve eg with None
 
         images = images or self._images
         labels = labels or self._labels
 
         if not input:
-            input = self._abs(self.outputpaths['estimate']['file'])
+            input = self._abs(self.outputpaths['extract_mean']['file'])
 
         super().view(input, images, labels, settings)
 
 
-def extract_resolution_level(image_in, resolution_level=-1):
-    """Extract data from a 5D Imaris image pyramid and create 4D image."""
-
-    # TODO: handle this in Image class when providing reslev as __init__ argument
-    if resolution_level != -1:
-        # FIXME: this is only ims, TODO bdv etc
-        image_in = '{}/DataSet/ResolutionLevel {}'.format(image_in, resolution_level)
-
-    im = Image(image_in, permission='r', reslev=resolution_level)
-    im.load(load_data=False)
-
-    return im
-
-
-def extract_mean(im, dim='c', keep_dtype=True, outputpath=''):
+def calculate_mean(image_in, resolution_level=-1, keep_dtype=True, channels=[], outputpath=''):
     """Calculate mean over channels."""
 
-    ods = 'mean'
+    def slice_dataset(im, cdim, channels):
+        # TODO: implement dirty slicing in Image class
+        d = []
+        for ch in channels:
+            im.slices[cdim] = slice(ch, ch + 1)
+            d.append(im.slice_dataset(squeeze=False))
+        return np.squeeze(np.stack(d, axis=cdim))
 
-    im.load(load_data=False)
-    props = im.get_props()
-    if len(im.dims) > 4:
-        props = im.squeeze_props(props, dim=4)
-    if len(im.dims) > 3:
-        props = im.squeeze_props(props, dim=3)
-
+    # Prepare output.
+    props = get_image_props(image_in, resolution_level, squeeze_dims=True)
+    if not keep_dtype:
+        props['dtype'] = 'float'
     mo = Image(outputpath, **props)
     mo.create()
 
+    im = Image(image_in, reslev=resolution_level, permission='r')
+    im.load(load_data=False)
     zdim = im.axlab.index('z')
+    cdim = im.axlab.index('c')
+
+    # Read in chunks or full image.
     if im.chunks is not None:
         nslcs = im.chunks[zdim]
     else:
         nslcs = im.dims[zdim]
+
     slc_thrs = []
     for zstart in range(0, im.dims[zdim], nslcs):
         zstop = min(im.dims[zdim], zstart + nslcs)
         im.slices[zdim] = mo.slices[zdim] = slice(zstart, zstop, None)
-        data = im.slice_dataset()
+
+        if channels:
+            data = slice_dataset(im, cdim, channels)  # for dirty slices
+        else:
+            data = im.slice_dataset()
+
         if im.slices[zdim].stop - im.slices[zdim].start == 1:
             data = np.expand_dims(data, 0)
-        data_mean = np.mean(data, axis=im.axlab.index(dim))
+
+        data_mean = np.mean(data, axis=cdim)
+
         if keep_dtype:
             data_mean = data_mean.astype(im.dtype)
+
         mo.write(data_mean)
+
         slc_thrs += list(np.median(np.reshape(data_mean, [data_mean.shape[0], -1]), axis=1))
 
-    mo.slices = None
-    mo.set_slices()
-
+    mo.close()
     im.close()
 
-    return mo, slc_thrs
+    return slc_thrs
 
 
-def extract_smooth(im, sigma=48.0, keep_dtype=True, outputpath=''):
+def smooth_image(image_in, sigma=48.0, keep_dtype=True, outputpath=''):
     """Smooth the image in-plane."""
 
     def smooth(data, sigma, elsize):
@@ -457,35 +531,39 @@ def extract_smooth(im, sigma=48.0, keep_dtype=True, outputpath=''):
 
         return data_smoothed
 
+    im = Image(image_in, permission='r+')
+    im.load(load_data=False)
+
     if not isinstance(sigma, list):
         sigma = [sigma] * 3
         sigma[im.axlab.index('z')] = 0.0
 
-    im.load(load_data=False)
     data_smoothed = smooth(im.slice_dataset(), sigma, im.elsize)
-    if keep_dtype:
-        data_smoothed = data_smoothed.astype(im.dtype)
-    im.close()
 
     props = im.get_props()
+    im.close()
+
+    if keep_dtype:
+        data_smoothed = data_smoothed.astype(im.dtype)
+
     mo = write_data(data_smoothed, props, outputpath)
 
     return mo
 
 
-def postproc_masks(im, thrs=[], fill_holes=True, outputpath=''):
-    """Apply slicewise thresholds to data and fill holes.
+def postproc_masks(image_in, thrs=[], fill_holes=True, outputpath=''):
+    """Apply slicewise thresholds to data and fill holes."""
+    # FIXME: assumes zyx
 
-    NOTE: zyx assumed
-    """
-
-    ods = 'mask'.format(0)
-
+    im = Image(image_in, permission='r+')
     im.load(load_data=False)
+    props = im.get_props()
     if thrs:
         data = im.slice_dataset()
-        mask = np.zeros(im.dims[:3], dtype='bool')
+        dims = [d for d, al in zip(im.dims, im.axlab) if al in 'zyx']
+        mask = np.zeros(dims, dtype='bool')
         for slc in range(0, mask.shape[0]):
+
             mask[slc, :, :] = data[slc, :, :] > thrs[slc]
     else:
         mask = im.slice_dataset()
@@ -495,24 +573,26 @@ def postproc_masks(im, thrs=[], fill_holes=True, outputpath=''):
         for slc in range(0, mask.shape[0]):
             mask[slc, :, :] = binary_fill_holes(mask[slc, :, :])
 
-    props = im.get_props()
     mo = write_data(mask, props, outputpath)
 
     return mo
 
 
-def calculate_distance_to_edge(im, outputpath=''):
+def calculate_distance_to_edge(image_in, outputpath=''):
     """"Calculate the euclidian distance transform of the mask."""
+    # FIXME: assumes zyx
 
-    ods = 'dist2edge'
-
+    im = Image(image_in, permission='r+')
     im.load(load_data=False)
     elsize = np.absolute(im.elsize)
     dt = np.zeros(im.ds.shape, dtype='float')
+
     for i, slc in enumerate(im.ds[:]):
         dt[i, :, :] = distance_transform_edt(slc, sampling=elsize[1:])
 
     props = im.get_props()
+    im.close()
+
     mo = write_data(dt, props, outputpath)
 
     return mo
@@ -528,6 +608,23 @@ def write_data(data, props, outputpath=''):
     mo.close()
 
     return mo
+
+
+def get_image_props(image_in, resolution_level, squeeze_dims=False):
+
+    im = Image(image_in, reslev=resolution_level, permission='r')
+    im.load(load_data=False)
+    props = im.get_props()
+
+    if squeeze_dims:
+        if len(im.dims) > 4:
+            props = im.squeeze_props(props, dim=4)
+        if len(im.dims) > 3:
+            props = im.squeeze_props(props, dim=3)
+
+    im.close()
+
+    return props
 
 
 if __name__ == "__main__":
