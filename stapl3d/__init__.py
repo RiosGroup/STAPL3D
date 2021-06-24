@@ -3482,6 +3482,14 @@ class Stapl3r(object):
     def _set_paths_step(self):
         self.inputs = self.inputpaths[self.step]
         self.outputs = self.outputpaths[self.step]
+        self._verify_paths()
+
+    def _verify_paths(self):
+        for _, filepath in self.outputs.items():
+            if '.h5' in filepath:
+                filepath = filepath.split('.h5')[0]
+            directory, filename = os.path.split(filepath)
+            os.makedirs(directory, exist_ok=True)
 
     def view(self, filepath='', images=[], labels=[], settings={}):
 
