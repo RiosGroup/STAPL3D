@@ -213,12 +213,13 @@ class Homogeniz3r(Stapl3r):
             self.inputpaths[step]  = self._merge_paths(self._paths[step], step, 'inputs')
             self.outputpaths[step] = self._merge_paths(self._paths[step], step, 'outputs')
 
-        self.set_downsample_factors(self.inputpaths['estimate']['data'])
-
     def estimate(self, **kwargs):
         """Perform N4 bias field correction."""
 
         arglist = self._prep_step('estimate', kwargs)
+
+        self.set_downsample_factors(self.inputpaths['estimate']['data'])
+
         # NOTE: ITK is already multithreaded => n_workers = 1
         self.n_threads = min(self.tasks, multiprocessing.cpu_count())
         self._n_workers = 1
@@ -326,6 +327,9 @@ class Homogeniz3r(Stapl3r):
         """Apply N4 bias field correction."""
 
         arglist = self._prep_step('apply', kwargs)
+
+        self.set_downsample_factors(self.inputpaths['estimate']['data'])
+
         with multiprocessing.Pool(processes=self._n_workers) as pool:
             pool.starmap(self._apply_channel, arglist)
 
@@ -614,12 +618,6 @@ def downsample_channel(inputpath, resolution_level, channel, downsample_factors,
     im_ch = im.extract_channel(channel)
     im.close()
     ds_im = im_ch.downsampled(downsample_factors, ismask, outputpath)
-
-    # downsample_factors = downsample_factors.copy()
-    # for dim, dsfac in dsfacs_rl.items():
-    #     downsample_factors[dim] = dsfac * downsample_factors[dim]
-    # downsample_factors = tuple([downsample_factors[dim] for dim in ds_im.axlab])
-    # ds_im.ds.attrs['downsample_factors'] = downsample_factors
 
     im_ch.close()
 
