@@ -291,57 +291,28 @@ class Homogeniz3r(Stapl3r):
             self.resolution_level = imarisfiles.find_resolution_level(inputpath)
 
     def postprocess(self, **kwargs):
-        """Merge bias field estimation files.
-
-        kwargs:
-        """
+        """Merge bias field estimation files."""
 
         self._prep_step('postprocess', kwargs)
 
         inputs = self._prep_paths(self.inputs)
         outputs = self._prep_paths(self.outputs)
 
-        """
-        # TODO: skip if inputfiles not found, throwing warning
-        inputfiles = glob(f'{inpath}.h5')
-        inputfiles.sort()
-        self.stack_bias(inputfiles, f'{outpath}.h5')
-        for filepath in inputfiles:
-            os.remove(filepath)
-        """
-        # try:
-        #     import h5py
-        #     f = h5py.File(outputs['aggregate'], 'r')
-        #     f.close()
-        # except IndexError:
-        #     pass
-        # else:
-        imarisfiles.h5chs_to_virtual(outputs['aggregate'], inputs['channels'], ids='data')
-        for ids in ['data', 'bias', 'corr']:
-            imarisfiles.h5chs_to_virtual(outputs['aggregate_ds'], inputs['channels_ds'], ids=ids)
+        def gather_4D(inputpat, outputfile, idss=['data']):
+            inputfiles = glob(inputpat)
+            inputfiles.sort()
+            if not inputfiles:
+                return
+            for ids in idss:
+                inputpaths = [f'{inputfile}/{ids}' for inputfile in inputfiles]
+                imarisfiles.h5chs_to_virtual(inputpaths, f'{outputfile}/{ids}')
+
+        gather_4D(inputs['channels'], outputs['aggregate'], ['data'])
+        gather_4D(inputs['channels_ds'], outputs['aggregate_ds'], ['data', 'bias', 'corr'])
 
         pdfs = glob(inputs['report'])
         pdfs.sort()
         self._merge_reports(pdfs, outputs['report'])
-
-        # # Replace fields.  # FIXME: assumed all the same: 4D inputfile
-        # ymls = glob(f'{inpath}.yml')
-        # ymls.sort()
-        # bname = self.format_([self.prefix, self._module_id, 'estimate'])
-        # ymlstem = os.path.join(self.datadir, self.directory, bname)
-        # steps = {
-        #     'estimate': [
-        #         ['biasfield', 'estimate', 'files', 'inputpath'],
-        #         ['biasfield', 'estimate', 'files', 'resolution_level'],
-        #         ['biasfield', 'estimate', 'files', 'mask_in'],
-        #     ],
-        # }
-        # for step, trees in steps.items():
-        #     # NOTE: will replace to the values from ymls[-1]
-        #     # FIXME: may aggregate submit:channels here
-        #     self._merge_parameters(ymls, trees, ymlstem, aggregate=False)
-        # for yml in ymls:
-        #     os.remove(yml)
 
     def stack_bias(self, inputfiles, outputfile, idss=['data', 'bias', 'corr']):
         """Merge the downsampled biasfield images to 4D datasets."""
