@@ -567,49 +567,37 @@ def bdv_to_virtual(outputfile, inputfile, reslev=0):
         f.create_virtual_dataset('data', layout, fillvalue=0)
 
 
-def h5chs_to_virtual(outputfile, inputpat, ids='data'):
+def h5chs_to_virtual(inputpaths, outputpath='', ext='.h5'):
 
-    inputfiles = glob(inputpat)
-    inputfiles.sort()
+    def h5_split(h5_path, ext='.h5'):
+        stem, ids = h5_path.split(ext)
+        file = f'{stem}{ext}'
+        return file, stem, ids
 
-    try:
-        f = h5py.File(inputfiles[0], 'r')
-    except IndexError:
-        return
+    props = get_imageprops(inputpaths[0])
+    props['shape'] += [len(inputpaths)]
+    props['axlab'] += 'c'
+    props['elsize'] += [1]
 
-    f = h5py.File(inputfiles[0], 'r')
-    shape = f[ids].shape + (len(inputfiles),)
-    dtype = f[ids].dtype
+    inputfile, inputstem, ids = h5_split(inputpaths[0], ext)
 
-    try:
-        axlab = [dim.label for dim in f[ids].dims]
-    except:
-        axlab = None
-    try:
-        elsize = [es for es in f[ids].attrs['element_size_um']]
-    except KeyError:
-        elsize = None
-
-    f.close()
-    layout = h5py.VirtualLayout(shape=shape, dtype=dtype)
-
-    for ch, inputfile in enumerate(inputfiles):
-        image_in = "{}".format(inputfile)
-        vsource = h5py.VirtualSource(image_in, name=ids, shape=shape[:3])
+    layout = h5py.VirtualLayout(shape=tuple(props['shape']), dtype=props['dtype'])
+    for ch, inputpath in enumerate(inputpaths):
+        inputfile, _, ids = h5_split(inputpath, ext)
+        vsource = h5py.VirtualSource(inputfile, name=ids, shape=tuple(props['shape'][:3]))
         layout[:, :, :, ch] = vsource
 
-    # Add virtual dataset to output file
-    if not outputfile:
-        filestem, ext = os.path.splitext(inputfiles[0])
-        outputfile = '{}{}{}'.format(filestem, '_virt', ext)
-    with h5py.File(outputfile, 'a', libver='latest') as f:
-        f.create_virtual_dataset(ids, layout, fillvalue=0)
+    if not outputpath:
+        outputfile, ods = f'{inputstem}_virtual{ext}', 'data_4D'
+    else:
+        outputfile, _, ods = h5_split(outputpath, ext)
 
-        if axlab is not None:
-            for i, label in enumerate(axlab + ['c']):
-                f[ids].dims[i].label = label
-        if elsize is not None:
-            f[ids].attrs['element_size_um'] = elsize + [1]
+    # Add virtual dataset to output file
+    with h5py.File(outputfile, 'a', libver='latest') as f:
+        f.create_virtual_dataset(ods, layout, fillvalue=0)
+        for i, label in enumerate(props['axlab']):
+            f[ods].dims[i].label = label
+        f[ods].attrs['element_size_um'] = props['elsize']
 
 
 if __name__ == "__main__":

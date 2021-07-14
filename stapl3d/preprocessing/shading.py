@@ -770,12 +770,13 @@ def get_image_info(image_in):
 
     elif image_in.endswith('.ims') or image_in.endswith('.bdv') or '.h5' in image_in:
 
+        # TODO: take group of h5 channels as input
         from stapl3d import get_imageprops
         props = get_imageprops(image_in)
         iminfo = {
-            'nchannels': props['shape'][props['axlab'].index('c')],
+            'nchannels': props['shape'][props['axlab'].index('c')]  if 'c' in props['axlab'] else 1,
             'ntimepoints': props['shape'][props['axlab'].index('t')] if 't' in props['axlab'] else 1,
-            'nplanes': props['shape'][props['axlab'].index('z')],
+            'nplanes': props['shape'][props['axlab'].index('z')] if 'z' in props['axlab'] else 1,
             'nstacks': 1,
             }
 

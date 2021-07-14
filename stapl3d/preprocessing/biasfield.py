@@ -213,12 +213,13 @@ class Homogeniz3r(Stapl3r):
             self.inputpaths[step]  = self._merge_paths(self._paths[step], step, 'inputs')
             self.outputpaths[step] = self._merge_paths(self._paths[step], step, 'outputs')
 
-        self.set_downsample_factors(self.inputpaths['estimate']['data'])
-
     def estimate(self, **kwargs):
         """Perform N4 bias field correction."""
 
         arglist = self._prep_step('estimate', kwargs)
+
+        self.set_downsample_factors(self.inputpaths['estimate']['data'])
+
         # NOTE: ITK is already multithreaded => n_workers = 1
         self.n_threads = min(self.tasks, multiprocessing.cpu_count())
         self._n_workers = 1
@@ -291,57 +292,28 @@ class Homogeniz3r(Stapl3r):
             self.resolution_level = imarisfiles.find_resolution_level(inputpath)
 
     def postprocess(self, **kwargs):
-        """Merge bias field estimation files.
-
-        kwargs:
-        """
+        """Merge bias field estimation files."""
 
         self._prep_step('postprocess', kwargs)
 
         inputs = self._prep_paths(self.inputs)
         outputs = self._prep_paths(self.outputs)
 
-        """
-        # TODO: skip if inputfiles not found, throwing warning
-        inputfiles = glob(f'{inpath}.h5')
-        inputfiles.sort()
-        self.stack_bias(inputfiles, f'{outpath}.h5')
-        for filepath in inputfiles:
-            os.remove(filepath)
-        """
-        # try:
-        #     import h5py
-        #     f = h5py.File(outputs['aggregate'], 'r')
-        #     f.close()
-        # except IndexError:
-        #     pass
-        # else:
-        imarisfiles.h5chs_to_virtual(outputs['aggregate'], inputs['channels'], ids='data')
-        for ids in ['data', 'bias', 'corr']:
-            imarisfiles.h5chs_to_virtual(outputs['aggregate_ds'], inputs['channels_ds'], ids=ids)
+        def gather_4D(inputpat, outputfile, idss=['data']):
+            inputfiles = glob(inputpat)
+            inputfiles.sort()
+            if not inputfiles:
+                return
+            for ids in idss:
+                inputpaths = [f'{inputfile}/{ids}' for inputfile in inputfiles]
+                imarisfiles.h5chs_to_virtual(inputpaths, f'{outputfile}/{ids}')
+
+        gather_4D(inputs['channels'], outputs['aggregate'], ['data'])
+        gather_4D(inputs['channels_ds'], outputs['aggregate_ds'], ['data', 'bias', 'corr'])
 
         pdfs = glob(inputs['report'])
         pdfs.sort()
         self._merge_reports(pdfs, outputs['report'])
-
-        # # Replace fields.  # FIXME: assumed all the same: 4D inputfile
-        # ymls = glob(f'{inpath}.yml')
-        # ymls.sort()
-        # bname = self.format_([self.prefix, self._module_id, 'estimate'])
-        # ymlstem = os.path.join(self.datadir, self.directory, bname)
-        # steps = {
-        #     'estimate': [
-        #         ['biasfield', 'estimate', 'files', 'inputpath'],
-        #         ['biasfield', 'estimate', 'files', 'resolution_level'],
-        #         ['biasfield', 'estimate', 'files', 'mask_in'],
-        #     ],
-        # }
-        # for step, trees in steps.items():
-        #     # NOTE: will replace to the values from ymls[-1]
-        #     # FIXME: may aggregate submit:channels here
-        #     self._merge_parameters(ymls, trees, ymlstem, aggregate=False)
-        # for yml in ymls:
-        #     os.remove(yml)
 
     def stack_bias(self, inputfiles, outputfile, idss=['data', 'bias', 'corr']):
         """Merge the downsampled biasfield images to 4D datasets."""
@@ -355,6 +327,9 @@ class Homogeniz3r(Stapl3r):
         """Apply N4 bias field correction."""
 
         arglist = self._prep_step('apply', kwargs)
+
+        self.set_downsample_factors(self.inputpaths['estimate']['data'])
+
         with multiprocessing.Pool(processes=self._n_workers) as pool:
             pool.starmap(self._apply_channel, arglist)
 
@@ -643,12 +618,6 @@ def downsample_channel(inputpath, resolution_level, channel, downsample_factors,
     im_ch = im.extract_channel(channel)
     im.close()
     ds_im = im_ch.downsampled(downsample_factors, ismask, outputpath)
-
-    # downsample_factors = downsample_factors.copy()
-    # for dim, dsfac in dsfacs_rl.items():
-    #     downsample_factors[dim] = dsfac * downsample_factors[dim]
-    # downsample_factors = tuple([downsample_factors[dim] for dim in ds_im.axlab])
-    # ds_im.ds.attrs['downsample_factors'] = downsample_factors
 
     im_ch.close()
 
