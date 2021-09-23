@@ -3468,8 +3468,7 @@ class Stapl3r(object):
         elif val == '?':
             s = self._suffix_formats[dim].format(**{dim: 0}).replace('0', val)
         elif val == '*':
-            pat = self._suffix_formats[dim]
-            s = pat.replace(pat[pat.find("{"):pat.find("}")+1], '*')
+            s = self._pat2mat(self._suffix_formats[dim])
         else:
             s = self._suffix_formats[dim].format(**{dim: val})
 
