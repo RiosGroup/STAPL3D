@@ -92,7 +92,7 @@ class Block3r(Stapl3r):
         self._parameter_sets = {
             'blockinfo': {
                 'fpar': self._FPAR_NAMES,
-                'ppar': ('fullsize', 'blocksize', 'blockmargin'),  # 'blocksize_xy', 'blockmargin_xy',
+                'ppar': ('fullsize', 'blocksize', 'blockmargin'),
                 'spar': ('_n_workers', 'blocks'),
                 },
             }
@@ -153,27 +153,30 @@ class Block3r(Stapl3r):
         arglist = self._prep_step('blockinfo', kwargs)
         for i, block in enumerate(self._blocks):
             if i in self.blocks:
-                pass
-                # print(f'Block {i:05d} with id {block.id} refers to region {block.slices}')
+                print(f'Block {i:05d} with id {block.id} refers to region {block.slices}')
 
     def _prep_blocks(self):
 
         step = 'blockinfo'  #self.step
-        self.set_fullsize(self.inputpaths[step]['data'])
+        inpaths = self.inputpaths[step]['data']
+        blockfiles = self.outputpaths[step]['blockfiles']
+
+        if '{b' in inpaths:
+            self.filepaths = self.get_filepaths(inpaths)
+            self.set_fullsize(self.filepaths[0])
+        else:
+            self.filepaths = []
+            self.set_fullsize(inpaths)
+
         self.set_blocksize()
         self.set_blockmargin()
-        if '{b}' in self.inputpaths[step]['data']:
-            self._blocks = self.set_blocks_from_files(self.inputpaths[step]['data'], self.outputpaths[step]['blockfiles'])
-            self._blocks0 = self.set_blocks_from_files(self.inputpaths[step]['data'], self.outputpaths[step]['blockfiles'], blocks0=True)
-        else:
-            self._blocks = self.set_blocks(self.outputpaths[step]['blockfiles'])
-            self._blocks0 = self.set_blocks(self.outputpaths[step]['blockfiles'], blocks0=True)
+
+        self._blocks = self.generate_blocks(blockfiles)
+        self._blocks0 = self.generate_blocks(blockfiles, blocks0=True)
 
     def set_fullsize(self, image_in, fullsize={}):
 
         if image_in:
-            if '{b}' in image_in:
-                image_in = image_in.format(b=0)  # FIXME
             im = Image(image_in, permission='r')
             im.load(load_data=False)
             im.close()
@@ -185,18 +188,24 @@ class Block3r(Stapl3r):
 
     def set_blocksize(self, blocksize={}):
 
-        # bs_xy = {d: self.blocksize_xy for d in 'xy' if self.blocksize_xy}
-        # self.blocksize = {**self.fullsize, **bs_xy, **self.blocksize, **blocksize}
         self.blocksize = {**self.fullsize, **self.blocksize, **blocksize}
 
     def set_blockmargin(self, blockmargin={}):
 
         bm_im = {d: 0 for d in self.blocksize.keys()}
-        # bm_xy = {d: self.blockmargin_xy for d in 'xy' if self.blockmargin_xy}
-        # self.blockmargin = {**bm_im, **bm_xy, **self.blockmargin, **blockmargin}
         self.blockmargin = {**bm_im, **self.blockmargin, **blockmargin}
 
-    def set_blocks(self, block_template, axlab='zyxct', blocks0=False):
+    def generate_blocks(self, block_template, axlab='zyxct', blocks0=False):
+        # TODO: flexible axlab order
+
+        if self.filepaths:
+            blocks = self.set_blocks_from_files(block_template, axlab, blocks0)
+        else:
+            blocks = self.set_blocks_from_grid(block_template, axlab, blocks0)
+
+        return blocks
+
+    def set_blocks_from_grid(self, block_template, axlab='zyxct', blocks0=False):
         # TODO: flexible axlab order
 
         axlab = [al for al in axlab if al in self.fullsize.keys()]
@@ -205,6 +214,7 @@ class Block3r(Stapl3r):
         shape = {d: len(range(*slc.indices(slc.stop))) for d, slc in imslices.items()}
         blocksize = self.blocksize or shape
         blocksize = {d: bs if bs else shape[d] for d, bs in blocksize.items()}
+
         if blocks0 or not self.blockmargin:
             margin = dict(zip(axlab, [0] * len(axlab)))
         else:
@@ -244,24 +254,46 @@ class Block3r(Stapl3r):
 
         return blocks
 
-    def set_blocks_from_files(self, inputpat, block_template, axlab='zyxct', blocks0=False):
+    def set_blocks_from_files(self, block_template, axlab='zyxct', blocks0=False):
 
         axlab = [al for al in axlab if al in self.fullsize.keys()]
 
         stops = []
-        for idx in [1, 2]:  # FIXME: glob files
-            from stapl3d.preprocessing import shading
-            iminfo = shading.get_image_info(inputpat.format(b=idx))
-            stops.append(iminfo['dims_zyxc'])
+        for filepath in self.filepaths:
+            if '.czi' in filepath:
+                from stapl3d.preprocessing import shading
+                iminfo = shading.get_image_info(filepath)
+                stops.append(iminfo['dims_zyxc'])
+            else:
+                im = Image(filepath)
+                im.load()
+                props = im.get_props()
+                stops.append(props['shape'])
+                im.close()
 
         # starts = [dict(zip(axlab, [0] * len(axlab))) for imsize in imsizes]
         # stops = [dict(zip(axlab, imsize)) for imsize in imsizes]
         starts = [[0] * len(stop) for stop in stops]
 
+        def blockdict_bak(start, stop, axlab, b_idx):
+            slcs = [slice(sta, sto) for sta, sto in zip(start, stop)]
+            id = self._suffix_formats['b'].format(b=b_idx)
+            bpat = block_template.format(b=b_idx) + '/{ods}'
+            # TODO: filename or h5-path pattern?
+            return {'slices': slcs, 'id': id, 'path': bpat, 'idx': b_idx}
+
         def blockdict(start, stop, axlab, b_idx):
             slcs = [slice(sta, sto) for sta, sto in zip(start, stop)]
             id = self._suffix_formats['b'].format(b=b_idx)
-            bpat = block_template.format(b=b_idx) + '/{ods}'  # TODO: filename or h5-path pattern?
+
+            if '{f' in block_template:
+                fp = self.filepaths[b_idx]
+                fstem = os.path.basename(os.path.splitext(fp)[0])
+                bpat = block_template.format(f=fstem) + '/{ods}'
+            elif '{b' in block_template:
+                bpat = block_template.format(b=b_idx) + '/{ods}'
+                  # TODO: filename or h5-path pattern?
+
             return {'slices': slcs, 'id': id, 'path': bpat, 'idx': b_idx}
 
         blocks = [Block(**blockdict(start, stop, axlab, b_idx))
@@ -303,6 +335,28 @@ class Block3r(Stapl3r):
             fC -= margin
 
         return (fc, fC), (bc, bC)
+
+    def get_filepaths(self, filepat):
+        """Set the filepaths by globbing the directory."""
+
+        def glob_h5(directory, s):
+
+            if '.h5' in s:
+                h5stem, ids = s.split('.h5')
+                s = f'{h5stem}.h5'
+            else:
+                ids = ''
+
+            fmat = os.path.join(directory, s)
+            filepaths = sorted(glob.glob(fmat))
+            filepaths = [f'{filepath}{ids}' for filepath in filepaths]
+
+            return filepaths
+
+        p = self.image_in.split('.h5')
+        directory = os.path.abspath(os.path.dirname(p[0]))
+
+        return glob_h5(directory, self._pat2mat(filepat))
 
     def _get_filepaths(self, blocks=[]):
 
@@ -419,7 +473,9 @@ class Splitt3r(Block3r):
         vols += ['data'] if self.output_ND else []
 
         os.makedirs('blocks', exist_ok=True)
-        bpat = self._build_path(moduledir='blocks', prefixes=[self.prefix, 'blocks'], suffixes=[{'b': 'p'}])
+        bpat = self._build_path(moduledir='blocks',
+                                prefixes=[self.prefix, 'blocks'],
+                                suffixes=[{'b': 'p'}])
 
         self._paths.update({
             'split': {
@@ -449,12 +505,21 @@ class Splitt3r(Block3r):
     def _split_with_combinechannels(self, block):
         """Average membrane and nuclear channels and write as blocks."""
 
-        reps = {'b': block} if '{b}' in self.inputs else {}
+        """
+        reps = {'b': block} if '{b}' in self.inputs['data'] else {}
         inputs = self._prep_paths(self.inputs, reps=reps)
+        reps = {'b': block} if '{b}' in self.outputs['data'] else {}
+        outputs = self._prep_paths(self.outputs, reps=reps)
+        """
+
+        inputs = self._prep_paths(self.inputs, reps={'b': block})
         outputs = self._prep_paths(self.outputs, reps={'b': block})
 
         # INPUT
-        infile = inputs['data'].format(b=block)
+        if self.filepaths:
+            infile = self.filepaths[block]
+        else:
+            infile = inputs['data'].format(b=block)
 
         block = self._blocks[block]
         print('Writing block with id {} to {}'.format(block.id, block.path))
@@ -472,16 +537,21 @@ class Splitt3r(Block3r):
 
         # OUTPUTS Image, 3D and ND
         props = im.get_props2()
+
         props['path'] = block.path.format(ods='data')
+
         props['permission'] = 'r+'
         props['dtype'] = self.datatype or props['dtype']
-        props['chunks'] = self.chunksize or [max(64, self.blockmargin[d]) if d in 'xy' else s for d, s in zip(im.axlab, im.dims)]  # FIXME: if blockmargin is 0
+        props['chunks'] = self.chunksize or [max(64, self.blockmargin[d])
+                                             if d in 'xy' else s
+                                             for d, s in zip(im.axlab, im.dims)]
+                                             # FIXME: if blockmargin is 0
         props['shape'] = list(im.slices2shape(list(block.slices)))
         props['dims'] = list(im.slices2shape(list(block.slices)))
         props['slices'] = None
         mo_ND = Image(**props)
         try:
-            if outputs['data']:
+            if outputs['data']:  # self.output_ND
                 mo_ND.create()
         except KeyError:
             pass
@@ -517,13 +587,11 @@ class Splitt3r(Block3r):
 
         idxs_set = set([l for k, v in self.volumes.items() for l in v['idxs']])
         for volnr in idxs_set:
-            print('volnr', volnr)
 
             if c_axis is not None:
                 im.slices[c_axis] = slice(volnr, volnr + 1, 1)
 
             data = im.slice_dataset(squeeze=False).astype('float')
-            print(data.shape)
 
             if bf is not None:
                 print('Performing bias field correction.')
@@ -542,14 +610,15 @@ class Splitt3r(Block3r):
                 if volnr in output['idxs']:
                     idx = output['idxs'].index(volnr)
                     data *= output['weights'][idx]
-                    print(data.shape)
                     output['data'] += np.squeeze(data)
 
         mo_ND.close()
 
         for name, output in self.volumes.items():
             output['data'] /= len(output['idxs'])
-            write_image(mo_3D, block.path.format(ods=output['ods']), output['data'].astype(mo_3D.dtype))
+            write_image(mo_3D,
+                        block.path.format(ods=output['ods']),
+                        output['data'].astype(mo_3D.dtype))
 
     def view(self, input=[], images=[], labels=[], settings={}):
 
