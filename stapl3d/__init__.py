@@ -3488,108 +3488,90 @@ class Stapl3r(object):
             if '.h5' in filepath:
                 filepath = filepath.split('.h5')[0]
             directory, filename = os.path.split(filepath)
-            os.makedirs(directory, exist_ok=True)
+            if directory:
+                os.makedirs(directory, exist_ok=True)
 
-    def view(self, filepath='', images=[], labels=[], settings={}):
+    def _get_h5_dset(self, filepath, ids, slices={}):
+        im = Image('{}/{}'.format(filepath, ids), permission='r')
+        im.load(load_data=False)
+        if slices:
+            for d, slc in slices.items():
+                idx = im.axlab.index(d)
+                if slc == 'ctr':
+                    slc = int(im.dims[idx] / 2)
+                im.slices[idx] = slc
+        data = im.slice_dataset(squeeze=False)
+        im.close()
+        return data
+
+    def view(self, input='', images=[], labels=[], settings={}):
 
         import napari
-        from stapl3d import Image
 
-        def get_h5_dset(filepath, ids, slices={}):
-            im = Image('{}/{}'.format(filepath, ids), permission='r')
-            im.load(load_data=False)
-
-            if slices:
-                for d, slc in slices.items():
-                    idx = im.axlab.index(d)
-                    if slc == 'ctr':
-                        slc = int(im.dims[idx] / 2)
-                    im.slices[idx] = slc
-            data = im.slice_dataset(squeeze=False)
-            im.close()
-            return data
-
-        # TODO
-        # if not filepath:
-        #     filepath = self._abs(self.outputpaths['estimate']['blockfiles'].format(b=block_idx))
         images = images or self._images
         labels = labels or self._labels
         slices = settings['slices'] if 'slices' in settings.keys() else {}
 
         viewer = napari.Viewer()
 
+        if isinstance(input, str):
+            self.view_single(viewer, input, images, labels, slices)
+        if isinstance(input, list):
+            self.view_blocks(viewer, input, images, labels, slices)
+
+        self.viewer = viewer
+        self.set_view(settings)
+
+    def view_single(self, viewer, filepath='', images=[], labels=[], slices={}):
+
         for ids in images:
-            viewer.add_image( get_h5_dset(filepath, ids, slices), name=ids)
+            viewer.add_image( self._get_h5_dset(filepath, ids, slices), name=ids)
         for lds in labels:
-            viewer.add_labels(get_h5_dset(filepath, lds, slices), name=lds)
+            viewer.add_labels(self._get_h5_dset(filepath, lds, slices), name=lds)
 
         im = Image('{}/{}'.format(filepath, (images + labels)[0]), permission='r')
         im.load(load_data=False)
         im.close()
 
-        axlab = []
-        viewer.dims.axis_labels = [al for i, al in enumerate(im.axlab) if im.dims[i] > 1]
-
+        axlab = [al for i, al in enumerate(im.axlab) if im.dims[i] > 1]
+        elsize = [es for i, es in enumerate(im.elsize) if im.dims[i] > 1]
+        viewer.dims.axis_labels = axlab
         for lay in viewer.layers:
-            lay.scale = [es for i, es in enumerate(im.elsize) if im.dims[i] > 1]
+            lay.scale = elsize
 
-        self.viewer = viewer
-
-        self.set_view(settings)
-
-    def view_blocks(self, block_idxs=[], images=[], labels=[], settings={}):
-        """TODO: merge with view_with_napari"""
-
-        import napari
-        from stapl3d import Image
-
-        def get_h5_dset(filepath, ids, slices={}):
-            im = Image('{}/{}'.format(filepath, ids), permission='r')
-            im.load(load_data=False)
-            if slices:
-                for d, slc in slices.items():
-                    idx = im.axlab.index(d)
-                    if slc == 'ctr':
-                        slc = int(im.dims[idx] / 2)
-                    im.slices[idx] = slc
-            data = im.slice_dataset(squeeze=False)
-            im.close()
-            return data
-
-        images = images or self._images
-        labels = labels or self._labels
-
-        viewer = napari.Viewer()
-
+    def view_blocks(self, viewer, block_idxs=[], images=[], labels=[], slices={}):
 
         block_id0 = self._blocks[block_idxs[0]].id
+
         for block_idx in block_idxs:
 
             filepath = self._blocks[block_idx].path.replace('/{ods}', '')
+
             im = Image('{}/{}'.format(filepath, (images + labels)[0]), permission='r')
             im.load(load_data=False)
             im.close()
 
-            slices = []
-
             block = self._blocks[block_idx]
-            Tt = np.copy(block.affine)
-            for i, es in enumerate(im.elsize[:3]):
-                Tt[0, i] *= es
-            Ts = np.diag(list(im.elsize[:3]) + [1])
-            # affine =  Tt @ Ts
-            affine =  Ts @ Tt
-            for ids in images:
-                viewer.add_image( get_h5_dset(filepath, ids, slices), name=f'{block.id}_{ids}', affine=affine)
-                viewer.layers[f'{block.id}_{ids}'].contrast_limits = viewer.layers[f'{block_id0}_{ids}'].contrast_limits
-            for lds in labels:
-                viewer.add_labels(get_h5_dset(filepath, lds, slices), name=f'{block.id}_{lds}', affine=affine)
+            affine = self._view_trans_affine(block.affine, im.elsize[:3])
+
+            for ids in images + labels:
+                name = f'{block.id}_{ids}'
+                data = self._get_h5_dset(filepath, ids, slices)
+                if ids in images:
+                    viewer.add_image(data, name=name, affine=affine)
+                    clim = viewer.layers[f'{block_id0}_{ids}'].contrast_limits
+                    viewer.layers[f'{block.id}_{ids}'].contrast_limits = clim
+                if ids in labels:
+                    viewer.add_labels(data, name=name, affine=affine)
 
         viewer.dims.axis_labels = [al for al in im.axlab]
 
-        self.viewer = viewer
-
-        self.set_view(settings)
+    def _view_trans_affine(self, affine, elsize):
+        Tt = np.copy(affine)
+        for i, es in enumerate(elsize):
+            Tt[0, i] *= es
+        Ts = np.diag(list(elsize) + [1])
+        return  Ts @ Tt
 
     def set_view(self, settings={}):
         """Viewer settings functions."""

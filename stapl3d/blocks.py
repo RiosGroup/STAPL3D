@@ -322,13 +322,13 @@ class Block3r(Stapl3r):
         images = images or self._images
 
         if isinstance(input, str):
-            super().view(input, images, labels, settings)
-        elif type(input) == int or float:
-            filepath = self._abs(self.outputpaths['blockinfo']['blockfiles'].format(b=input))
-            super().view(filepath, images, labels, settings)
-        else:
-            input = input or [0, 1]
-            super().view_blocks(input, images, labels, settings)
+            input = input or self._blocks[0].path.replace('/{ods}', '')
+        elif isinstance(input, (int, float)):
+            input = self._blocks[input].path.replace('/{ods}', '')
+        elif isinstance(input, list):
+            input = input or list(range(len(self._blocks)))
+
+        super().view(input, images, labels, settings)
 
 
 class Splitt3r(Block3r):
@@ -554,26 +554,17 @@ class Splitt3r(Block3r):
     def view(self, input=[], images=[], labels=[], settings={}):
 
         images = images or self._images
+        labels = labels or self._labels
 
         if isinstance(input, str):
-            super().view(input, images, labels, settings)
-        elif type(input) == int or float:
-            filepath = self._abs(self.outputpaths['split']['blockfiles'].format(b=input))
-            super().view(filepath, images, labels, settings)
-        else:
-            input = input or [0, 1]
-            super().view_blocks(input, images, labels, settings)
+            input = input or self._blocks[0].path.replace('/{ods}', '')
+        elif isinstance(input, (int, float)):
+            input = self._blocks[input].path.replace('/{ods}', '')
+            print(input, images, labels)
+        elif isinstance(input, list):
+            input = input or list(range(len(self._blocks)))
 
-    # def view(self, filepath='', images=['mean', 'memb/mean', 'nucl/mean'], labels=[], block_idx=0, settings={}):
-    #
-    #     if not filepath:
-    #         filepath = self._abs(self.outputpaths['split']['blockfiles'].format(b=block_idx))
-    #
-    #     super().view(filepath, images, labels, settings)
-    #
-    # def view_blocks(self, block_idxs=[0, 1], images=['mean', 'memb/mean', 'nucl/mean'], labels=[], settings={}):
-    #
-    #     super().view_blocks(block_idxs, images, labels, settings)
+        super().view(input, images, labels, settings)
 
 
 class Merg3r(Block3r):
@@ -833,35 +824,13 @@ class Merg3r(Block3r):
         labels = labels or self._labels
 
         if isinstance(input, str):
-            super().view(input, images, labels, settings)
-        elif type(input) == int or type(input) == float:
-            filepath = self._abs(self.outputpaths['merge']['blockfiles'].format(b=input))
-            # if not filepath:
-            #     basename = self.format_([self.dataset, self.suffix])
-            #     outstem = os.path.join(self.directory, basename)
-            #     filepath = '{}.h5'.format(outstem)
-            super().view(filepath, images, labels, settings)
-        else:
-            input = input or [0, 1]
-            super().view_blocks(input, images, labels, settings)
+            input = input or self._blocks[0].path.replace('/{ods}', '')
+        elif isinstance(input, (int, float)):
+            input = self._blocks[input].path.replace('/{ods}', '')
+        elif isinstance(input, list):
+            input = input or list(range(len(self._blocks)))
 
-    # def view(self, filepath='', images=[], labels=[], vol_idx=0, settings={}):
-
-        # idss = idss or [list(volume.keys())[0] for volume in self.volumes]
-
-        # if not filepath:
-        #     filestem = os.path.join(self.directory, self.format_())
-        #     filepath = f'{filestem}_ds.h5'
-        # if not filepath:
-        #     filepath = self._abs(self.outputpaths['estimate']['file'])
-        # if not filepath:
-        #     basename = self.format_([self.dataset, self.suffix])
-        #     outstem = os.path.join(self.directory, basename)
-        #     filepath = '{}.h5'.format(outstem)
-
-        # TODO: dask array
-        # super().view(filepath, images, labels, settings)
-        # super().view_with_napari(filepath, idss, slices={'z': 'ctr'})
+        super().view(input, images, labels, settings)
 
 
 def get_bias_field_block(bf, slices, outdims, dsfacs):
