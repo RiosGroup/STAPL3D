@@ -628,7 +628,7 @@ class Equaliz3r(Stapl3r):
         extent = [0, w, 0, h]
 
         ax = axdict['image']
-        ax.imshow(image, cmap="gray", extent=extent)
+        ax.imshow(image, cmap="gray", extent=extent, vmin=0, vmax=info_dict['median_fg'])
         ax.set_axis_off()
         self._add_scalebar(ax, w)
 
