@@ -224,6 +224,7 @@ class Equaliz3r(Stapl3r):
             'methods': ['seg'],
             'quantiles': [0.50, 0.99],
             '_metrics': {},
+            '_use_dirtree': False,
         }
         for k, v in default_attr.items():
             setattr(self, k, v)
@@ -487,6 +488,11 @@ class Equaliz3r(Stapl3r):
                 df = pd.concat([df, df0], axis=1)
 
         df.index = [filestem]
+
+        if self._use_dirtree:
+            comps = filepath.split(os.sep)
+            df['antibody'] = comps[-2]
+            df['species'] = comps[-3]
 
         # NB: need single-file output for HCP distributed system
         df.to_csv(outputs['csv'], index_label='sample_id')
