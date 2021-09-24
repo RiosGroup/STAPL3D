@@ -235,6 +235,9 @@ class Equaliz3r(Stapl3r):
 
         self._init_log()
 
+        self._images = ['data', 'smooth']
+        self._labels = ['noise_mask', 'tissue_mask', 'segmentation']
+
     def _init_paths(self):
 
         self.set_filepaths()
@@ -692,21 +695,24 @@ class Equaliz3r(Stapl3r):
 
         return info_dict
 
-    def view_with_napari(self, filepath='', idss=['data', 'smooth'], ldss=['noise_mask', 'tissue_mask', 'segmentation']):
+    def view(self, input=[], images=[], labels=[], settings={}):
         """View equalization image and segmentations with napari."""
 
-        if not filepath:
+        images = images or self._images
+        labels = labels or self._labels
+
+        if not input:
             filestem = os.path.splitext(os.path.basename(self.filepaths[0]))[0]
             outputs = self._prep_paths(self.outputpaths['segment'], reps={'f': filestem})
             input = outputs['stem']
             filepath = f'{input}.h5'
-        elif filepath.endswith('.czi'):
+        elif input.endswith('.czi'):
             filestem = os.path.splitext(os.path.basename(filepath))[0]
             outputs = self._prep_paths(self.outputpaths['segment'], reps={'f': filestem})
             input = outputs['stem']
             filepath = f'{input}.h5'
 
-        super().view_with_napari(filepath, idss, ldss)
+        super().view(input, images, labels, settings)
 
 
 def load_image(inputpath):
