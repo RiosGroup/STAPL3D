@@ -224,7 +224,7 @@ class Equaliz3r(Stapl3r):
             'methods': ['seg'],
             'quantiles': [0.50, 0.99],
             '_metrics': {},
-            '_use_dirtree': False,
+            '_use_dirtree': True,
             'df': pd.DataFrame(),
         }
         for k, v in default_attr.items():
@@ -253,7 +253,7 @@ class Equaliz3r(Stapl3r):
             fstring = '{}_{}.nii.gz'
 
         stem = self._build_path()
-        fpat = self._build_path(suffixes=[{'f': 'p'}])
+        fpat = os.path.join('{d}', '{f}')
 
         self._paths = {
             'smooth': {
@@ -307,6 +307,19 @@ class Equaliz3r(Stapl3r):
             self.inputpaths[step]  = self._merge_paths(self._paths[step], step, 'inputs')
             self.outputpaths[step] = self._merge_paths(self._paths[step], step, 'outputs')
 
+    def _get_filepaths_inout(self, filepath):
+        """Smooth images with a gaussian kernel."""
+
+        dir, base = os.path.split(filepath)
+        filestem = os.path.splitext(base)[0]
+        if not self._use_dirtree:
+            dir = self.directory
+        reps = {'d': dir, 'f': filestem}
+        inputs = self._prep_paths(self.inputs, reps=reps)
+        outputs = self._prep_paths(self.outputs, reps=reps)
+
+        return filestem, inputs, outputs
+
     def smooth(self, **kwargs):
         """Smooth images with a gaussian kernel."""
 
@@ -317,9 +330,7 @@ class Equaliz3r(Stapl3r):
     def _smooth_image(self, filepath):
         """Smooth an image with a gaussian kernel."""
 
-        filestem = os.path.splitext(os.path.basename(filepath))[0]
-        inputs = self._prep_paths(self.inputs, reps={'f': filestem})
-        outputs = self._prep_paths(self.outputs, reps={'f': filestem})
+        filestem, inputs, outputs = self._get_filepaths_inout(filepath)
 
         data, props = load_image(filepath)
 
@@ -344,9 +355,7 @@ class Equaliz3r(Stapl3r):
 
     def _segment_regions_image(self, filepath):
 
-        filestem = os.path.splitext(os.path.basename(filepath))[0]
-        inputs = self._prep_paths(self.inputs, reps={'f': filestem})
-        outputs = self._prep_paths(self.outputs, reps={'f': filestem})
+        filestem, inputs, outputs = self._get_filepaths_inout(filepath)
 
         data, props = load_image(inputs['data'])
         smooth, props = load_image(inputs['smooth'])
@@ -472,9 +481,7 @@ class Equaliz3r(Stapl3r):
             cnr, noise_sd = get_cnr(image, segmentation==1, tissue, signal)
             return pd.DataFrame([signal, tissue, contrast, cnr, noise_sd]).T
 
-        filestem = os.path.splitext(os.path.basename(filepath))[0]
-        inputs = self._prep_paths(self.inputs, reps={'f': filestem})
-        outputs = self._prep_paths(self.outputs, reps={'f': filestem})
+        filestem, inputs, outputs = self._get_filepaths_inout(filepath)
 
         data, props = load_image(inputs['data'])
         smooth, props = load_image(inputs['smooth'])
@@ -560,7 +567,11 @@ class Equaliz3r(Stapl3r):
 
         # directory = os.path.abspath(self.directory)
         directory = os.path.abspath(os.path.dirname(self.image_in))
-        self.filepaths = sorted(glob(os.path.join(directory, self.filepat)))
+        if self._use_dirtree:
+            filepat = os.path.join('*', '*', self.filepat)
+        else:
+            filepat = self.filepat
+        self.filepaths = sorted(glob(os.path.join(directory, filepat)))
 
     def _get_info_dict(self, **kwargs):
 
