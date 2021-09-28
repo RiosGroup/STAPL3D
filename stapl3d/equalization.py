@@ -225,6 +225,7 @@ class Equaliz3r(Stapl3r):
             'quantiles': [0.50, 0.99],
             '_metrics': {},
             '_use_dirtree': False,
+            'df': pd.DataFrame(),
         }
         for k, v in default_attr.items():
             setattr(self, k, v)
@@ -551,6 +552,8 @@ class Equaliz3r(Stapl3r):
         self._merge('report', merge_reports)
 
         self.summary_report(outputpath=outputs['summary'])
+
+        self.df = pd.read_csv(outputs['csv'], index_col='sample_id')
 
     def set_filepaths(self):
         """Set the filepaths by globbing the directory."""
