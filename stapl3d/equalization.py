@@ -705,10 +705,9 @@ class Equaliz3r(Stapl3r):
         # smoothed image with contours at thresholds
         ax = axdict['tissue / noise regions']
         ax.imshow(image_smooth, cmap="gray")
-        thrs = [thresholds[0], thresholds[2]]
-        cs = ax.contour(image_smooth, thrs, colors=thrcolors[:2], linestyles='dashed')
+        cs = ax.contour(image_smooth, thresholds[:2], colors=thrcolors[:2], linestyles='dashed')
         ax.clabel(cs, inline=1, fontsize=5)
-        labels = ['thr={:.5}'.format(thr) for thr in thrs]
+        labels = ['thr={:.5}'.format(float(thr)) for thr in thresholds[:2]]
         for i in range(len(labels)):
             cs.collections[i].set_label(labels[i])
         ax.set_axis_off()
@@ -730,7 +729,11 @@ class Equaliz3r(Stapl3r):
         ax = axdict['histogram smoothed image']
         ax.hist(np.ravel(image_smooth), bins=256, log=logscale, color=[0, 0, 0])
         linestyles = '--:'
-        labels = ['{:.5}'.format(thr) for thr in thresholds]
+        if info_dict['threshold_otsu'] is None:
+            thresholds = thresholds[:2]
+            linestyles = linestyles[:2]
+            thrcolors = thrcolors[:2]
+        labels = ['{:.5}'.format(float(thr)) for thr in thresholds]
         self._draw_thresholds(ax, thresholds, thrcolors, linestyles, labels)
 
         # image histogram from background and signal-of-interest regions
