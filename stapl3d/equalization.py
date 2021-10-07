@@ -71,7 +71,7 @@ class Equaliz3r(Stapl3r):
         Calculate metrics of equalization images.
     postprocess
         Merge outputs of individual equalization images.
-    view_with_napari
+    view
         View equalization image and segmentations with napari.
 
     Parameters
@@ -505,10 +505,45 @@ class Equaliz3r(Stapl3r):
 
         df.index = [filestem]
 
+
+
+        def find_primaries(mapping, name):
+            for v, prefix in mapping.items():
+                if name.lower().startswith(prefix.lower()):
+                    return True, v
+            return False, 'None'
+
+        def find_secondaries(mapping, name):
+            for species, specdict in mapping.items():
+                for ab, prefix in specdict.items():
+                    if name.lower().startswith(prefix.lower()):
+                        return True, species, ab
+            return False, 'None', 'None'
+
         if self._use_dirtree:
             comps = filepath.split(os.sep)
             df['antibody'] = comps[-2]
             df['species'] = comps[-3]
+            df['primaries'] = comps[-3] == 'primaries'
+            df['secondaries'] = comps[-3] != 'primaries'
+
+        elif self.step_id in self._cfg.keys():
+
+            if 'primaries' in self._cfg[self.step_id]:
+                mapping = self._cfg[self.step_id]['primaries']
+                in_primaries, antibody = find_primaries(mapping, filestem)
+                df['primaries'] = in_primaries
+                df['secondaries'] = False
+                df['antibody'] = antibody
+                df['species'] = 'primaries'  # FIXME
+
+            if 'secondaries' in self._cfg[self.step_id]:
+                mapping = self._cfg[self.step_id]['secondaries']
+                in_secondaries, species, antibody = find_secondaries(mapping, filestem)
+                df['secondaries'] = in_secondaries
+                if in_secondaries:
+                    df['antibody'] = antibody
+                    df['species'] = species
 
         # NB: need single-file output for HCP distributed system
         df.to_csv(outputs['csv'], index_label='sample_id')
@@ -727,24 +762,75 @@ class Equaliz3r(Stapl3r):
 
         return info_dict
 
-    def view(self, input=[], images=[], labels=[], settings={}):
+    def _plot_primaries(self, metric='seg-q2'):
+
+        df = self.df[self.df['primaries']]
+        dfa = df.groupby('antibody').agg([np.mean, np.std])
+        dfb = dfa.xs(metric, axis=1).sort_values('mean', ascending=False)
+
+        try:
+            import seaborn as sns
+        except ImportError:
+            dfb.plot(kind="bar", y="mean", yerr='std',
+                     legend=False, figsize=(16, 10), title="Primaries")
+        else:
+            g = sns.catplot(
+                kind='bar',
+                x='antibody',
+                y=metric,
+                data=df,
+                estimator=np.mean,
+                ci='sd',
+                order=dfb.index,
+                height=8,
+                aspect=2,
+            )
+
+            g.set_xticklabels(rotation=60, fontsize=15)
+            g.set_yticklabels(fontsize=15)
+            g.set_axis_labels('', 'intensity', fontsize=20)
+
+    def _plot_secondaries(self, metric='seg-q2'):
+
+        df = self.df[self.df['secondaries']]
+        dfa = df.groupby(['species', 'antibody']).agg([np.mean, np.std])
+        dfb = dfa.xs(metric, axis=1).dropna().sort_values('mean', ascending=False)
+
+        dfb.unstack(level=0).plot(
+            kind='bar',
+            y="mean",
+            yerr='std',
+            subplots=True,
+            sharex=False,
+            sharey=True,
+            legend=False,
+            figsize=(16, 10),
+            layout=(1, 8),
+            ylim=[0, 50000],
+        )
+        #sns.catplot(kind='bar', data=df, col='species', estimator=np.mean, ci='sd', col_wrap=4)
+
+    def view(self, input=[], images=None, labels=None, settings={}):
         """View equalization image and segmentations with napari."""
 
         images = images or self._images
         labels = labels or self._labels
 
-        if not input:
-            filestem = os.path.splitext(os.path.basename(self.filepaths[0]))[0]
-            outputs = self._prep_paths(self.outputpaths['segment'], reps={'f': filestem})
-            input = outputs['stem']
-            filepath = f'{input}.h5'
-        elif input.endswith('.czi'):
-            filestem = os.path.splitext(os.path.basename(filepath))[0]
-            outputs = self._prep_paths(self.outputpaths['segment'], reps={'f': filestem})
-            input = outputs['stem']
-            filepath = f'{input}.h5'
+        """
+        if images is None:
+            images = []
+        else:
+            images = images or self._images
+        if labels is None:
+            labels = []
+        else:
+            labels = labels or self._labels
+        """
 
-        super().view(input, images, labels, settings)
+        filepath = input or self.filepaths[0]
+        filepath = filepath.replace(os.path.splitext(filepath)[-1], '.h5')
+
+        super().view(filepath, images, labels, settings)
 
 
 def load_image(inputpath):
