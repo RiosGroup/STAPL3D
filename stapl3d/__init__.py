@@ -3491,7 +3491,7 @@ class Stapl3r(object):
             if '.h5' in filepath:
                 filepath = filepath.split('.h5')[0]
             directory, filename = os.path.split(filepath)
-            if directory:
+            if directory and directory!='{d}':
                 os.makedirs(directory, exist_ok=True)
 
     def _get_h5_dset(self, filepath, ids, slices={}):
