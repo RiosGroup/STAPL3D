@@ -2930,7 +2930,10 @@ class Stapl3r(object):
         self.image_in = image_in  # raw input image file (.czi / .lif)
         if '.h5' in image_in:
             image_in = image_in.split('.h5')[0]
-        self.datadir = os.path.abspath(os.path.dirname(image_in))
+        if os.path.isdir(image_in):
+            self.datadir = os.path.abspath(image_in)
+        else:
+            self.datadir = os.path.abspath(os.path.dirname(image_in))
         # self.image_in = os.path.basename(image_in)  # raw input image file (.czi / .lif)
         # self.projdir = os.path.dirname(self.datadir)
 
