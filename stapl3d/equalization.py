@@ -754,12 +754,18 @@ class Equaliz3r(Stapl3r):
     def _summary_report(self, f, axdict, info_dict):
         """Plot summary report."""
 
+        metric = 'seg-cnr'
+        title = "contrast-to-noise"
+
+        metric = 'seg-q2'
+        title = "median_fg"
+
         ax = axdict['graph']
         df = info_dict['df']
-        df = df.sort_values('seg-cnr')
+        df = df.sort_values(metric)
         c = plt.cm.rainbow(np.linspace(0, 1, df.shape[0]))
-        df['seg-cnr'].plot(ax=ax, kind='barh', color=c)
-        ax.set_title("contrast-to-noise", fontsize=12)
+        df[metric].plot(ax=ax, kind='barh', color=c)
+        ax.set_title(title, fontsize=12)
 
     def _get_info_dict_summary(self, filestem, info_dict={}, channel=None):
 
