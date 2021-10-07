@@ -258,6 +258,7 @@ class Block3r(Stapl3r):
 
         axlab = [al for al in axlab if al in self.fullsize.keys()]
 
+        from stapl3d.preprocessing import shading
         stops = []
         for filepath in self.filepaths:
             if '.czi' in filepath:
