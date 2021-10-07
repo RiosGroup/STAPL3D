@@ -551,28 +551,15 @@ class Equaliz3r(Stapl3r):
         self._metrics = {filestem: df.to_dict(orient='list')}
         self.dump_parameters(self.step, outputs['yml'])
 
-        # Pars of this step
-        pars = self._step_pars(self._parameter_sets[self.step], vars(self))['params']
-        # Add 'sigma' parameter of previous step
-        pars = self._load_dumped_step(self._module_id, self._module_id, 'smooth', pars)
-        # Load thresholds from filestem-specific yml
-        with open(inputs['yml'], 'r') as ymlfile:
-            cfg = yaml.safe_load(ymlfile)
-        pars = {**pars, **cfg['equalization']['segment']['params']}
-
         # NOTE: doing this for 'seg' method only => TODO
-        self.report(outputpath=outputs['report'],
-                    name=filestem, filestem=filestem,
-                    inputs=inputs, outputs=outputs,
-                    parameters=pars,
-                    # threshold_noise=pars['thresholds'][filestem][0],
-                    # threshold_tissue=pars['thresholds'][filestem][1],
-                    # threshold_otsu=pars['_otsus'][filestem],
-                    # cnr=self._metrics[filestem]['seg-cnr'][0],
-                    # contrast=self._metrics[filestem]['seg-contrast'][0],
-                    # median_bg=self._metrics[filestem]['seg-q1'][0],
-                    # median_fg=self._metrics[filestem]['seg-q2'][0],
-                    )
+        inputstem = inputs['data'].replace('.h5/data', '')
+        pars = self._collect_parameters(inputstem)
+        self.report(
+            outputpath=outputs['report'],
+            name=filestem, filestem=filestem,
+            inputs=inputs, outputs=outputs,
+            parameters=pars,
+            )
 
     def postprocess(self, **kwargs):
         """Merge outputs of individual equalization images."""
@@ -599,6 +586,11 @@ class Equaliz3r(Stapl3r):
         }
         for step, trees in steps.items():
             self._merge(f'yml_{step}', merge_parameters, trees=trees)
+        pars = self.load_dumped_pars()
+        self._sigmas = pars['_sigmas']
+        self._otsus = pars['_otsus']
+        self.thresholds = pars['thresholds']
+        self._metrics = pars['_metrics']
 
         self._merge('csv', merge_csvs)
 
@@ -608,16 +600,27 @@ class Equaliz3r(Stapl3r):
 
         self.df = pd.read_csv(outputs['csv'], index_col='sample_id')
 
+
     def set_filepaths(self):
         """Set the filepaths by globbing the directory."""
 
-        # directory = os.path.abspath(self.directory)
-        directory = os.path.abspath(os.path.dirname(self.image_in))
         if self._use_dirtree:
             filepat = os.path.join('*', '*', self.filepat)
         else:
             filepat = self.filepat
-        self.filepaths = sorted(glob(os.path.join(directory, filepat)))
+        self.filepaths = sorted(glob(os.path.join(self.datadir, filepat)))
+
+    def _collect_parameters(self, inputstem, steps=['smooth', 'segment', 'metrics']):
+        """Collect parameters of steps for file-specific report generation."""
+
+        pars = {}
+        for step in steps:
+            ymlpath = f'{inputstem}_{step}.yml'
+            with open(ymlpath, 'r') as ymlfile:
+                cfg = yaml.safe_load(ymlfile)
+            pars = {**pars, **cfg[self._module_id][step]['params']}
+
+        return pars
 
     def _get_info_dict(self, **kwargs):
 
