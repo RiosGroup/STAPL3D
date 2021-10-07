@@ -259,7 +259,7 @@ class Equaliz3r(Stapl3r):
         self._paths = {
             'smooth': {
                 'inputs': {
-                    'data': f'{fpat}',
+                    'data': fstring.format(fpat, 'data'),
                     },
                 'outputs': {
                     **{ods: fstring.format(fpat, ods) for ods in vols_d},
