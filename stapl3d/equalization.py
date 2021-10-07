@@ -176,7 +176,7 @@ class Equaliz3r(Stapl3r):
         self._parameter_sets = {
             'smooth': {
                 'fpar': self._FPAR_NAMES,
-                'ppar': ('sigma',),
+                'ppar': ('sigma', '_sigmas'),
                 'spar': ('_n_workers', 'filepaths'),
                 },
             'segment': {
@@ -262,7 +262,8 @@ class Equaliz3r(Stapl3r):
                     'data': f'{fpat}',
                     },
                 'outputs': {
-                    ods: fstring.format(fpat, ods) for ods in vols_d
+                    **{ods: fstring.format(fpat, ods) for ods in vols_d},
+                    **{'yml': f'{fpat}_smooth'},
                     },
                 },
             'segment': {
@@ -290,12 +291,14 @@ class Equaliz3r(Stapl3r):
                 'inputs': {
                     'data': fstring.format(fpat, 'data'),
                     'csv': f'{fpat}.csv',
+                    'yml_smooth': f'{fpat}_smooth.yml',
                     'yml_segment': f'{fpat}_segment.yml',
                     'yml_metrics': f'{fpat}_metrics.yml',
                     'report': f'{fpat}.pdf',
                     },
                 'outputs': {
                     'csv': f'{stem}.csv',
+                    'yml_smooth': f'{stem}_smooth.yml',
                     'yml_segment': f'{stem}_segment.yml',
                     'yml_metrics': f'{stem}_metrics.yml',
                     'report': f'{stem}.pdf',
@@ -346,6 +349,10 @@ class Equaliz3r(Stapl3r):
         for ids, out in vols.items():
             props['path'] = outputs[ids]
             write_image(out, props)
+
+        self._sigmas = {filestem: self.sigma}
+
+        self.dump_parameters(self.step, outputs['yml'])
 
     def segment(self, **kwargs):
         """Segment the noise and tissue region in the image."""
@@ -544,6 +551,9 @@ class Equaliz3r(Stapl3r):
         outputs = self._prep_paths(self.outputs)
 
         steps = {
+            'smooth': [
+                ['equalization', 'smooth', 'params', '_sigmas'],
+                ],
             'segment': [
                 ['equalization', 'segment', 'params', 'thresholds'],
                 ['equalization', 'segment', 'params', '_otsus'],
@@ -583,6 +593,7 @@ class Equaliz3r(Stapl3r):
             kwargs['parameters'] = p
 
         filestem = kwargs['filestem']
+        kwargs['sigma']  = p['_sigmas'][filestem]
         kwargs['threshold_noise']  = p['thresholds'][filestem][0]
         kwargs['threshold_tissue'] = p['thresholds'][filestem][1]
         kwargs['threshold_otsu']   = p['_otsus'][filestem]
