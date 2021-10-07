@@ -368,10 +368,8 @@ class Segment3r(Block3r):
         images = images or self._images
         labels = labels or self._labels
 
-        if isinstance(input, str):
-            super().view(input, images, labels, settings)
-        elif type(input) == int or type(input) == float:
-            filepath = self._abs(self.outputpaths['estimate']['blockfiles'].format(b=input))
+        if isinstance(input, (int, float)):
+            filepath = self._blocks[input].path.replace('/{ods}', '')
             super().view(filepath, images, labels, settings)
         else:
             input = input or [0, 1]
@@ -1478,13 +1476,26 @@ class Subsegment3r(Block3r):
 
     def view(self, input=[], images=[], labels=[], settings={}):
 
+        # images = images or self._images
+        #
+        # if isinstance(input, str):
+        #     super().view(input, images, labels, settings)
+        # elif type(input) == int or float:
+        #     if not input:
+        #         filepath = self._abs(self.outputpaths['estimate']['blockfiles'].format(b=input))
+        #     super().view(filepath, images, labels, settings)
+        # else:
+        #     input = input or [0, 1]
+        #     super().view_blocks(input, images, labels, settings)
+
         images = images or self._images
+        labels = labels or self._labels
 
         if isinstance(input, str):
             super().view(input, images, labels, settings)
-        elif type(input) == int or float:
-            if not input:
-                filepath = self._abs(self.outputpaths['estimate']['blockfiles'].format(b=input))
+        elif type(input) == int or type(input) == float:
+            #filepath = self._abs(self.outputpaths['estimate']['blockfiles'].format(b=input))
+            filepath = self._blocks[input].path.replace('/{ods}', '')
             super().view(filepath, images, labels, settings)
         else:
             input = input or [0, 1]

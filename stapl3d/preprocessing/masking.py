@@ -199,13 +199,10 @@ class Mask3r(Stapl3r):
             self.inputpaths[step]  = self._merge_paths(self._paths[step], step, 'inputs')
             self.outputpaths[step] = self._merge_paths(self._paths[step], step, 'outputs')
 
-        datapath = self.inputpaths['extract_mean']['data']
-        if ('.ims' in datapath or '.bdv' in datapath):
-            if self.resolution_level == -1:
-                self.resolution_level = find_resolution_level(datapath)
-
     def extract_mean(self, **kwargs):
         """Calculate mean over channels and slicewise medians."""
+
+        self._set_resolution_level(self.inputpaths['extract_mean']['data'])
 
         arglist = self._prep_step('extract_mean', kwargs)
         self._extract_mean()
@@ -228,6 +225,8 @@ class Mask3r(Stapl3r):
     def extract_smooth(self, **kwargs):
         """Smooth image."""
 
+        self._set_resolution_level(self.inputpaths['extract_mean']['data'])
+
         arglist = self._prep_step('extract_smooth', kwargs)
         self._extract_smooth()
         self.dump_parameters(step='extract_smooth')
@@ -242,6 +241,8 @@ class Mask3r(Stapl3r):
 
     def extract_mask(self, **kwargs):
         """Generate a mask that covers the tissue."""
+
+        self._set_resolution_level(self.inputpaths['extract_mean']['data'])
 
         arglist = self._prep_step('extract_mask', kwargs)
         self._extract_mask()
@@ -258,6 +259,8 @@ class Mask3r(Stapl3r):
 
     def postprocess(self, **kwargs):
         """Calculate distance to edge and generate report."""
+
+        self._set_resolution_level(self.inputpaths['extract_mean']['data'])
 
         arglist = self._prep_step('postprocess', kwargs)
         self._postprocess()
@@ -277,6 +280,12 @@ class Mask3r(Stapl3r):
             im_edt.close()
 
         self.report(outputpath=outputs['report'], inputs=inputs, outputs=outputs)
+
+    def _set_resolution_level(self, datapath):
+
+        if ('.ims' in datapath or '.bdv' in datapath):
+            if self.resolution_level == -1:
+                self.resolution_level = find_resolution_level(datapath)
 
     def set_thresholds(self, thrs, inputs, facs=[0.01, 0.1, 0.2, 0.5, 1.0, 2.0]):
         """Set thresholds for each dataset slice."""

@@ -114,6 +114,7 @@ class Zipp3r(Block3r):
             'ods_zipmask': 'segm/labels_zipmask',
             'ods_blocks': '',
             'ods_copied': '',
+            'segmentation_id': 'segmentation',
         }  # TODO: to saved paths
         for k, v in default_attr.items():
             setattr(self, k, v)
@@ -531,7 +532,7 @@ class Zipp3r(Block3r):
 
         from stapl3d.segmentation import segment
         elsize = segs[0].elsize
-        params = self._cfg['segmentation']['estimate']
+        params = self._cfg[self.segmentation_id]['estimate']
 
         pars = params['seed']
         data, data_ds = self.read_images(pars['ids_image'], 'Image', concat=True)

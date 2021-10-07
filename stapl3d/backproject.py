@@ -229,8 +229,6 @@ class Backproject3r(Stapl3r):
 
         mo.close()
 
-        return mo
-
 
 def scale_fwmap(fw, maxval=65535, replace_nan=False, normalize=False, scale_dtype=False):
 
