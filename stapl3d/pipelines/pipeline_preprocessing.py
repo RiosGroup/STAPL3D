@@ -2,6 +2,8 @@
 
 """Run STAPL3D preprocessing.
 
+> NOTE: STAPL3D development branch (dev1.0.0) required to run this pipeline.
+
 - Organize files in a directory structure according to:
     <projectdir>/<dataset>/<dataset>.<ext>
 

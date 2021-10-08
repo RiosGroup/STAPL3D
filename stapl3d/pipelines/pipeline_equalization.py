@@ -3,6 +3,8 @@
 """
 # STAPL3D equalization assay analysis.
 
+> NOTE: STAPL3D development branch (dev1.0.0) required to run this pipeline.
+
 - File organization (recommended):
 
   > NB: ensure each filename is unique, even if they are in separate directories.
