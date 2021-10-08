@@ -82,14 +82,14 @@ class Deshad3r(Stapl3r):
         List of channels indices to process, default 'all'.
     planes : list []
         List of plane indices to process, default 'all'.
-    noise_threshold : None
+    noise_threshold : 1000
         Threshold to discard background, default 1000.
     metric : string 'median'
         Metric for creating profiles, default 'median', else 'mean'.
     quantile_threshold : float 0.8
         Quantile at which planes are discarded, default 0.8.
     polynomial_order : int 3
-        Order of the polynomial to fit the profile.
+        Order of the polynomial to fit the profile, default 3.
     stacks : list []
         List of stack indices to correct.
     clipping_mask': bool False
@@ -162,7 +162,7 @@ class Deshad3r(Stapl3r):
         default_attr = {
             'channels': [],
             'planes': [],
-            'noise_threshold': None,
+            'noise_threshold': 1000,  # FIXME: automate
             'metric': 'median',
             'quantile_threshold': 0.8,
             'polynomial_order': 3,
