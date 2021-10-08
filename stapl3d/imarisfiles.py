@@ -11,6 +11,7 @@ import logging
 import pickle
 import shutil
 import multiprocessing
+import subprocess
 
 from glob import glob
 
@@ -155,6 +156,72 @@ def extract_channel(ims_path, ref_path, channel, outputpath):
     f.close()
 
 
+def copy_groups(f, g, root, groups_src, groups_dst=[]):
+
+    groups_dst = groups_dst or groups_src
+
+    for grp_src, grp_dst in zip(groups_src, groups_dst):
+
+        g.require_group(root)
+
+        try:
+            del g[root][grp_dst]
+        except KeyError:
+            pass
+
+        try:
+            f.copy(f[root][grp_src], g[root], name=grp_dst)
+        except KeyError:
+            pass
+
+
+def subset(filepath_ims, filepath_ref, timepoints=[0], channels=[0]):
+
+    f = h5py.File(filepath_ims, 'r')
+    g = h5py.File(filepath_ref, 'a')
+
+    # Copy top level attributes.
+    for k, v in f['/'].attrs.items():
+        g['/'].attrs[k] = v
+
+    # Copy top level groups.
+    groups = ['DataSetTimes', 'Scene', 'Scene8', 'Thumbnail']
+    copy_groups(f, g, '/', groups)
+
+    # Copy DataSetInfo
+    groups = ['Document', 'Image', 'Imaris', 'ImarisDataSet', 'Log', 'TimeInfo', 'ZeissAttrs']
+    copy_groups(f, g, '/DataSetInfo', groups)
+    for ii, ch in enumerate(channels):
+        groups_src = [f'Channel {ch}', f'Display settings channel {ch}']
+        groups_dst = [f'Channel {ii}', f'Display settings channel {ii}']
+        copy_groups(f, g, '/DataSetInfo', groups_src, groups_dst)
+
+    # DataSet
+    for rl in range(len(f['/DataSet'])):
+        rlloc = f'/DataSet/ResolutionLevel {rl}'
+        for i, tp in enumerate(timepoints):
+            tploc = f'{rlloc}/TimePoint {tp}'
+            for ii, ch in enumerate(channels):
+                groups_src = [f'Channel {ch}']
+                groups_dst = [f'Channel {ii}']
+                copy_groups(f, g, tploc, groups_src, groups_dst)
+
+    g['/DataSetInfo/Image'].attrs['C'] = np.array([str(len(channels))], dtype='|S1')
+    g['/DataSetInfo/Image'].attrs['T'] = np.array([str(len(timepoints))], dtype='|S1')
+
+    f.close()
+    g.close()
+
+
+def create_ref(filepath_ims):
+    filepath_ch0 = filepath_ims.replace('.ims', '_ch0.ims')
+    filepath_ref = filepath_ims.replace('.ims', '_ref.ims')
+    subset(filepath_ims, filepath_ch0)
+    ims_to_zeros(filepath_ch0)
+    subprocess.call(['h5repack', filepath_ch0, filepath_ref])
+    os.remove(filepath_ch0)
+
+
 def aggregate_file(tgt_file, channels, ch_offset=0):
     """Create an aggregate file with links to individual channels."""
 
@@ -279,8 +346,9 @@ def make_aggregate(outputfile, ref_path,
                    color=[1, 1, 1], crange=[0, 20000]):
     """Gather the inputfiles into an imarisfile by symbolic links."""
 
-    inputfiles = glob('{}{}{}.ims'.format(inputstem, channel_pat, postfix))
+    inputfiles = glob(f'{inputstem}{channel_pat}{postfix}.ims')
     inputfiles.sort()
+    print(inputfiles)
 
     channels = [
         {
@@ -294,6 +362,24 @@ def make_aggregate(outputfile, ref_path,
     shutil.copy2(ref_path, outputfile)
     aggregate_file(outputfile, channels, ch_offset=0)
 
+
+def ims_linked_channels(outputfile, inputfiles, filepath_ref,
+                        color=[1, 1, 1], crange=[0, 20000]):
+    """Gather the inputfiles into an imarisfile by symbolic links."""
+
+    channels = [
+        {
+         'filepath': inputfile,
+         'Name': 'chan',
+         'Color': ' '.join(['{:.3f}'.format(i) for i in color]),
+         'ColorRange': ' '.join(['{:.3f}'.format(i) for i in crange]),
+         'ColorMode': 'BaseColor',
+         } for inputfile in inputfiles]
+
+    if not filepath_ref:
+        filepath_ref = inputfiles[0]
+    shutil.copy2(filepath_ref, outputfile)
+    aggregate_file(outputfile, channels, ch_offset=0)
 
 def ref_to_zeros(image_in):
     """Set BigDataViewer datasets to all-zeros."""

@@ -146,26 +146,41 @@ class Homogeniz3r(Stapl3r):
             'ioitem': 'outputs', 'output': 'aggregate',
             }
         datapath = self._get_inpath(prev_path)
-        if datapath == 'default':
+        if self.image_in.endswith('.ims'):
+            datapath = self.image_in
+            maskpath = ''  # FIXME: assuming stitching and masking coupled
+            ext = '.ims'
+            ids = ''
+        elif self.image_in.endswith('.czi'):
+            datapath = self.image_in
+            maskpath = ''  # FIXME: assuming stitching and masking coupled
+            ext = '.h5'
+            ids = '/data'
+        elif datapath == 'default':
             datapath = self._build_path(
                 moduledir=prev_path['moduledir'],
                 prefixes=[self.prefix, prev_path['module_id']],
                 ext='bdv',
                 )
 
-        # FIXME: moduledir (=step_id?) can vary
-        prev_path = {
-            'moduledir': 'mask', 'module_id': 'mask',
-            'step_id': 'mask', 'step': 'estimate',
-            'ioitem': 'outputs', 'output': 'mask',
-            }
-        maskpath = self._get_inpath(prev_path)
-        if maskpath == 'default':
-            maskpath = self._build_path(
-                moduledir=prev_path['moduledir'],
-                prefixes=[self.prefix, prev_path['module_id']],
-                ext='h5/mask',
-                )
+            # FIXME: moduledir (=step_id?) can vary
+            prev_path = {
+                'moduledir': 'mask', 'module_id': 'mask',
+                'step_id': 'mask', 'step': 'estimate',
+                'ioitem': 'outputs', 'output': 'mask',
+                }
+            maskpath = self._get_inpath(prev_path)
+            if maskpath == 'default':
+                maskpath = self._build_path(
+                    moduledir=prev_path['moduledir'],
+                    prefixes=[self.prefix, prev_path['module_id']],
+                    ext='h5/mask',
+                    )
+            ext = '.h5'
+            ids = '/data'
+        else:
+            ext = '.h5'
+            ids = '/data'
 
         vols = ['data', 'mask', 'bias', 'corr']
         stem = self._build_path()
@@ -187,22 +202,23 @@ class Homogeniz3r(Stapl3r):
                 },
             'apply': {
                 'inputs': {
-                    # 'cpat': "self.inputpaths['estimate']['data']",
                     'data': datapath,
                     'bias': f'{cpat}_ds.h5/bias',
+                    'ims_ref': '',
                     },
                 'outputs': {
-                    'channels': f'{cpat}.h5/data',
+                    'channels': f'{cpat}{ext}{ids}',
                     },
             },
             'postprocess': {
                 'inputs': {
-                    'channels': f'{cmat}.h5',
+                    'channels': f'{cmat}{ext}',
                     'channels_ds': f'{cmat}_ds.h5',
                     'report': f'{cmat}_ds.pdf',
+                    'ims_ref': '',
                     },
                 'outputs': {
-                    'aggregate': f'{stem}.h5',
+                    'aggregate': f'{stem}{ext}',
                     'aggregate_ds': f'{stem}_ds.h5',
                     'report': f'{stem}.pdf',
                     },
@@ -304,9 +320,12 @@ class Homogeniz3r(Stapl3r):
             inputfiles.sort()
             if not inputfiles:
                 return
-            for ids in idss:
-                inputpaths = [f'{inputfile}/{ids}' for inputfile in inputfiles]
-                imarisfiles.h5chs_to_virtual(inputpaths, f'{outputfile}/{ids}')
+            if outputfile.endswith('.ims'):
+                imarisfiles.ims_linked_channels(outputfile, inputfiles, inputs['ims_ref'])
+            elif '.h5' in outputfile:
+                for ids in idss:
+                    inputpaths = [f'{inputfile}/{ids}' for inputfile in inputfiles]
+                    imarisfiles.h5chs_to_virtual(inputpaths, f'{outputfile}/{ids}')
 
         gather_4D(inputs['channels'], outputs['aggregate'], ['data'])
         gather_4D(inputs['channels_ds'], outputs['aggregate_ds'], ['data', 'bias', 'corr'])
@@ -330,6 +349,15 @@ class Homogeniz3r(Stapl3r):
 
         self.set_downsample_factors(self.inputpaths['estimate']['data'])
 
+        if self.outputpaths['apply']['channels'].endswith('.ims'):
+            if not self.inputpaths['apply']['ims_ref']:
+                filepath_ims = self.inputpaths['estimate']['data']
+                filepath_ref = filepath_ims.replace('.ims', '_ref.ims')
+                # TODO: protect existing files
+                imarisfiles.create_ref(filepath_ims)
+                self.inputpaths['apply']['ims_ref'] = filepath_ref
+                self.inputpaths['postprocess']['ims_ref'] = filepath_ref
+
         with multiprocessing.Pool(processes=self._n_workers) as pool:
             pool.starmap(self._apply_channel, arglist)
 
@@ -349,19 +377,19 @@ class Homogeniz3r(Stapl3r):
         bf.load(load_data=False)
 
         # Create the output image.
-        # if self.image_ref:
-        #     shutil.copy2(self.image_ref, self.outputpath)
-        #     mo = Image(self.outputpath)
-        #     mo.load()
-        #     # TODO: write to bdv pyramid
-        # else:
-        props = im.get_props()
-        if len(im.dims) > 4:
-            props = im.squeeze_props(props, dim=4)
-        if len(im.dims) > 3:
-            props = im.squeeze_props(props, dim=3)
-        mo = Image(outputs['channels'], **props)
-        mo.create()
+        if inputs['ims_ref']:
+            shutil.copy2(inputs['ims_ref'], outputs['channels'])
+            mo = Image(outputs['channels'])
+            mo.load()
+            # TODO: write to bdv pyramid
+        else:
+            props = im.get_props()
+            if len(im.dims) > 4:
+                props = im.squeeze_props(props, dim=4)
+            if len(im.dims) > 3:
+                props = im.squeeze_props(props, dim=3)
+            mo = Image(outputs['channels'], **props)
+            mo.create()
 
         # Get the downsampling between full and bias images.
         p = self._load_dumped_step(self.directory, self._module_id, 'estimate')
@@ -408,7 +436,8 @@ class Homogeniz3r(Stapl3r):
 
             it = zip(block['slices'], block_nm['slices'], blocksize, data_shape)
 
-            data_shape = list(im.slices2shape(block_nm['slices']))  # ??? this does nothing ???
+            data_shape = list(im.slices2shape(block_nm['slices']))
+            # ??? this does nothing ???
 
             data_slices = []
             for b_slc, n_slc, bs, ds in it:
@@ -422,7 +451,8 @@ class Homogeniz3r(Stapl3r):
             data = im.slice_dataset().astype('float')
 
             # Get the upsampled bias field.
-            bias = get_bias_field_block(bf, im.slices, data.shape, downsample_factors)
+            bias = get_bias_field_block(bf, im.slices, data.shape,
+                                        downsample_factors)
             data /= bias
             data = np.nan_to_num(data, copy=False)
 
@@ -607,7 +637,8 @@ class Homogeniz3r(Stapl3r):
         super().view(input, images, labels, settings)
 
 
-def downsample_channel(inputpath, resolution_level, channel, downsample_factors, ismask, outputpath):
+def downsample_channel(inputpath, resolution_level, channel,
+                       downsample_factors, ismask, outputpath):
 
     if not inputpath:
         return
@@ -624,7 +655,8 @@ def downsample_channel(inputpath, resolution_level, channel, downsample_factors,
     return ds_im
 
 
-def calculate_bias_field(im, mask=None, n_iter=50, n_fitlev=4, n_cps=[5, 5, 5], n_threads=1, outputpath=''):
+def calculate_bias_field(im, mask=None, n_iter=50, n_fitlev=4, n_cps=[5, 5, 5],
+                         n_threads=1, outputpath=''):
     """Calculate the bias field."""
 
     # wmem images to sitk images
