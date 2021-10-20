@@ -2922,7 +2922,10 @@ class Stapl3r(object):
         prefix='',
         # suffix='',
         max_workers=0,
+        verbosity=1,
         ):
+
+        self.verbosity = verbosity
 
         self._module_id = module_id  # module name
         self.step_id = step_id or self._module_id # yml-file entry
@@ -3601,11 +3604,17 @@ class Stapl3r(object):
 
         logfile = self._build_path(ext='log', rel=False)
 
+        if self.verbosity == 0:
+            handlers = [logging.FileHandler(logfile)]
+        else:
+            handlers = [logging.FileHandler(logfile), logging.StreamHandler()]
+            # FIXME: this goes to stderr
+
         logging.basicConfig(
             level=logging.INFO,
             datefmt='%Y-%m-%d %H:%M:%S',
             format='%(asctime)s [%(threadName)-12.12s] [%(levelname)-5.5s]  %(message)s',
-            handlers=[logging.FileHandler(logfile), logging.StreamHandler()]  # FIXME: this goes to stderr
+            handlers=handlers,
             )
 
     def _logstep(self, parameters=[]):
