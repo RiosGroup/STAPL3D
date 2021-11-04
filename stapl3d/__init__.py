@@ -3517,8 +3517,15 @@ class Stapl3r(object):
 
         import napari
 
-        images = images or self._images
-        labels = labels or self._labels
+        if images is None:
+            images = []
+        else:
+            images = images or self._images
+        if labels is None:
+            labels = []
+        else:
+            labels = labels or self._labels
+
         slices = settings['slices'] if 'slices' in settings.keys() else {}
 
         viewer = napari.Viewer()
