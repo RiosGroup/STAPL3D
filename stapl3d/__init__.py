@@ -3541,9 +3541,19 @@ class Stapl3r(object):
     def view_single(self, viewer, filepath='', images=[], labels=[], slices={}):
 
         for ids in images:
-            viewer.add_image( self._get_h5_dset(filepath, ids, slices), name=ids)
-        for lds in labels:
-            viewer.add_labels(self._get_h5_dset(filepath, lds, slices), name=lds)
+            try:
+                data = self._get_h5_dset(filepath, ids, slices)
+            except:
+                pass
+            else:
+                viewer.add_image(data, name=ids)
+        for ids in labels:
+            try:
+                data = self._get_h5_dset(filepath, ids, slices)
+            except:
+                pass
+            else:
+                viewer.add_labels(data, name=ids)
 
         im = Image('{}/{}'.format(filepath, (images + labels)[0]), permission='r')
         im.load(load_data=False)
