@@ -426,7 +426,7 @@ def prep_volume(filepath, step_key, pars, save_steps=True):
                 data = smooth_channel(data, p['sigma'], p['type'])
         elif p['type'] == 'dog':
             data = smooth_dog(data, im.elsize, p['sigma1'], p['sigma2'])
-            data = data.astype('float16')
+            data = data.astype('float')
 
         if 'postfix' in p.keys(): write(data, image_in, p['postfix'], im)
 
