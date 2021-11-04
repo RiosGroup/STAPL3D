@@ -460,7 +460,13 @@ def mask_volume(filepath, step_key, pars, save_steps=True):
     except KeyError:
         pass
     else:
-        mask = data > pars['threshold']
+        if pars['threshold'] is None:
+            from skimage.filters import threshold_otsu
+            thr = threshold_otsu(data)
+        else:
+            thr = pars['threshold']
+        print(f'thresholding at {thr} for {filepath}')
+        mask = data > thr
 
     try:
         p = pars['sauvola']
