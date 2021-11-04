@@ -504,10 +504,14 @@ def calculate_mean(image_in, resolution_level=-1, keep_dtype=True, channels=[], 
         if channels:
             data = slice_dataset(im, cdim, channels)  # for dirty slices
         else:
+            channels = list(range(im.dims[cdim]))
             data = im.slice_dataset()
 
         if im.slices[zdim].stop - im.slices[zdim].start == 1:
             data = np.expand_dims(data, 0)
+
+        if len(channels) == 1:
+            data = np.expand_dims(data, cdim)
 
         data_mean = np.mean(data, axis=cdim)
 
