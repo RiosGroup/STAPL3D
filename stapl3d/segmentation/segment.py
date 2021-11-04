@@ -735,6 +735,14 @@ def segment_volume(filepath, step_key, pars, save_steps=True):
     seeds = im.slice_dataset()
     im.close()
 
+    if 'ids_neg_seed' in pars.keys():
+        image_in = '{}/{}'.format(filepath, pars['ids_neg_seed'])
+        im = Image(image_in)
+        im.load()
+        nseed = im.slice_dataset()
+        im.close()
+        seeds[~nseed] = max(np.unique(seeds)) + 1
+
     elsize = np.absolute(im.elsize)
 
     try:
