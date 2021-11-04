@@ -380,12 +380,23 @@ class Segment3r(Block3r):
 
 def prep_volume(filepath, step_key, pars, save_steps=True):
 
-    print(filepath, pars['ids_image'])
     image_in = '{}/{}'.format(filepath, pars['ids_image'])
     im = Image(image_in)
     im.load()
-    data = im.slice_dataset()
-    im.close()
+
+    try:
+        p = pars['downsample']
+        print(p)
+    except KeyError:
+        data = im.slice_dataset()
+        im.close()
+    else:
+        im2 = im.downsampled(p['factors'])
+        data = im2.slice_dataset()
+        if 'postfix' in p.keys(): write(data, image_in, p['postfix'], im2)
+        im2.close()
+        im = im2
+
 
     # if 'shift_planes' in pars.keys():
     #     p = pars['shift_planes']
