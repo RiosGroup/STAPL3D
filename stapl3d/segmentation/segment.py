@@ -1435,7 +1435,7 @@ class Subsegment3r(Block3r):
         aspects = ['equal', 'auto', 'auto']
         for i, (dim, aspect) in enumerate(zip('zyx', aspects)):
 
-            data_nucl = get_data('nucl/prep', 'chan/ch00', dimfac=3)
+            data_nucl = get_data('nucl/prep', 'nucl/mean', dimfac=3)
             data_memb = get_data('memb/prep', 'memb/mean', dimfac=5)
             if data_memb is None:
                 data_memb = np.zeros(data_nucl.shape)
