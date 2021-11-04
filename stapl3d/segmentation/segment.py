@@ -1285,7 +1285,7 @@ class Subsegment3r(Block3r):
                     },
                 'outputs': {
                     'blockfiles': f'{bpat}',
-                    'report': f'{bpat}_subsegment.pdf',  # TODO: take out .h5 from filename
+                    'report': f'{bpat}_subsegment'.replace('.h5', '.pdf'),
                     }
                 },
             })
