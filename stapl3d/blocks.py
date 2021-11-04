@@ -374,7 +374,10 @@ class Block3r(Stapl3r):
 
     def view(self, input=[], images=[], labels=[], settings={}):
 
-        images = images or self._images
+        if images is not None:
+            images = images or self._images
+        if labels is not None:
+            labels = labels or self._labels
 
         if isinstance(input, str):
             input = input or self._blocks[0].path.replace('/{ods}', '')
@@ -890,8 +893,10 @@ class Merg3r(Block3r):
 
     def view(self, input=[], images=[], labels=[], settings={}):
 
-        images = images or self._images
-        labels = labels or self._labels
+        if images is not None:
+            images = images or self._images
+        if labels is not None:
+            labels = labels or self._labels
 
         if isinstance(input, str):
             input = input or self._blocks[0].path.replace('/{ods}', '')

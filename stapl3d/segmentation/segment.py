@@ -304,7 +304,7 @@ class Segment3r(Block3r):
         aspects = ['equal', 'auto', 'auto']
         for i, (dim, aspect) in enumerate(zip('zyx', aspects)):
 
-            data_nucl = get_data('nucl/prep', 'chan/ch00', dimfac=3)
+            data_nucl = get_data('nucl/prep', 'nucl/mean', dimfac=3)
             data_memb = get_data('memb/prep', 'memb/mean', dimfac=5)
 
             plot_imgs(data_nucl, None, axdict, 'nucl', i, aspect, 'gray')
@@ -365,15 +365,17 @@ class Segment3r(Block3r):
 
     def view(self, input=[], images=[], labels=[], settings={}):
 
-        images = images or self._images
-        labels = labels or self._labels
+        if images is not None:
+            images = images or self._images
+        if labels is not None:
+            labels = labels or self._labels
 
         if isinstance(input, (int, float)):
-            filepath = self._blocks[input].path.replace('/{ods}', '')
-            super().view(filepath, images, labels, settings)
+            input = self._blocks[input].path.replace('/{ods}', '')
         else:
             input = input or [0, 1]
-            super().view_blocks(input, images, labels, settings)
+
+        super().view(input, images, labels, settings)
 
 
 def prep_volume(filepath, step_key, pars, save_steps=True):
@@ -1476,41 +1478,18 @@ class Subsegment3r(Block3r):
 
     def view(self, input=[], images=[], labels=[], settings={}):
 
-        # images = images or self._images
-        #
-        # if isinstance(input, str):
-        #     super().view(input, images, labels, settings)
-        # elif type(input) == int or float:
-        #     if not input:
-        #         filepath = self._abs(self.outputpaths['estimate']['blockfiles'].format(b=input))
-        #     super().view(filepath, images, labels, settings)
-        # else:
-        #     input = input or [0, 1]
-        #     super().view_blocks(input, images, labels, settings)
+        if images is not None:
+            images = images or self._images
+        if labels is not None:
+            labels = labels or self._labels
 
-        images = images or self._images
-        labels = labels or self._labels
-
-        if isinstance(input, str):
-            super().view(input, images, labels, settings)
-        elif type(input) == int or type(input) == float:
-            #filepath = self._abs(self.outputpaths['estimate']['blockfiles'].format(b=input))
-            filepath = self._blocks[input].path.replace('/{ods}', '')
-            super().view(filepath, images, labels, settings)
+        if isinstance(input, (int, float)):
+            input = self._blocks[input].path.replace('/{ods}', '')
         else:
             input = input or [0, 1]
-            super().view_blocks(input, images, labels, settings)
 
-    # def view(self, filepath='', idss=['nucl/prep'], ldss=['segm/labels_full', 'segm/labels_nucl', 'segm/labels_memb', 'segm/labels_csol'], block_idx=0, settings={}):
-    #
-    #     if not filepath:
-    #         filepath = self._abs(self.outputpaths['estimate']['blockfiles'].format(b=block_idx))
-    #
-    #     super().view(filepath, idss, ldss, settings)
-    #
-    # def view_blocks(self, block_idxs=[0, 1], idss=['nucl/prep'], ldss=['segm/labels_full', 'segm/labels_nucl', 'segm/labels_memb', 'segm/labels_csol'], settings={}):
-    #
-    #     super().view_blocks(block_idxs, idss, ldss, settings)
+        super().view(input, images, labels, settings)
+
 
 
 if __name__ == "__main__":
