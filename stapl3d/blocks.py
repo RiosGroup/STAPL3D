@@ -164,6 +164,9 @@ class Block3r(Stapl3r):
         if '{b' in inpaths:
             self.filepaths = self.get_filepaths(inpaths)
             self.set_fullsize(self.filepaths[0])
+        elif os.path.isdir(self.image_in):
+            self.filepaths = sorted(glob.glob(os.path.join(self.image_in, '*.czi')))  # TODO: flexible extension
+            self.set_fullsize(self.filepaths[0])
         else:
             self.filepaths = []
             self.set_fullsize(inpaths)
