@@ -25,3 +25,5 @@ docs/apidocs
 .DS_Store
 
 /demos/HFK16w*
+/demos/EqualizationAssay*
+/demos/equalization.zip
