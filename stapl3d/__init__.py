@@ -3016,6 +3016,9 @@ class Stapl3r(object):
         Returns the argument list for parallelization.
         """
 
+        if self._parallelization[step]:
+            self.viewer = None
+
         # self.set_parameters(step, kwargs)
         kwargs.update({'step': step})
         self.__dict__.update(kwargs)
