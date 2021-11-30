@@ -98,6 +98,7 @@ class Backproject3r(Stapl3r):
             'normalize': False,
             'scale_dtype': False,
             'replace_nan': True,
+            'dtype': 'uint16',
             'channel': -1,
             'blocksize': [64, 1280, 1280],
             'ims_ref': '',
@@ -112,6 +113,10 @@ class Backproject3r(Stapl3r):
 
         self._init_log()
 
+        self._images = []
+        self._labels = []
+
+
     def _init_paths(self):
 
         stem = self._build_path()
@@ -125,8 +130,10 @@ class Backproject3r(Stapl3r):
                     'ims_ref': self.ims_ref,
                     },
                 'outputs': {
-                    **{ods: f'{apat}.ims' for ods in self.features},
+                    **{'stem': f'{stem}'},
+                    **{ods: f'{stem}_{ods}.h5/{ods}' for ods in self.features},
                     #**{ods: f'{apat}.h5/{ods}' for ods in self.features},
+                    #**{ods: f'{apat}.ims' for ods in self.features},
                     # ims... feats as datasets ... etc
                     },
                 },
@@ -153,16 +160,18 @@ class Backproject3r(Stapl3r):
         outputs = self._prep_paths(self.outputs, reps={'a': key})
         outpath = outputs[key]
 
-        labels = LabelImage(image_in)
+        labels = LabelImage(image_in, permission='r')
         labels.load(load_data=False)
-
-        mpi = wmeMPI(usempi=False)
-        mpi.set_blocks(labels, self.blocksize or labels.dims)
-        mpi.scatter_series()
+        props = labels.get_props()
 
         if not self.maxlabel:  # TODO: read maxlabel from attribute (see zipping)
             labels.set_maxlabel()
             self.maxlabel = labels.maxlabel
+            labels.close()
+
+        mpi = wmeMPI(usempi=False)
+        mpi.set_blocks(labels, self.blocksize or labels.dims)
+        mpi.scatter_series()
 
         if feat_path.endswith('.csv'):
             df = pd.read_csv(feat_path)
@@ -182,6 +191,7 @@ class Backproject3r(Stapl3r):
             'normalize': self.normalize,
             'scale_dtype': self.scale_dtype,
             'replace_nan': self.replace_nan,
+            'dtype': self.dtype,
             }
         featdict = {**default, **self.features[key]}
         fw = scale_fwmap(fw, maxval, **featdict)
@@ -190,8 +200,10 @@ class Backproject3r(Stapl3r):
             if ims_ref:  # single-channel empty imaris image with the correct dimensions
                 shutil.copy2(ims_ref, outpath)
                 self.channel = 0
+
             mo = Image(outpath, permission='r+')
             mo.load(load_data=False)
+
             if self.channel >= 0 and self.channel < mo.dims[3]:
                 ch = self.channel
             else:
@@ -202,35 +214,52 @@ class Backproject3r(Stapl3r):
             name = self.name or key
             mo.file[cpath].attrs['Name'] = np.array([c for c in name], dtype='|S1')
 
+        elif '.h5' in outpath:
+            props['dtype'] = featdict['dtype']
+            mo = Image(outpath, **props)
+            mo.create()
+
         fw = list(fw)
         for i in mpi.series:
 
             print('processing {}: block {:03d} with coords: {}'.format(key, i, mpi.blocks[i]['id']))
             block = mpi.blocks[i]
+            labels = LabelImage(image_in, permission='r')
+            labels.load(load_data=False)
             labels.slices = block['slices']
             data = labels.slice_dataset()
             out = labels.forward_map(fw, ds=data)
+            labels.close()
 
             if outpath.endswith('.ims'):
                 mo.slices[:3] = block['slices']
                 mo.write(out.astype(mo.dtype))
 
+            elif '.h5' in outpath:
+                mo = Image(outpath)
+                mo.load()
+                mo.slices[:3] = block['slices']
+                mo.write(out.astype(mo.dtype))
+                mo.close()
+
             elif outpath.endswith('.nii.gz'):
-                props = labels.get_props()
+                # props = labels.get_props()
+                # labels.close()
                 if not labels.path.endswith('.nii.gz'):
                     props = transpose_props(props, outlayout='xyz')
                     out = out.transpose()
                 mo = write_output(outpath, out, props)
 
             else:
+                # props = labels.get_props()
                 #TODO
                 #outpath = outpath or gen_outpath(labels, key)
-                mo = write_output(outpath, out, labels.get_props())
+                mo = write_output(outpath, out, props)
 
         mo.close()
 
 
-def scale_fwmap(fw, maxval=65535, replace_nan=False, normalize=False, scale_dtype=False):
+def scale_fwmap(fw, maxval=65535, replace_nan=False, normalize=False, scale_dtype=False, dtype='uint16'):
 
     if replace_nan:
         fw = np.nan_to_num(fw)
