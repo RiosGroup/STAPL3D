@@ -539,14 +539,18 @@ class Zipp3r(Block3r):
         seed_mask, seed_mask_ds = self.read_images(pars['ids_mask'], 'Mask', concat=True)
         seeds_ds = segment.seed_volume_data(pars, data_ds, seed_mask_ds, elsize)
 
-        pars = params['segment']
-        data, data_ds = self.read_images(pars['ids_image'], 'Image', concat=True)
-        # seeds, seeds_ds = self.read_images(pars['ids_labels'], 'Label')
-        # if 'ids_mask' in pars.keys():
-        #     ws_mask = ... & mask
-        # else:
-        #     ws_mask = mask
-        ws = segment.segment_volume_data(pars, data_ds, seeds_ds, mask, elsize)
+        # TODO: negative seed for zip
+        if 'segment' in params.keys():
+            pars = params['segment']
+            data, data_ds = self.read_images(pars['ids_image'], 'Image', concat=True)
+            # seeds, seeds_ds = self.read_images(pars['ids_labels'], 'Label')
+            # if 'ids_mask' in pars.keys():
+            #     ws_mask = ... & mask
+            # else:
+            #     ws_mask = mask
+            ws = segment.segment_volume_data(pars, data_ds, seeds_ds, mask, elsize)
+        else:
+            ws = seeds_ds
 
         # pars = self._cfg['segmentation']['estimate']['filter']
         # im = segment.filter_segments(filepath, 'filter', params['filter'], save_steps=True)
