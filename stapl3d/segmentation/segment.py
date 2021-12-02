@@ -172,9 +172,24 @@ class Segment3r(Block3r):
     def _estimate_block(self, block):
         """Segment cells from membrane and nuclear channels."""
 
+        filestem = os.path.basename(self._blocks[block].path.replace('.h5/{ods}', ''))
         block = self._blocks[block]
-        inputs = self._prep_paths(self.inputs, reps={'b': block.idx})
-        outputs = self._prep_paths(self.outputs, reps={'b': block.idx})
+
+        if '{b' in self.inputs['blockfiles']:
+            reps = {'b': block}
+        elif '{f}' in self.inputs['blockfiles']:
+            reps = {'f': filestem}
+        else:
+            reps = {}
+        inputs = self._prep_paths(self.inputs, reps=reps)
+
+        if '{b' in self.outputs['blockfiles']:
+            reps = {'b': block}
+        elif '{f}' in self.outputs['blockfiles']:
+            reps = {'f': filestem}
+        else:
+            reps = {}
+        outputs = self._prep_paths(self.outputs, reps=reps)
 
         step = 'estimate'
         params = self._cfg[self.step_id][step]
@@ -1340,9 +1355,27 @@ class Subsegment3r(Block3r):
     def _estimate_block(self, block):
         """Subdivide cells in compartments."""
 
+        filestem = os.path.basename(self._blocks[block].path.replace('.h5/{ods}', ''))
         block = self._blocks[block]
-        inputs = self._prep_paths(self.inputs, reps={'b': block.idx})
-        outputs = self._prep_paths(self.outputs, reps={'b': block.idx})
+
+        if '{b' in self.inputs['blockfiles']:
+            reps = {'b': block}
+        elif '{f}' in self.inputs['blockfiles']:
+            reps = {'f': filestem}
+        else:
+            reps = {}
+        inputs = self._prep_paths(self.inputs, reps=reps)
+
+        if '{b' in self.outputs['blockfiles']:
+            reps = {'b': block}
+        elif '{f}' in self.outputs['blockfiles']:
+            reps = {'f': filestem}
+        else:
+            reps = {}
+        outputs = self._prep_paths(self.outputs, reps=reps)
+
+        step = 'estimate'
+        params = self._cfg[self.step_id][step]
 
         inputfile = inputs['blockfiles'].format(b=block)
 
