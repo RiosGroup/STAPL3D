@@ -577,7 +577,12 @@ def seed_volume(filepath, step_key, pars, save_steps=True):
     try:
         p = pars['edt']
     except KeyError:
-        pass
+        if 'ids_edt' in pars.keys():
+            image_in = '{}/{}'.format(filepath, pars['ids_edt'])
+            im = Image(image_in)
+            im.load()
+            edt = im.slice_dataset()
+            im.close()
     else:
         edt = distance_transform_edt(mask, sampling=elsize)
         # mask = im.ds[:].astype('uint32')
@@ -594,7 +599,12 @@ def seed_volume(filepath, step_key, pars, save_steps=True):
     try:
         p = pars['modulate']
     except KeyError:
-        pass
+        if 'ids_dog' in pars.keys():
+            image_in = '{}/{}'.format(filepath, pars['ids_dog'])
+            im = Image(image_in)
+            im.load()
+            edt = im.slice_dataset()
+            im.close()
     else:
         dog = smooth_dog(data, elsize, p['sigma1'], p['sigma2'])
         edt *= normalize_data(dog, a=p['min'], b=p['max'])[0]
