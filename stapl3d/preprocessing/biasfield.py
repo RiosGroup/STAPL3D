@@ -118,7 +118,7 @@ class Homogeniz3r(Stapl3r):
             '_downsample_factors_reslev': {},
             'tasks': 1,
             'n_iterations': 50,
-            'n_fitlevels': 4,
+            'n_fitlevels': {'z': 4, 'y': 4, 'x': 4},
             'n_bspline_cps': {'z': 5, 'y': 5, 'x': 5},
             'inputstem': True,
             'blocksize_xy': 1280,
@@ -261,7 +261,8 @@ class Homogeniz3r(Stapl3r):
             )
         ds_bf = calculate_bias_field(
             ds_im, ds_ma,
-            self.n_iterations, self.n_fitlevels,
+            self.n_iterations,
+            [self.n_fitlevels[dim] for dim in ds_im.axlab],
             [self.n_bspline_cps[dim] for dim in ds_im.axlab],
             self.n_threads,
             outputs['bias'],
@@ -655,7 +656,7 @@ def downsample_channel(inputpath, resolution_level, channel,
     return ds_im
 
 
-def calculate_bias_field(im, mask=None, n_iter=50, n_fitlev=4, n_cps=[5, 5, 5],
+def calculate_bias_field(im, mask=None, n_iter=50, n_fitlev=[4, 4, 4], n_cps=[5, 5, 5],
                          n_threads=1, outputpath=''):
     """Calculate the bias field."""
 
@@ -672,7 +673,7 @@ def calculate_bias_field(im, mask=None, n_iter=50, n_fitlev=4, n_cps=[5, 5, 5],
     corrector = sitk.N4BiasFieldCorrectionImageFilter();
     corrector.SetDebug(True)
     corrector.SetNumberOfThreads(n_threads)  # FIXME: seems to have no effect
-    corrector.SetMaximumNumberOfIterations([n_iter] * n_fitlev)
+    corrector.SetMaximumNumberOfIterations([n_iter] * n_fitlev[0])  # FIXME
     corrector.SetNumberOfControlPoints(n_cps)
     corrector.SetWienerFilterNoise(0.01)
     corrector.SetConvergenceThreshold(0.001)
