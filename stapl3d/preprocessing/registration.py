@@ -25,7 +25,6 @@ from stapl3d import Image
 logger = logging.getLogger(__name__)
 
 
-
 def main(argv):
     """Co-acquisition image registration."""
 
@@ -90,12 +89,20 @@ class Registrat3r(Stapl3r):
             }
 
         default_attr = {
-            'filepat': '*_25x.czi',
+            'filepat': '*_LR.czi',
+            'LR_suffix': 'LR',
+            'HR_suffix': 'HR',
+            'channel': 0,
+            'timepoint': 0,
             'filepaths': [],
+            'centrepoint': {},
+            'margin': {'y': 20, 'x': 20},
             'tasks': 1,
             'method': 'affine',
-            'centrepoint': [],
-            '_margins': [20, 20],
+            'target_voxelsize': {},
+            'volumes': [],
+            '_empty_slice_volume': '',
+            '_empty_slice_threshold': 1000,
         }
         for k, v in default_attr.items():
             setattr(self, k, v)
@@ -107,30 +114,37 @@ class Registrat3r(Stapl3r):
 
         self._init_log()
 
+        self._images = ['raw_nucl']
+        self._labels = ['label_cell']
+
     def _init_paths(self):
 
         self.set_filepaths()
 
-        stem = self._build_path()
-        #spat = self._build_path(suffixes=[{'s': 'p'}])
-        #smat = self._build_path(suffixes=[{'s': '?'}])
-        fpat = self._build_path(suffixes=[{'f': 'p'}])
+        ext = os.path.splitext(os.path.split(self.filepaths[0])[1])[1]
+        lr = '{f}' + f'{self.LR_suffix}{ext}'
+        hr = '{f}' + f'{self.HR_suffix}{ext}'
 
         self._paths = {
             'estimate': {
                 'inputs': {
-                    'lowres': '{f}_25x_{s}.czi',
-                    'highres': '{f}_63x_{s}.czi',
+                    'lowres': lr,
+                    'highres': hr,
                     },
                 'outputs': {
-                    'elastix': f'{fpat}_params_elastix.txt',
-                    'transformix': f'{fpat}_params_transformix.txt',
+                    'elastix': '{f}_elastix.txt',
+                    'transformix': '{f}_transformix.txt',
                     },
                 },
             'apply': {
                 'inputs': {
+                    'lowres': lr,
+                    'highres': hr,
+                    'moving': '',
+                    'transformix': '{f}_transformix.txt',
                     },
                 'outputs': {
+                    'reg': '{f}.h5',
                     },
             },
             'postprocess': {
@@ -145,16 +159,11 @@ class Registrat3r(Stapl3r):
             self.inputpaths[step]  = self._merge_paths(self._paths[step], step, 'inputs')
             self.outputpaths[step] = self._merge_paths(self._paths[step], step, 'outputs')
 
-
     def estimate(self, **kwargs):
-        """Co-acquisition image registration.
-
-        """
+        """Co-acquisition image registration."""
 
         arglist = self._prep_step('estimate', kwargs)
-
         # NOTE: ITK is already multithreaded => n_workers = 1
-        # TODO: check if the case for SimpleElastix
         self.n_threads = min(self.tasks, multiprocessing.cpu_count())
         self._n_workers = 1
 
@@ -163,41 +172,37 @@ class Registrat3r(Stapl3r):
 
     def _estimate_stack(self, filepath):
 
-        #filestem = os.path.splitext(os.path.basename(filepath))[0]
-        filestem = os.path.basename(filepath).split('_S')[0]
-        print(filestem)
-        inputs = self._prep_paths(self.inputs, reps={'f': filestem})
-        print(inputs)
-        outputs = self._prep_paths(self.outputs, reps={'f': filestem})
-        print(outputs)
+        filestem = os.path.basename(filepath).split(self.LR_suffix)[0]
 
-        fixed = load_itk_image(inputs['highres'])
-        slc_yx = find_lowres_slice_yx(inputs['lowres'], inputs['highres'], self.centrepoint, self._margins)
-        moving = load_itk_image(inputs['lowres'], slc=slc_yx)
+        inputs = self._prep_paths(self.inputs, reps={'f': filestem})
+        outputs = self._prep_paths(self.outputs, reps={'f': filestem})
+
+        ch = self.channel
+        tp = self.timepoint
+
+        fixed = load_itk_image(inputs['highres'], ch=ch, tp=tp)
+        slc = self._slc_lowres(inputs)
+        moving = load_itk_image(inputs['lowres'], ch=ch, tp=tp, slc=slc)
 
         parmap, eif = self._elastix_register(fixed, moving, self.method)
 
         sitk.WriteParameterFile(parmap, outputs['elastix'])
 
-        transformParameterMap = eif.GetTransformParameterMap()
-        transformParameterMap[0]['FinalBSplineInterpolationOrder'] = '1',
-        transformParameterMap[0]['ResultImagePixelType'] = "uint16",
-        sitk.WriteParameterFile(transformParameterMap[0], outputs['transformix'])
+        tpMap = eif.GetTransformParameterMap()
+        tpMap[0]['FinalBSplineInterpolationOrder'] = '1',
+        tpMap[0]['ResultImagePixelType'] = "uint16",
+        sitk.WriteParameterFile(tpMap[0], outputs['transformix'])
 
-        # fixme: these inputs are the czi, we need segmentation h5's for labels
-        #fname = '{}{}.h5/{}'.format(fstem, stack_pf, ids)
-        #movingfile = os.path.join(blockdir, fname)
-        vols = [
-            {'type': 'raw',   'filepath': inputs['lowres'],  'ids': 'chan/ch00',           'ods': 'raw_nucl'},
-            {'type': 'label', 'filepath': inputs['highres'], 'ids': 'segm/labels_curated', 'ods': 'label_cell_curated'},
-            ]
-        self._elastix_transform(outputs['transformix'], inputs['highres'], vols, slc_xy)
+    def _elastix_register(self, fixed, moving, parpath='affine'):
 
-    def _elastix_register(self, fixed, moving, method):
+        if parpath in ['rigid', 'affine', 'bspline']:
+            parmap = sitk.GetDefaultParameterMap(parpath)
+        else:
+            parmap = sitk.ReadParameterFile(parpath)
 
-        parmap = sitk.GetDefaultParameterMap(self.method)
         parmap['AutomaticTransformInitialization'] = "true",
         parmap['AutomaticTransformInitializationMethod'] = "GeometricalCenter",
+
         elastixImageFilter = sitk.ElastixImageFilter()
         elastixImageFilter.SetFixedImage(fixed)
         elastixImageFilter.SetMovingImage(moving)
@@ -206,110 +211,91 @@ class Registrat3r(Stapl3r):
 
         return parmap, elastixImageFilter
 
-    def _elastix_transform(self, transformfile, fixedfile, vols, slc_xy):
+    def apply(self, **kwargs):
+        """Co-acquisition image registration."""
 
-        transformParameterMap = sitk.ReadParameterFile(transformfile)
-        affine = transformParameterMap['TransformParameters']
+        arglist = self._prep_step('apply', kwargs)
+        # NOTE: ITK is already multithreaded => n_workers = 1
+        #self.n_threads = min(self.tasks, multiprocessing.cpu_count())
+        #self._n_workers = 1
+        with multiprocessing.Pool(processes=self._n_workers) as pool:
+            pool.starmap(self._apply_transform, arglist)
 
-        im = Image(fixedfile)
-        im.load()
-        props = im.get_props()
-        props['slices'] = None
-        im.close()
+    def _apply_transform(self, filepath):
 
-        tgt_elsize = [im.elsize[im.axlab.index(dim)] for dim in 'xyz']
-        tgt_shape =  [im.dims[im.axlab.index(dim)] for dim in 'xyz']
-        if self.tgt_elsize:  # xyz  # self.tgt_elsize = [0.3321, 0.3321, 1.2048]
-            elsize = [self.tgt_elsize[dim] for dim in 'xyz']
-            tgt_shape = [int(ssh/(te/se)) for se, te, ssh in zip(tgt_elsize, self.tgt_elsize, tgt_shape)]
+        filestem = os.path.basename(filepath).split(self.LR_suffix)[0]
 
-        transformParameterMap['Size'] = tuple([str(s) for s in tgt_shape])
-        transformParameterMap['Spacing'] = tuple([str(s) for s in tgt_elsize])
+        inputs = self._prep_paths(self.inputs, reps={'f': filestem})
+        outputs = self._prep_paths(self.outputs, reps={'f': filestem})
 
-        for vol in vols:
+        # Target voxelsize and shape
+        lr_elsize, lr_shape = get_shapes(inputs['lowres'])
+        hr_elsize, hr_shape = get_shapes(inputs['highres'])
+        tgt_elsize = {**lr_elsize, **self.target_voxelsize}
+        tgt_shape = {d: int( (hr_shape[d] * hr_elsize[d]) / tgt_elsize[d] )
+                     for d in 'xyz'}
 
-            ids, ods, movingfile, voltype = vol['ids'], vol['ods'], vols['filepath'], vols['type']
-            if voltype == 'raw':  # lowres data in 25x space
-                tp = affine
-                dtype = 'uint16'  # TODO: generalize
-                order = 1
-                slc = slc_yx
-            elif voltype == 'label':  # highres labels in 63x space
-                tp = ('1', '0', '0', '0', '1', '0', '0', '0', '1', '0', '0', '0')
-                dtype = 'uint32'
-                order = 0
-                slc = {}
+        # Read transform.
+        tpMap = sitk.ReadParameterFile(inputs['transformix'])
+        tpMap['Size'] = tuple([str(tgt_shape[d]) for d in 'xyz'])
+        tpMap['Spacing'] = tuple([str(tgt_elsize[d]) for d in 'xyz'])
+        affine = tpMap['TransformParameters']
+        unit = ('1', '0', '0', '0', '1', '0', '0', '0', '1', '0', '0', '0')
 
-            moving = load_itk_image(movingfile, slc=slc)
-            transformParameterMap['FinalBSplineInterpolationOrder'] = str(order),
-            transformParameterMap['TransformParameters'] = tp
+        # Reorder to process _empty_slice_volume first.
+        a = self.volumes.pop(self._empty_slice_volume, {})
+        b = {self._empty_slice_volume: a} if a else {}
+        volumes = {**b, **self.volumes}
+
+        # Perform transformation.
+        for ods, vol in volumes.items():
+
+            order = 1 if vol['type'] == 'raw' else 0
+            dtype = 'uint16' if vol['type'] == 'raw' else 'uint32'
+            tpars = affine if vol['resolution'] == 'lowres' else unit
+            slic3 = self._slc_lowres(inputs) if vol['resolution'] == 'lowres' else {}
+
+            if 'moving' in vol.keys():
+                inputs = {**inputs, **{'moving': vol['moving']}}
+            inputs = self._prep_paths(inputs, reps={'f': filestem})
+            moving = get_moving(inputs, vol, slc=slic3)
+
+            tpMap['FinalBSplineInterpolationOrder'] = str(order),
+            tpMap['TransformParameters'] = tpars
 
             transformixImageFilter = sitk.TransformixImageFilter()
-            transformixImageFilter.SetTransformParameterMap(transformParameterMap)
+            transformixImageFilter.SetTransformParameterMap(tpMap)
             transformixImageFilter.SetMovingImage(moving)
             transformixImageFilter.Execute()
             data = sitk.GetArrayFromImage(transformixImageFilter.GetResultImage())
 
-            # filter empty slices???
-            if ods == 'raw_nucl' or ods == 'chan/ch00':
-                nz = np.count_nonzero(np.reshape(data==0, [data.shape[0], -1]), axis=1)
-                idxs = np.nonzero(nz > 1000)
-            data = np.delete(data, idxs, axis=0)
+            # Discard empty region.  # FIXME: assuming zyx
+            if self._empty_slice_volume:
+                if ods == self._empty_slice_volume:
+                    idxs = self._identify_empty_slices(data)
+                data = self._remove_empty_slices(data, idxs, axis=0)
 
-            props['elsize'] = tgt_elsize[::-1]
-            props['shape'] = data.shape
-            props['chunks'] = [tgt_shape[2], 64, 64]
-            props['dtype'] = dtype
+            # Write output.  # TODO?: axis order options
+            ods = vol['ods'] if 'ods' in vol.keys() else ods
+            outpath = '{}/{}'.format(outputs['reg'], ods)
+            props = {
+                'elsize': [tgt_elsize[d] for d in 'zyx'],
+                'chunks': [tgt_shape['z'], 64, 64],
+                'shape': data.shape,
+                'dtype': dtype,
+                'axlab': 'zyx',
+            }
 
-            fname = '{}_zstack{}.h5/{}'.format(dataset, stack_idx, ods)
-            fpath = os.path.join(projectdir, fname)
-            mo = Image(fpath, **props)
+            mo = Image(outpath, **props)
             mo.create()
             mo.write(data.astype(dtype))
             mo.close()
 
-
-    def apply(self, **kwargs):
-        """Co-acquisition image registration.
-
-        """
-
-        arglist = self._prep_step('apply', kwargs)
-
     def postprocess(self, **kwargs):
-        """Co-acquisition image registration.
-
-        """
+        """Co-acquisition image registration."""
 
         arglist = self._prep_step('postprocess', kwargs)
-
-
-    # def elastix_apply(self, fixed, moving, method):
-    #
-    #     # write all transformed channels to imaris file
-    #     transformixImageFilter = sitk.TransformixImageFilter()
-    #     transformixImageFilter.SetTransformParameterMap(transformParameterMap)
-    #
-    #     fname_out_fixed = '{}{}'.format(fstem_fixed, stack_pf)
-    #     fname_out_moving = '{}'.format(fstem_moving)
-    #     fname_out = "{}_{}_{}.ims".format(fname_out_fixed, fname_out_moving, method)
-    #     fpath_out = os.path.join(ddir_out, fname_out)
-    #
-    #     shutil.copy2(fpath_fixed, fpath_out)
-    #     mo = Image(fpath_out, dtype='uint16', permission='r+')
-    #     mo.load(load_data=False)
-    #     #for ch in range(0, im_moving.dims[im_moving.axlab.index('c')]):
-    #     for ch in range(0, nchannels):
-    #         print(ch)
-    #         slc_c = {'c': slice(ch, ch + 1)}
-    #         mo.slices[mo.axlab.index('c')] = slc_c['c']
-    #         moving = load_itk_image(fpath_moving, slc={**slc_yx, **slc_c})
-    #         transformixImageFilter.SetMovingImage(moving)
-    #         transformixImageFilter.Execute()
-    #         data = sitk.GetArrayFromImage(transformixImageFilter.GetResultImage())
-    #         mo.write(data.astype('uint16'))
-    #     mo.close()
-    #     #im_moving.close()
+        # TODO
 
     def set_filepaths(self):
         """Set the filepaths by globbing the directory."""
@@ -318,10 +304,40 @@ class Registrat3r(Stapl3r):
         directory = os.path.abspath(os.path.dirname(self.image_in))
         self.filepaths = sorted(glob(os.path.join(directory, self.filepat)))
 
+    def _slc_lowres(self, inputs):
+        """Get a slice for the lowres cutout matching the highres zstack."""
 
+        hr_elsize, hr_shape = get_shapes(inputs['highres'])
+        lr_elsize, lr_shape = get_shapes(inputs['lowres'])
 
+        centrepoint_lr_def = {d: lrs / 2 for d, lrs in lr_shape.items()}
+        cp = {**centrepoint_lr_def, **self.centrepoint}
 
+        slc = {}
+        dims = {**self.centrepoint, **self.margin}.keys()
+        for d in dims:
+            halfwidth = (hr_elsize[d] * hr_shape[d]) / 2
+            extent = halfwidth / lr_elsize[d] + self.margin[d]
+            slc_start = max(0, int(cp[d] - extent))
+            slc_end = min(lr_shape[d], int(cp[d] + extent))
+            slc[d] = slice(slc_start, slc_end)
 
+        return slc
+
+    def _identify_empty_slices(self, data, ods='raw_nucl'):
+        """Find empty slices."""
+
+        nz = np.count_nonzero(np.reshape(data==0, [data.shape[0], -1]), axis=1)
+        # FIXME: generalize (automate threshold)
+        idxs = np.nonzero(nz > self._empty_slice_threshold)
+
+        return idxs
+
+    def _remove_empty_slices(self, data, idxs=[], axis=0):
+        """Discard empty region."""
+        if self._empty_slice_volume:
+            data = np.delete(data, idxs, axis=axis)
+        return data
 
 
 def load_itk_image(filepath, ch=0, tp=0, slc={}):
@@ -344,6 +360,8 @@ def load_itk_image(filepath, ch=0, tp=0, slc={}):
     for k, v in slc.items():
         im.slices[im.axlab.index(k)] = v
     data = im.slice_dataset()
+    if data.dtype == 'bool':
+        data = data.astype('uint8')
     itk_im = sitk.GetImageFromArray(data)
     spacing = np.array(im.elsize[:data.ndim][::-1], dtype='float')
     itk_im.SetSpacing(spacing)
@@ -352,35 +370,31 @@ def load_itk_image(filepath, ch=0, tp=0, slc={}):
     return itk_im
 
 
-def find_lowres_slice_yx(input_lr, input_hr, lr_centrepoint_yx=[], margins=[20, 20]):
-    """Get a slice for the lowres cutout matching the highres zstack."""
+def get_shapes(filepath):
+    im = Image(filepath)
+    im.load()
+    elsize = {d: im.elsize[im.axlab.index(d)] for d in 'zyx'}
+    shape = {d: im.dims[im.axlab.index(d)] for d in 'zyx'}
+    im.close()
+    return elsize, shape
 
-    def get_shapes(filepath):
-        if 'czi' in filepath:
-            from stapl3d.preprocessing.shading import get_image_info
-            iminfo = get_image_info(filepath)
-            elsize = iminfo['elsize_zyxc'][1:3]
-            shape = [iminfo['ncols'], iminfo['nrows']]
-        else:
-            im = Image(filepath)
-            im.load()
-            elsize = [im.elsize[im.axlab.index(d)] for d in 'yx']
-            shape = [im.dims[im.axlab.index(d)] for d in 'yx']
-            im.close()
-        return elsize, shape
 
-    hr_elsize, hr_shape = get_shapes(input_hr)
-    lr_elsize, lr_shape = get_shapes(input_lr)
+def get_moving(inputs, vol, slc={}):
 
-    lr_blocksize_yx = [(hr_shape[i] * hr_elsize[i]) / lr_elsize[i] + 2 * margins[i] for i in [0, 1]]
+    if 'moving' in vol.keys():
+        movingfile = inputs['moving']
+        if 'ids' in vol.keys():
+            ids = vol['ids']
+            movingfile = f'{movingfile}/{ids}'
+    else:
+        movingfile = inputs[vol['resolution']]
 
-    if not lr_centrepoint_yx:
-        lr_centrepoint_yx = [lr_shape[0] / 2, lr_shape[1] / 2]
+    ch = vol['channel'] if 'channel' in vol.keys() else 0
+    tp = vol['timepoint'] if 'timepoint' in vol.keys() else 0
 
-    slc_yx = {k: slice(int(cp - bs / 2), int(cp + bs / 2))
-              for k, cp, bs in zip('yx', lr_centrepoint_yx, lr_blocksize_yx)}
+    moving = load_itk_image(movingfile, ch=ch, tp=tp, slc=slc)
 
-    return slc_yx
+    return moving
 
 
 def Image_from_czi(filepath, stack=0):
