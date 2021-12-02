@@ -3368,10 +3368,15 @@ class Stapl3r(object):
     def _prep_paths(self, paths, reps={}, abs=True):
         """Format-in reps by keywords into (absolute) in- and outputpaths."""
 
+        def l2p(p):
+            if isinstance(p, list):
+                p = os.path.join(*p)
+            return p
+
         if reps:
-            paths = {ids: p.format(**reps) for ids, p in paths.items()}
+            paths = {ids: l2p(p).format(**reps) for ids, p in paths.items()}
         if abs:
-            paths = {ids: self._abs(p) for ids, p in paths.items()}
+            paths = {ids: self._abs(l2p(p)) for ids, p in paths.items()}
 
         return paths
 
