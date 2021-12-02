@@ -159,9 +159,8 @@ class Block3r(Stapl3r):
 
         step = 'blockinfo'  #self.step
         inpaths = self.inputpaths[step]['data']
-        blockfiles = self.outputpaths[step]['blockfiles']
 
-        if '{b' in inpaths:
+        if '{b' in inpaths or '{f' in inpaths:
             self.filepaths = self.get_filepaths(inpaths)
             self.set_fullsize(self.filepaths[0])
         elif os.path.isdir(self.image_in):
@@ -173,6 +172,11 @@ class Block3r(Stapl3r):
 
         self.set_blocksize()
         self.set_blockmargin()
+
+        if '{f' in inpaths:
+            self.outputpaths[step]['blockfiles'] = os.path.join('blocks', '{f}.h5')
+
+        blockfiles = self.outputpaths[step]['blockfiles']
 
         self._blocks = self.generate_blocks(blockfiles)
         self._blocks0 = self.generate_blocks(blockfiles, blocks0=True)
@@ -484,15 +488,16 @@ class Splitt3r(Block3r):
                                 prefixes=[self.prefix, 'blocks'],
                                 suffixes=[{'b': 'p'}])
 
+        blockfiles = self.outputpaths['blockinfo']['blockfiles']
         self._paths.update({
             'split': {
                 'inputs': {
-                    'data': f'{datapath}/data',
+                    'data': self.inputpaths['blockinfo']['data'],
                     'bias': f'{biaspath}/bias',
                     },
                 'outputs': {
-                    **{'blockfiles': f"{bpat}.h5"},
-                    **{ods: f"{bpat}.h5/{ods}" for ods in vols},
+                    **{'blockfiles': blockfiles},
+                    **{ods: f"{blockfiles}/{ods}" for ods in vols},
                     },
                 },
             })
@@ -512,23 +517,31 @@ class Splitt3r(Block3r):
     def _split_with_combinechannels(self, block):
         """Average membrane and nuclear channels and write as blocks."""
 
-        """
-        reps = {'b': block} if '{b}' in self.inputs['data'] else {}
-        inputs = self._prep_paths(self.inputs, reps=reps)
-        reps = {'b': block} if '{b}' in self.outputs['data'] else {}
-        outputs = self._prep_paths(self.outputs, reps=reps)
-        """
+        filestem = os.path.basename(self._blocks[block].path.replace('.h5/{ods}', ''))
+        block = self._blocks[block]
 
-        inputs = self._prep_paths(self.inputs, reps={'b': block})
-        outputs = self._prep_paths(self.outputs, reps={'b': block})
+        if '{b' in self.inputs['data']:
+            reps = {'b': block.idx}
+        elif '{f}' in self.inputs['data']:
+            reps = {'f': filestem}
+        else:
+            reps = {}
+        inputs = self._prep_paths(self.inputs, reps=reps)
+
+        if '{b' in self.outputs['blockfiles']:
+            reps = {'b': block.idx}
+        elif '{f}' in self.outputs['blockfiles']:
+            reps = {'f': filestem}
+        else:
+            reps = {}
+        outputs = self._prep_paths(self.outputs, reps=reps)
 
         # INPUT
         if self.filepaths:
-            infile = self.filepaths[block]
+            infile = self.filepaths[block.idx]
         else:
-            infile = inputs['data'].format(b=block)
+            infile = inputs['data'].format(b=block.idx)
 
-        block = self._blocks[block]
         print('Writing block with id {} to {}'.format(block.id, block.path))
 
         im = Image(infile, permission='r')
