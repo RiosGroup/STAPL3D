@@ -97,8 +97,6 @@ class Equaliz3r(Stapl3r):
         Regex to use on the data directory. [needs set_filepaths()]
     filepaths : list
         Paths to files to process.
-    outputformat : string
-        Format of output images, '.h5' (default) or '.nii'.
     sigma : float
         Kernel width for Gaussian smoothing, default 60.
     thresholds : dict
@@ -106,7 +104,7 @@ class Equaliz3r(Stapl3r):
     threshold_noise : float
         Specified threshold (global) for noise regions,
         (unused if 'thresholds' is specified).
-    threshold_noise : float
+    threshold_tissue : float
         Specified threshold (global) for tissue regions,
         (unused if 'thresholds' is specified).
     otsu_factor_noise: float
@@ -122,11 +120,19 @@ class Equaliz3r(Stapl3r):
         Minimum size of connected components of the foreground clusters,
         default 3.
     methods : list
-        Quantification method, default ['seg'].
+        Quantification methods, default ['seg'].
     quantiles : list
         Quantiles of image intensities for metric calculation,
         not used for the default 'seg' method,
         default [0.50, 0.99].
+    use_dirtree : bool
+        Switch to derive groupings from directory trees
+        or parameterfile, default 'True'. Expected tree structure:
+        <root>/<species>/<antibody> with 'primaries' as a separate species.
+    metric : str
+        Metric to use in the output plots.
+    df : pandas dataframe
+        Dataframe with quantification of the equalization assay.
 
     Examples
     --------
@@ -201,8 +207,10 @@ class Equaliz3r(Stapl3r):
 
         self._parameter_table = {
             'sigma': 'Smoothing sigma',
-            'otsu_factor_noise': 'Multiplication factor for noise threshold',
-            'otsu_factor_tissue': 'Multiplication factor for tissue threshold',
+            'otsu_factor_noise': 'Multiplication factor for otsu noise threshold',
+            'otsu_factor_tissue': 'Multiplication factor for otsu tissue threshold',
+            'threshold_noise': 'Global noise threshold',
+            'threshold_tissue': 'Global tissue threshold',
             'segment_quantile': 'Quantile used for segmentation',
             'segment_min_size': 'Minimal connected component size',
             'quantiles': 'Quantiles separating signal and tissue background',
@@ -211,7 +219,6 @@ class Equaliz3r(Stapl3r):
         default_attr = {
             'filepat': '*.*',
             'filepaths': [],
-            'outputformat': '.h5',
             'sigma': 10,
             '_sigmas': {},
             'otsu_factor_noise': 0.1,
@@ -225,7 +232,8 @@ class Equaliz3r(Stapl3r):
             'methods': ['seg'],
             'quantiles': [0.50, 0.99],
             '_metrics': {},
-            '_use_dirtree': True,
+            'use_dirtree': True,
+            'metric': 'foreground',
             'df': pd.DataFrame(),
         }
         for k, v in default_attr.items():
@@ -243,16 +251,10 @@ class Equaliz3r(Stapl3r):
 
     def _init_paths(self):
 
-        self.set_filepaths()
-
         vols_d = ['data', 'smooth']
         vols_m = ['noise_mask', 'tissue_mask', 'segmentation']
 
-        if 'h5' in self.outputformat:
-            fstring = '{}.h5/{}'
-        elif 'nii' in self.outputformat:
-            fstring = '{}_{}.nii.gz'
-
+        fstring = '{}.h5/{}'
         stem = self._build_path()
         fpat = os.path.join('{d}', '{f}')
 
@@ -316,7 +318,7 @@ class Equaliz3r(Stapl3r):
 
         dir, base = os.path.split(filepath)
         filestem = os.path.splitext(base)[0]
-        if not self._use_dirtree:
+        if not self.use_dirtree:
             dir = self.directory
         reps = {'d': dir, 'f': filestem}
         inputs = self._prep_paths(self.inputs, reps=reps)
@@ -326,6 +328,9 @@ class Equaliz3r(Stapl3r):
 
     def smooth(self, **kwargs):
         """Smooth images with a gaussian kernel."""
+
+        if not self.filepaths:
+            self.set_filepaths()
 
         arglist = self._prep_step('smooth', kwargs)
         with multiprocessing.Pool(processes=self._n_workers) as pool:
@@ -340,15 +345,10 @@ class Equaliz3r(Stapl3r):
 
         data_smooth = gaussian_filter(data.astype('float'), self.sigma)
 
-        if 'nii' in self.outputformat:
-            props = transpose_props(props)
-            data = np.atleast_3d(data)
-            data_smooth = np.atleast_3d(data_smooth)
-
         vols = {'data': data, 'smooth': data_smooth}
         for ids, out in vols.items():
             props['path'] = outputs[ids]
-            write_image(out, props)
+            write_image(out, props, attrs={'sigma': self.sigma})
 
         self._sigmas = {filestem: self.sigma}
 
@@ -356,6 +356,9 @@ class Equaliz3r(Stapl3r):
 
     def segment(self, **kwargs):
         """Segment the noise and tissue region in the image."""
+
+        if not self.filepaths:
+            self.set_filepaths()
 
         arglist = self._prep_step('segment', kwargs)
         with multiprocessing.Pool(processes=self._n_workers) as pool:
@@ -368,19 +371,46 @@ class Equaliz3r(Stapl3r):
         data, props = load_image(inputs['data'])
         smooth, props = load_image(inputs['smooth'])
 
-        masks, otsu, thrs = self._region_masks(smooth, filestem)
-        masks = self._tissue_segmentation(data, masks)
+        segmentation = np.zeros_like(data, dtype='uint8')
 
+        # clipper
+        infun = np.iinfo if data.dtype.kind in 'ui' else np.finfo
+        clipping_mask = data == infun(data.dtype).max
+
+        # noise / tissue separation
+        thresholds = self._pick_thresholds(smooth, filestem)
+        noise_mask = smooth < thresholds[0]
+        tissue_mask = smooth > thresholds[1]
+        tissue_mask = np.logical_and(tissue_mask, ~noise_mask)
+        tissue_mask &= ~clipping_mask
+
+        # foreground / background separation
+        signal_mask = data > np.quantile(data[tissue_mask], self.segment_quantile)
+        signal_mask[~tissue_mask] = False
+        signal_mask &= ~clipping_mask
+        remove_small_objects(signal_mask, min_size=self.segment_min_size, in_place=True)
+
+        segmentation[noise_mask]  = 1
+        segmentation[tissue_mask] = 2
+        segmentation[signal_mask] = 3
+        segmentation[clipping_mask] = 0
+
+        masks = {
+            'noise_mask': [noise_mask, {'threshold_noise': thresholds[0]}],
+            'tissue_mask': [tissue_mask, {'threshold_noise': thresholds[0]}],
+            'segmentation': [segmentation,
+                             {'segment_quantile': self.segment_quantile,
+                             'segment_min_size': self.segment_min_size,
+                             }],
+            }
         for ids, out in masks.items():
             props['path'] = outputs[ids]
-            write_image(out, props)
-
-        self.thresholds = {filestem: thrs}
-        self._otsus = {filestem: otsu}
+            write_image(out[0], props, attrs=out[1])
 
         self.dump_parameters(self.step, outputs['yml'])
 
-    def _region_masks(self, data, filestem):
+    def _pick_thresholds(self, data, filestem):
+        """Switch between threshold options."""
 
         if filestem in self.thresholds.keys():
             thresholds = self.thresholds[filestem]
@@ -394,41 +424,16 @@ class Equaliz3r(Stapl3r):
             thresholds[0] = float(thresholds[0] or mi + otsu * self.otsu_factor_noise)
             thresholds[1] = float(thresholds[1] or otsu * self.otsu_factor_tissue)
 
-        noise_mask = data < thresholds[0]
-        tissue_mask = data > thresholds[1]
-        tissue_mask = np.logical_and(tissue_mask, ~noise_mask)
+        self.thresholds = {filestem: thresholds}
+        self._otsus = {filestem: otsu}
 
-        masks = {'noise_mask': noise_mask, 'tissue_mask': tissue_mask}
-
-        return masks, otsu, thresholds
-
-    def _tissue_segmentation(self, data, masks):
-
-        noise_mask = masks['noise_mask']
-        tissue_mask = masks['tissue_mask']
-
-        # clipper
-        infun = np.iinfo if data.dtype.kind in 'ui' else np.finfo
-        clipping_mask = data == infun(data.dtype).max
-        tissue_mask &= ~clipping_mask
-
-        signal_mask = data > np.quantile(data[tissue_mask], self.segment_quantile)
-        signal_mask[~tissue_mask] = False
-        signal_mask &= ~clipping_mask
-        remove_small_objects(signal_mask, min_size=self.segment_min_size, in_place=True)
-
-        segmentation = np.zeros_like(tissue_mask, dtype='uint8')
-        segmentation[noise_mask]  = 1
-        segmentation[tissue_mask] = 2
-        segmentation[signal_mask] = 3
-        segmentation[clipping_mask] = 0
-
-        masks['segmentation'] = segmentation
-
-        return masks
+        return thresholds
 
     def metrics(self, **kwargs):
         """Calculate metrics of equalization images."""
+
+        if not self.filepaths:
+            self.set_filepaths()
 
         arglist = self._prep_step('metrics', kwargs)
         with multiprocessing.Pool(processes=self._n_workers) as pool:
@@ -441,6 +446,16 @@ class Equaliz3r(Stapl3r):
             quantiles = np.quantile(data, quantiles)
             score = quantiles[1] / quantiles[0]
             return quantiles, score
+
+        def get_snr(image, noise_mask, sigval, bgval=None):
+            noise = np.ravel(image[noise_mask])
+            if noise.size > 0:
+                noise_sd = np.std(noise)
+                snr = sigval / noise_sd
+                cnr = (sigval - bgval) / noise_sd
+            else:
+                cnr, noise_sd = 0, 0
+            return cnr, noise_sd, snr
 
         def get_cnr(image, noise_mask, sigval, bgval):
             noise = np.ravel(image[noise_mask])
@@ -455,8 +470,7 @@ class Equaliz3r(Stapl3r):
             """Simple quantiles."""
             data = np.ravel(image)
             vals, score = get_measures(data, quantiles)
-            cnr, noise_sd = None, None
-            return pd.DataFrame([vals[0], vals[1], score, cnr, noise_sd]).T
+            return pd.DataFrame([vals[0], vals[1], None, None, None, None]).T
 
         def q_clip(image, quantiles, segpath):
             """Simple quantiles of non-clipping."""
@@ -465,8 +479,7 @@ class Equaliz3r(Stapl3r):
                                   image < infun(image.dtype).max)
             data = np.ravel(image[mask])
             vals, score = get_measures(data, quantiles)
-            cnr, noise_sd = None, None
-            return pd.DataFrame([vals[0], vals[1], score, cnr, noise_sd]).T
+            return pd.DataFrame([vals[0], vals[1], None, None, None, None]).T
 
         def q_mask(image, quantiles, segpath):
             """Simple quantiles of image[tissue_mask]."""
@@ -477,17 +490,29 @@ class Equaliz3r(Stapl3r):
             data = np.ravel(image[mask])
             #mode = stats.mode(data)[0][0]
             vals, score = get_measures(data, quantiles)
-            cnr, noise_sd = get_cnr(image, segmentation==1, vals[1], vals[0])
-            return pd.DataFrame([vals[0], vals[1], score, cnr, noise_sd]).T
+            tissue, signal = vals[1], vals[0]
+
+            contrast = tissue / signal
+            cnr, noise_sd, snr = get_snr(image, segmentation==1, vals[1], vals[0])
+
+            return pd.DataFrame([vals[0], vals[1], noise_sd, snr, contrast, cnr]).T
 
         def seg(image, quantiles, segpath):
             """Three-comp segmentation."""
+
             segmentation, _ = load_image(segpath)
-            signal = np.median(np.ravel(image[segmentation==2]))
-            tissue = np.median(np.ravel(image[segmentation==3]))
+
+            #fun = self._metric_fun
+            fun = np.median
+            fun = np.mean
+
+            signal = fun(np.ravel(image[segmentation==2]))
+            tissue = fun(np.ravel(image[segmentation==3]))
+
             contrast = tissue / signal
-            cnr, noise_sd = get_cnr(image, segmentation==1, tissue, signal)
-            return pd.DataFrame([signal, tissue, contrast, cnr, noise_sd]).T
+            cnr, noise_sd, snr = get_snr(image, segmentation==1, tissue, signal)
+
+            return pd.DataFrame([signal, tissue, noise_sd, snr, contrast, cnr]).T
 
         filestem, inputs, outputs = self._get_filepaths_inout(filepath)
 
@@ -495,7 +520,7 @@ class Equaliz3r(Stapl3r):
         smooth, props = load_image(inputs['smooth'])
 
         df = pd.DataFrame()
-        metrics = ['q1', 'q2', 'contrast', 'cnr', 'noise_sd']
+        metrics = ['background', 'foreground', 'noise_sd', 'snr', 'contrast', 'cnr']
         meths = {'q_base': q_base, 'q_clip': q_clip, 'q_mask': q_mask, 'seg': seg}
         for method, fun in meths.items():
             if method in self.methods:
@@ -505,47 +530,66 @@ class Equaliz3r(Stapl3r):
 
         df.index = [filestem]
 
-
-
-        def find_primaries(mapping, name):
-            for v, prefix in mapping.items():
-                if name.lower().startswith(prefix.lower()):
-                    return True, v
-            return False, 'None'
-
-        def find_secondaries(mapping, name):
-            for species, specdict in mapping.items():
-                for ab, prefix in specdict.items():
-                    if name.lower().startswith(prefix.lower()):
-                        return True, species, ab
-            return False, 'None', 'None'
-
-        if self._use_dirtree:
+        def stratify_from_dirtree(df, filepath):
             comps = filepath.split(os.sep)
-            df['antibody'] = comps[-2]
-            df['species'] = comps[-3]
-            df['primaries'] = comps[-3] == 'primaries'
-            df['secondaries'] = comps[-3] != 'primaries'
+            newcols = {
+                'secondaries': comps[-3] != 'primaries',
+                'primaries': comps[-3] == 'primaries',
+                'antibody': comps[-2],
+                'species': comps[-3],
+                }
+            for k, v in newcols.items():
+                df.insert(0, k, v)
+            return df
 
-        elif self.step_id in self._cfg.keys():
+        def stratify_from_parfile(df, filestem):
+
+            def find_primaries(mapping, name):
+                for v, prefix in mapping.items():
+                    if name.lower().startswith(prefix.lower()):
+                        return True, v
+                return False, 'None'
+
+            def find_secondaries(mapping, name):
+                for species, specdict in mapping.items():
+                    for ab, prefix in specdict.items():
+                        if name.lower().startswith(prefix.lower()):
+                            return True, species, ab
+                return False, 'None', 'None'
 
             if 'primaries' in self._cfg[self.step_id]:
                 mapping = self._cfg[self.step_id]['primaries']
                 in_primaries, antibody = find_primaries(mapping, filestem)
-                df['primaries'] = in_primaries
-                df['secondaries'] = False
-                df['antibody'] = antibody
-                df['species'] = 'primaries'  # FIXME
+                newcols = {
+                    'secondaries': False,
+                    'primaries': in_primaries,
+                    'antibody': antibody,
+                    'species': 'primaries',
+                    }
+                for k, v in newcols.items():
+                    df.insert(0, k, v)
 
             if 'secondaries' in self._cfg[self.step_id]:
                 mapping = self._cfg[self.step_id]['secondaries']
                 in_secondaries, species, antibody = find_secondaries(mapping, filestem)
-                df['secondaries'] = in_secondaries
+                newcols = {'secondaries': in_secondaries}
                 if in_secondaries:
-                    df['antibody'] = antibody
-                    df['species'] = species
+                    newcols['antibody'] = antibody
+                    newcols['species'] = species
+                for k, v in newcols.items():
+                    df.insert(0, k, v)
+
+            return df
+
+        if self.use_dirtree:
+            df = stratify_from_dirtree(df, filepath)
+        elif self.step_id in self._cfg.keys():
+            df = stratify_from_parfile(df, filestem)
 
         # NB: need single-file output for HCP distributed system
+        cols = list(df.columns)
+
+        df = df[cols]
         df.to_csv(outputs['csv'], index_label='sample_id')
 
         self._metrics = {filestem: df.to_dict(orient='list')}
@@ -563,6 +607,9 @@ class Equaliz3r(Stapl3r):
 
     def postprocess(self, **kwargs):
         """Merge outputs of individual equalization images."""
+
+        if not self.filepaths:
+            self.set_filepaths()
 
         arglist = self._prep_step('postprocess', kwargs)
         self._postprocess()
@@ -596,19 +643,24 @@ class Equaliz3r(Stapl3r):
 
         self._merge('report', merge_reports)
 
-        self.summary_report(outputpath=outputs['summary'])
-
         self.df = pd.read_csv(outputs['csv'], index_col='sample_id')
 
+        self.summary_report(outputpath=outputs['summary'])
 
     def set_filepaths(self):
         """Set the filepaths by globbing the directory."""
 
-        if self._use_dirtree:
-            filepat = os.path.join('*', '*', self.filepat)
-        else:
+        if not self.use_dirtree:
             filepat = self.filepat
-        self.filepaths = sorted(glob(os.path.join(self.datadir, filepat)))
+            self.filepaths = sorted(glob(os.path.join(self.datadir, filepat)))
+        else:
+            filepat = os.path.join('*', '*', self.filepat)
+            self.filepaths = sorted(glob(os.path.join(self.datadir, filepat)))
+            if not self.filepaths:
+                filepat = self.filepat
+                self.filepaths = sorted(glob(os.path.join(self.datadir, filepat)))
+                if self.filepaths:
+                    self.use_dirtree = False
 
     def _collect_parameters(self, inputstem, steps=['smooth', 'segment', 'metrics']):
         """Collect parameters of steps for file-specific report generation."""
@@ -631,15 +683,20 @@ class Equaliz3r(Stapl3r):
             kwargs['parameters'] = p
 
         filestem = kwargs['filestem']
-        kwargs['sigma']  = p['_sigmas'][filestem]
+
+        kwargs['sigma']            = p['_sigmas'][filestem]
+
         kwargs['threshold_noise']  = p['thresholds'][filestem][0]
         kwargs['threshold_tissue'] = p['thresholds'][filestem][1]
         kwargs['threshold_otsu']   = p['_otsus'][filestem]
-        # # NOTE: doing this for 'seg' method first => TODO
-        kwargs['cnr']              = p['_metrics'][filestem]['seg-cnr'][0]
-        kwargs['contrast']         = p['_metrics'][filestem]['seg-contrast'][0]
-        kwargs['median_bg']        = p['_metrics'][filestem]['seg-q1'][0]
-        kwargs['median_fg']        = p['_metrics'][filestem]['seg-q2'][0]
+
+        method = self.methods[0]
+        kwargs['method']           = method
+        kwargs['metric']           = self.metric
+        kwargs['cnr']              = p['_metrics'][filestem][f'{method}-cnr'][0]
+        kwargs['contrast']         = p['_metrics'][filestem][f'{method}-contrast'][0]
+        kwargs['background']       = p['_metrics'][filestem][f'{method}-background'][0]
+        kwargs['foreground']       = p['_metrics'][filestem][f'{method}-foreground'][0]
 
         filepath = kwargs['inputs']['data']
         kwargs['props'] = get_imageprops(filepath)
@@ -698,7 +755,7 @@ class Equaliz3r(Stapl3r):
         extent = [0, w, 0, h]
 
         ax = axdict['image']
-        ax.imshow(image, cmap="gray", extent=extent, vmin=0, vmax=info_dict['median_fg'])
+        ax.imshow(image, cmap="gray", extent=extent, vmin=0, vmax=info_dict['foreground'])
         ax.set_axis_off()
         self._add_scalebar(ax, w)
 
@@ -742,8 +799,12 @@ class Equaliz3r(Stapl3r):
         ax.hist(data, bins=256, log=logscale, histtype='bar', stacked=True, color=segcolors[1:])
         ax.set_xlim([0, dmax])
 
-        mets = ['cnr', 'contrast', 'median_fg', 'median_bg']
-        labs = ['{} = {}'.format(k, '{0: >8.2f}'.format(info_dict[k])) for k in mets]
+        mets =  ['foreground', 'background', 'contrast', 'cnr']
+        vals = {
+            **{'method': '{0: >8s}'.format(info_dict['method'])},
+            **{k:        '{0: >8.2f}'.format(info_dict[k]) for k in mets},
+            }
+        labs = ['{} = {}'.format(k, v) for k, v in vals.items()]
         lab = '\n'.join(labs)
         ax.annotate(
             text=lab, xy=(1.01, 1.01), c='k',
@@ -754,55 +815,96 @@ class Equaliz3r(Stapl3r):
     def _summary_report(self, f, axdict, info_dict):
         """Plot summary report."""
 
-        metric = 'seg-cnr'
-        title = "contrast-to-noise"
-
-        metric = 'seg-q2'
-        title = "median_fg"
-
-        ax = axdict['graph']
-        df = info_dict['df']
-        df = df.sort_values(metric)
-        c = plt.cm.rainbow(np.linspace(0, 1, df.shape[0]))
-        df[metric].plot(ax=ax, kind='barh', color=c)
-        ax.set_title(title, fontsize=12)
+        try:
+            self._plot_stratified(f, axdict, info_dict)
+        except (KeyError, IndexError):
+            plt.clf()
+            self._plot_basic(f, axdict, info_dict)
 
     def _get_info_dict_summary(self, filestem, info_dict={}, channel=None):
+
+        info_dict['method']           = self.methods[0]
+        info_dict['metric']           = self.metric
 
         filepath = self._abs(self.outputs['csv'].format(filestem))
         info_dict['df'] = pd.read_csv(filepath, index_col='sample_id')
 
         return info_dict
 
-    def _plot_primaries(self, metric='seg-q2'):
+    def _plot_basic(self, f, axdict, info_dict):
+
+        sortcol = '{}-{}'.format(info_dict['method'], info_dict['metric'])
+
+        gs = axdict['gs']
+        ax = f.add_subplot(gs[0].subgridspec(1, 3)[1:])
+
+        df = info_dict['df']
+        df = df.sort_values(sortcol)
+        c = plt.cm.rainbow(np.linspace(0, 1, df.shape[0]))
+        df[sortcol].plot(ax=ax, kind='barh', color=c)
+        ax.set_title(info_dict['metric'], fontsize=12)
+
+    def _plot_stratified(self, f, axdict, info_dict):
+
+        sortcol = '{}-{}'.format(info_dict['method'], info_dict['metric'])
+
+        df_p = self.df[self.df['primaries']]
+        df_s = self.df[self.df['secondaries']]
+
+        dfa = df_s.groupby(['species', 'antibody']).agg([np.mean, np.std])
+        n_species = dfa.index.get_level_values(0).nunique()
+
+        gs = axdict['gs']
+        gs01 = gs[0].subgridspec(3, n_species, height_ratios=[5, 1, 5])
+
+        axdict['graph1'] = f.add_subplot(gs01[0, :])
+        self._plot_primaries(metric=sortcol, ax=axdict['graph1'])
+
+        axs = []
+        for ab in range(n_species):
+            if len(axs) == 0:
+                axs.append(f.add_subplot(gs01[2, ab]))
+            else:
+                axs.append(f.add_subplot(gs01[2, ab], sharey=axs[-1]))
+        axdict['graph2'] = axs
+        self._plot_secondaries(metric=sortcol, axs=axdict['graph2'])
+
+    def _plot_primaries(self, metric='seg-foreground', ax=None):
 
         df = self.df[self.df['primaries']]
         dfa = df.groupby('antibody').agg([np.mean, np.std])
         dfb = dfa.xs(metric, axis=1).sort_values('mean', ascending=False)
 
-        try:
-            import seaborn as sns
-        except ImportError:
+        if ax is not None:
             dfb.plot(kind="bar", y="mean", yerr='std',
-                     legend=False, figsize=(16, 10), title="Primaries")
+                     legend=False, title="Primaries", ax=ax)
+            ax.set_ylabel(self.metric)
         else:
-            g = sns.catplot(
-                kind='bar',
-                x='antibody',
-                y=metric,
-                data=df,
-                estimator=np.mean,
-                ci='sd',
-                order=dfb.index,
-                height=8,
-                aspect=2,
-            )
+            try:
+                import seaborn as sns
+            except ImportError:
+                dfb.plot(kind="bar", y="mean", yerr='std',
+                         legend=False, figsize=(16, 10), title="Primaries",
+                         ax=ax)
+                ax.set_ylabel(self.metric)
+            else:
+                g = sns.catplot(
+                    kind='bar',
+                    x='antibody',
+                    y=metric,
+                    data=df,
+                    estimator=np.mean,
+                    ci='sd',
+                    order=dfb.index,
+                    height=8,
+                    aspect=2,
+                )
 
-            g.set_xticklabels(rotation=60, fontsize=15)
-            g.set_yticklabels(fontsize=15)
-            g.set_axis_labels('', 'intensity', fontsize=20)
+                g.set_xticklabels(rotation=60, fontsize=15)
+                g.set_yticklabels(fontsize=15)
+                g.set_axis_labels('', 'intensity', fontsize=20)
 
-    def _plot_secondaries(self, metric='seg-q2'):
+    def _plot_secondaries(self, metric='seg-foreground', axs=None):
 
         df = self.df[self.df['secondaries']]
         dfa = df.groupby(['species', 'antibody']).agg([np.mean, np.std])
@@ -813,31 +915,15 @@ class Equaliz3r(Stapl3r):
             y="mean",
             yerr='std',
             subplots=True,
-            sharex=False,
-            sharey=True,
             legend=False,
-            figsize=(16, 10),
-            layout=(1, 8),
-            ylim=[0, 50000],
+            ax=axs,
         )
+        axs[0].set_ylabel(self.metric)
+
         #sns.catplot(kind='bar', data=df, col='species', estimator=np.mean, ci='sd', col_wrap=4)
 
     def view(self, input=[], images=None, labels=None, settings={}):
         """View equalization image and segmentations with napari."""
-
-        images = images or self._images
-        labels = labels or self._labels
-
-        """
-        if images is None:
-            images = []
-        else:
-            images = images or self._images
-        if labels is None:
-            labels = []
-        else:
-            labels = labels or self._labels
-        """
 
         filepath = input or self.filepaths[0]
         filepath = filepath.replace(os.path.splitext(filepath)[-1], '.h5')
@@ -863,12 +949,14 @@ def load_image(inputpath):
     return data, props
 
 
-def write_image(data, props):
+def write_image(data, props, attrs={}):
 
     props['dtype'] = data.dtype
     mo = Image(**props)
     mo.create()
     mo.write(data)
+    for attr, val in attrs.items():
+        mo.ds.attrs[attr] = val
     mo.close()
 
 

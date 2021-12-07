@@ -1944,10 +1944,11 @@ class Image(object):
 
         # downsample
         dsfac = tuple([downsample_factors[dim] for dim in self.axlab])
+        ds = self.slice_dataset()
         if ismask:
-            data = block_reduce(self.ds[:], dsfac, np.max)
+            data = block_reduce(ds, dsfac, np.max)
         else:
-            data = downscale_local_mean(self.ds[:], dsfac).astype('float32')
+            data = downscale_local_mean(ds, dsfac).astype('float32')
 
         mo.shape = data.shape
         mo.dims = data.shape
@@ -3710,7 +3711,10 @@ class Stapl3r(object):
 
         info_dict = self._get_info_dict_summary(filestem, channel=channel)
 
-        axdict = {'graph': f.add_subplot(gs[0].subgridspec(1, 3)[1:])}
+        if self._module_id == 'equalization':
+            axdict = {'gs': gs}
+        else:
+            axdict = {'graph': f.add_subplot(gs[0].subgridspec(1, 3)[1:])}
 
         self._summary_report(f, axdict, info_dict)
 
@@ -3931,9 +3935,11 @@ class Stapl3r(object):
         mpaths = []
         outputs = self._prep_paths(self.outputs)
         for filepath in self.filepaths:
-            filestem = os.path.splitext(os.path.basename(filepath))[0]
-            inputs = self._prep_paths(self.inputs, reps={'f': filestem})
+            _, inputs, _ = self._get_filepaths_inout(filepath)
+            #filestem = os.path.splitext(os.path.basename(filepath))[0]
+            #inputs = self._prep_paths(self.inputs, reps={'f': filestem})
             mpaths.append(inputs[filetype])
+
         mpaths.sort()
 
         try:
