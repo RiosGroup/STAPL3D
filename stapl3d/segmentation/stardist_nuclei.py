@@ -141,36 +141,43 @@ def augmenter(x, y,
     return x, y
 
 
-def get_training_data(datadir, filestem_train, h5_path_pat, z_range, trainblock_list, ids_dapi, ids_label, ids_memb, use_memb, axis_norm, ind_val, normalizer, **kwargs):
-    X, Y = [], []
-    for trainblock in trainblock_list:
-        if z_range:
-            z_slc = slice(z_range[0], z_range[1])
-        else:
-            z_slc = slice(None)
-        h5_path = h5_path_pat.format(filestem_train, trainblock)
-        img_path = os.path.join(datadir, '{}/{}'.format(h5_path, ids_dapi))
-        img_im = Image(img_path, permission='r')
-        img_im.load(load_data=True)
-        data = img_im.ds[z_slc, :, :]
-        if use_memb:
-            img_path = os.path.join(datadir, '{}/{}'.format(h5_path, ids_memb))
-            img_im.path = img_path
-            img_im.load(load_data=True)
-            data = np.stack([data, img_im.ds[z_slc, :, :]], axis=-1)
-        X.append(data)
-        img_im.close()
+def load_data(filepath, ids, z_range=[]):
 
-        lbl_path = os.path.join(datadir, '{}/{}'.format(h5_path, ids_label))
-        lbl_im = Image(lbl_path, permission='r')
-        lbl_im.load(load_data=True)
-        Y.append(lbl_im.ds[z_slc, :, :])
-        lbl_im.close()
+    z_slc = slice(z_range[0], z_range[1]) if z_range else slice(None)
+
+    im = Image(f'{filepath}/{ids}', permission='r')
+    im.load()
+    im.slices[im.axlab.index('z')] = z_slc
+    data = im.slice_dataset()
+    im.close()
+
+    return data
+
+
+def get_training_data(datadir, filestem_train, h5_path_pat, z_range, trainblock_list, ids_dapi, ids_label, ids_memb, use_memb, axis_norm, ind_val, normalizer, **kwargs):
+
+    X, Y = [], []
+
+    for trainblock in trainblock_list:
+
+        filename = h5_path_pat.format(filestem_train, trainblock)
+        filepath = os.path.join(datadir, filename)
+
+        data = load_data(filepath, ids_dapi, z_range)
+        if use_memb:
+            data_memb = load_data(filepath, ids_memb, z_range)
+            data = np.stack([data, data_memb], axis=-1)
+
+        lbl = load_data(filepath, ids_label, z_range)
+
+        X.append(data)
+        Y.append(lbl)
 
     if not normalizer:
         X = [normalize(x, 1, 99.8, axis=axis_norm) for x in X]
     else:
         X = [normalize_mi_ma(x, normalizer[0], normalizer[1]) for x in X]
+
     Y = [fill_label_holes(y) for y in Y]
 
     X_trn, Y_trn, X_val, Y_val, ind_train, ind_val = split_training_data(X, Y, ind_val)
@@ -179,6 +186,7 @@ def get_training_data(datadir, filestem_train, h5_path_pat, z_range, trainblock_
 
 
 def split_training_data(X, Y, ind_val=[]):
+
     if ind_val:
         ind_train = [ind for ind in range(len(X)) if ind not in ind_val]
     else:
