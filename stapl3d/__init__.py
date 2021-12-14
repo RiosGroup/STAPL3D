@@ -3074,7 +3074,16 @@ class Stapl3r(object):
                     par_paths[k] = self._cfg[step_id][step][key][k]
             print(f'Parameter file specified {key} for step "{step}":')
             print(f'   ... using {par_paths}.')
-        return {**paths[key], **par_paths}
+
+        def l2p(p):
+            if isinstance(p, list):
+                p = os.path.join(*p)
+            return p
+
+        paths = {**paths[key], **par_paths}
+        paths = {ids: l2p(p) for ids, p in paths.items()}
+
+        return paths
 
     def _get_arglist(self, parallelized_pars=[]):
         """Generate a argument list for multiprocessing."""
