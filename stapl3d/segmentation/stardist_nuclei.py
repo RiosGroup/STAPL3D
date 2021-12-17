@@ -331,7 +331,7 @@ class StarDist3r(Block3r):
         inputs = self._prep_paths(self.inputs)
         outputs = self._prep_paths(self.outputs)
 
-        filemat = self._pat2mat(inputs['blockfiles'], mat='*')
+        filemat = self._pat2mat(inputs['blockfiles'])
         blockpaths = sorted(glob(filemat))
 
         maxlabels = zipping.get_maxlabels_from_attribute(blockpaths, self.ids_lbl, '')

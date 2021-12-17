@@ -10,6 +10,7 @@ __author__ = "Michiel Kleinnijenhuis"
 __email__ = 'M.Kleinnijenhuis@prinsesmaximacentrum.nl'
 
 import os
+import re
 import sys
 import h5py
 import glob
@@ -3508,9 +3509,10 @@ class Stapl3r(object):
 
         return s
 
-    def _pat2mat(self, pat, mat='*'):
-        """"""
-        return pat.replace(pat[pat.find("{"):pat.find("}")+1], '*')
+    def _pat2mat(self, s, mat='*', pat=r"{[^{}]+}"):
+        """Replace all sets of curly brackets with wildcard."""
+
+        return re.sub(pat, mat, s)
 
     def _set_paths_step(self):
         self.inputs = self.inputpaths[self.step]
