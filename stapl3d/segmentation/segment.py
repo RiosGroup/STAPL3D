@@ -52,11 +52,8 @@ from stapl3d.blocks import Block3r
 from stapl3d import get_paths  # TODO: into Image/Stapl3r
 from stapl3d.reporting import (
     gen_orthoplot,
-    load_parameters,
     get_centreslice,
     get_centreslices,
-    get_zyx_medians,
-    get_cslc,
     )
 
 logger = logging.getLogger(__name__)

@@ -32,7 +32,6 @@ import czifile
 from readlif.reader import LifFile
 
 from stapl3d import parse_args, Stapl3r, Image
-from stapl3d.reporting import merge_reports
 
 logger = logging.getLogger(__name__)
 
