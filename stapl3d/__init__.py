@@ -3574,6 +3574,7 @@ class Stapl3r(object):
                 pass
             else:
                 self.viewer.add_image(data, name=ids)
+                self.view_set_axes(filepath, ids)
         for ids in labels:
             try:
                 data = self._get_h5_dset(filepath, ids, slices)
@@ -3581,16 +3582,7 @@ class Stapl3r(object):
                 pass
             else:
                 self.viewer.add_labels(data, name=ids)
-
-        im = Image('{}/{}'.format(filepath, (images + labels)[0]), permission='r')
-        im.load(load_data=False)
-        im.close()
-
-        axlab = [al for i, al in enumerate(im.axlab) if im.dims[i] > 1]
-        elsize = [es for i, es in enumerate(im.elsize) if im.dims[i] > 1]
-        viewer.dims.axis_labels = axlab
-        for lay in viewer.layers:
-            lay.scale = elsize
+                self.view_set_axes(filepath, ids)
 
     def view_blocks(self, block_idxs=[], images=[], labels=[], slices={}):
 
@@ -3598,18 +3590,19 @@ class Stapl3r(object):
 
         for block_idx in block_idxs:
 
-            filepath = self._blocks[block_idx].path.replace('/{ods}', '')
-
-            im = Image('{}/{}'.format(filepath, (images + labels)[0]), permission='r')
-            im.load(load_data=False)
-            im.close()
-
             block = self._blocks[block_idx]
-            affine = self._view_trans_affine(block.affine, im.elsize[:3])
+            filepath = block.path.replace('/{ods}', '')
 
             for ids in images + labels:
+
+                im = Image('{}/{}'.format(filepath, ids), permission='r')
+                im.load(load_data=False)
+                im.close()
+                affine = self._view_trans_affine(block.affine, im.elsize[:3])
+
                 name = f'{block.id}_{ids}'
                 data = self._get_h5_dset(filepath, ids, slices)
+
                 if ids in images:
                     self.viewer.add_image(data, name=name, affine=affine)
                     clim = self.viewer.layers[f'{block_id0}_{ids}'].contrast_limits
@@ -3625,6 +3618,19 @@ class Stapl3r(object):
             Tt[0, i] *= es
         Ts = np.diag(list(elsize) + [1])
         return  Ts @ Tt
+
+    def view_set_axes(self, filepath, ids):
+
+        im = Image('{}/{}'.format(filepath, ids), permission='r')
+        im.load(load_data=False)
+        im.close()
+
+        elsize = [es for i, es in enumerate(im.elsize) if im.dims[i] > 1]
+        for lay in self.viewer.layers:
+            lay.scale = elsize
+
+        axlab = [al for i, al in enumerate(im.axlab) if im.dims[i] > 1]
+        self.viewer.dims.axis_labels = axlab
 
     def set_view(self, settings={}):
         """Viewer settings functions."""
