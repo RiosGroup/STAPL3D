@@ -4,8 +4,6 @@
 
 """
 
-from __future__ import print_function, unicode_literals, absolute_import, division
-
 import os
 import sys
 import argparse
@@ -18,69 +16,418 @@ import numpy as np
 
 from glob import glob
 
-import warnings
-import math
-from tqdm import tqdm
-from collections import namedtuple
-from pathlib import Path
+from csbdeep.utils import normalize, normalize_mi_ma, axes_check_and_normalize, axes_dict
 
-from csbdeep.models.base_model import BaseModel
-from csbdeep.utils import Path, normalize, normalize_mi_ma, _raise, backend_channels_last, axes_check_and_normalize, axes_dict, load_json, save_json
-from csbdeep.utils.tf import export_SavedModel, keras_import, IS_TF_1, CARETensorBoard
-from csbdeep.internals.predict import tile_iterator
-from csbdeep.internals.train import RollingSequence
-from csbdeep.data import Resizer
+from stardist import fill_label_holes, calculate_extents, Rays_GoldenSpiral
+from stardist.models import Config3D, StarDist3D
+from stardist.big import _grid_divisible, BlockND, OBJECT_KEYS
 
-from stardist import random_label_cmap, fill_label_holes, calculate_extents, Rays_GoldenSpiral
-from stardist.models import Config3D, StarDist3D, StarDistData3D
-from stardist.sample_patches import get_valid_inds
-from stardist.utils import _is_power_of_2, optimize_threshold
-from stardist.matching import relabel_sequential
-from stardist.big import _grid_divisible, BlockND, OBJECT_KEYS#, repaint_labels
+from stapl3d import parse_args, Stapl3r, Image
+from stapl3d.blocks import Block3r
+from stapl3d.segmentation import zipping
 
-import tensorflow as tf
-K = keras_import('backend')
-Sequence = keras_import('utils', 'Sequence')
-Adam = keras_import('optimizers', 'Adam')
-ReduceLROnPlateau, TensorBoard = keras_import('callbacks', 'ReduceLROnPlateau', 'TensorBoard')
-
-from stapl3d import Image
-from stapl3d.pipelines import stardist_testing_library
+logger = logging.getLogger(__name__)
 
 
-def stardist_train(basedir, modelname='stardist'):
+def main(argv):
+    """Segment nuclei with StarDist."""
 
-    datadir = os.path.join(basedir, 'data')
-    modeldir = os.path.join(basedir, 'models')
+    steps = ['train', 'predict', 'merge']
+    args = parse_args('stardist', steps, *argv)
 
-    runs = stardist_testing_library.get_runs()
-    trainsets = stardist_testing_library.get_trainsets()
+    stardist3r = StarDist3r(
+        args.image_in,
+        args.parameter_file,
+        step_id=args.step_id,
+        directory=args.outputdir,
+        prefix=args.prefix,
+        max_workers=args.max_workers,
+    )
 
-    run = runs[modelname]
+    for step in args.steps:
+        stardist3r._fun_selector[step]()
 
-    td = {}
-    for trainset_name in run['trainsets']:
-        ts = trainsets[trainset_name]
-        td[trainset_name] = get_training_data(datadir, **ts, **run)
 
-    X_trn, Y_trn, X_val, Y_val, i_trn, i_val = [], [], [], [], [], []
-    for tsname, (X_t, X_v, Y_t, Y_v, i_t, i_v) in td.items():
-        X_trn += X_t
-        X_val += X_v
-        Y_trn += Y_t
-        Y_val += Y_v
-        i_trn += list(i_t)
-        i_val += list(i_v)
+class StarDist3r(Block3r):
+    """Segment nuclei with StarDist."""
 
-    n_channels = 1 if X_trn[0].ndim == 3 else X_trn[0].shape[-1]
+    def __init__(self, image_in='', parameter_file='', **kwargs):
 
-    conf = get_config(run, n_channels, Y_trn + Y_val)
-    model = StarDist3D(conf, name=modelname, basedir=modeldir)
+        if 'module_id' not in kwargs.keys():
+            kwargs['module_id'] = 'stardist'
 
-    model.train(X_trn, Y_trn, validation_data=(X_val, Y_val), augmenter=augmenter)
-    model.optimize_thresholds(X_val, Y_val)
+        super(StarDist3r, self).__init__(
+            image_in, parameter_file,
+            **kwargs,
+            )
 
-    return model
+        self._fun_selector.update({
+            'train': self.train,
+            'predict': self.predict,
+            'merge': self.merge,
+            })
+
+        self._parallelization.update({
+            'train': [],
+            'predict': ['blocks'],
+            'merge': [],
+            })
+
+        self._parameter_sets.update({
+            'train': {
+                'fpar': self._FPAR_NAMES,
+                'ppar': (),
+                'spar': ('_n_workers',),
+                },
+            'predict': {
+                'fpar': self._FPAR_NAMES,
+                'ppar': (),
+                'spar': ('_n_workers', 'blocks'),
+                },
+            'merge': {
+                'fpar': self._FPAR_NAMES,
+                'ppar': (),
+                'spar': ('_n_workers',),
+                },
+            })
+
+        # TODO
+        self._parameter_table.update({})
+
+        # TODO: parameters controlling stardist training epochs
+        default_attr = {
+            'modelname': 'stardist',
+            'ids_raw': 'raw_nucl',
+            'ids_lbl': 'label_nucl',
+            'train_patch_size': (40, 96, 96),
+            'axis_norm': (0, 1, 2),
+            'grid': (),
+            'n_rays': 96,
+            'augmenter': {
+                'rotflip_axis': (1, 2),
+                'int_fac': [0.8, 1.2],
+                'int_add': [-0.1, 0.1],
+                'scale_axis': (),
+                'scale_fac': [],
+                },
+            'normalizer_intensities': [],
+            'normalizer_percentages': [1.0, 99.8],
+            'config': {},
+            'axes': 'ZYX',
+            'block_size': [None, None, None],
+            'min_overlap': [32, 128, 128],
+            'context': [0, 64, 64],
+            'ids_label': 'labels',
+            'print_nblocks': False,
+            'blocks': [],
+            '_blocks': [],
+            'channel': None,
+        }
+        for k, v in default_attr.items():
+            setattr(self, k, v)
+
+        for step in self._fun_selector.keys():
+            step_id = 'blocks' if step=='blockinfo' else self.step_id
+            self.set_parameters(step, step_id=step_id)
+
+        self._init_paths_stardist()
+
+        self._init_log()
+
+        self._prep_blocks_stardist()
+
+        self._images = []
+        self._labels = []
+
+    def _init_paths_stardist(self):
+
+        self._paths.update({
+            'train': {
+                'inputs': {
+                    'traindir': ['stardist', 'data', 'train'],
+                    'valdir': ['stardist', 'data', 'val'],
+                    },
+                'outputs': {
+                    'modeldir': ['stardist', 'models'],
+                    }
+                },
+            'predict': {
+                'inputs': {
+                    'data': '.',
+                    'modeldir': ['stardist', 'models'],
+                    },
+                'outputs': {
+                    'nblocks': ['blocks_stardist', 'nblocks.txt'],
+                    'blockfiles': ['blocks_stardist', '{f}.h5'],
+                    }
+                },
+            'merge': {
+                'inputs': {
+                    'blockfiles': ['blocks_stardist', '{f}.h5'],
+                    'data': '.',
+                    },
+                'outputs': {
+                    'prediction': 'stardist_prediction.h5/stardist',
+                    'polys': 'stardist_prediction.pickle',
+                    }
+                },
+            })
+
+        for step in self._fun_selector.keys():
+            self.inputpaths[step]  = self._merge_paths(self._paths[step], step, 'inputs')
+            self.outputpaths[step] = self._merge_paths(self._paths[step], step, 'outputs')
+
+    def train(self, **kwargs):
+        """Train StarDist model."""
+
+        arglist = self._prep_step('train', kwargs)
+        self._train_model()
+
+    def _train_model(self):
+        """Train StarDist model."""
+
+        inputs = self._prep_paths(self.inputs)
+        outputs = self._prep_paths(self.outputs)
+
+        X_trn, Y_trn = self._load_data_directory(inputs['traindir'])
+        X_val, Y_val = self._load_data_directory(inputs['valdir'])
+
+        n_channels = 1 if X_trn[0].ndim == 3 else X_trn[0].shape[-1]
+
+        self._set_stardist_config(n_channels, Y_trn + Y_val)
+
+        model = StarDist3D(self.config, name=self.modelname, basedir=outputs['modeldir'])
+
+        model.train(X_trn, Y_trn, validation_data=(X_val, Y_val), augmenter=augmenter)
+
+        model.optimize_thresholds(X_val, Y_val)
+
+    def _load_data_directory(self, datadir):
+        """Load data/label pairs of all hdf5 files in a directory."""
+
+        X, Y = [], []
+        filepaths = sorted(glob(os.path.join(datadir, '*.h5')))
+        for filepath in filepaths:
+            X.append(load_data(filepath, self.ids_raw))
+            Y.append(load_data(filepath, self.ids_lbl))
+
+        X = [self._normalize_stardist_data(x) for x in X]
+
+        Y = [fill_label_holes(y) for y in Y]
+
+        return X, Y
+
+    def _set_stardist_config(self, n_channels, Y):
+        """Set the StarDist configuration."""
+
+        extents = calculate_extents(Y)
+        anisotropy = tuple(np.max(extents) / extents)
+        grid = self.grid or tuple(1 if a > 1.5 else 2 for a in anisotropy)
+        rays = Rays_GoldenSpiral(self.n_rays, anisotropy=anisotropy)
+        self.config = Config3D (
+            rays             = rays,
+            grid             = grid,
+            anisotropy       = anisotropy,
+            use_gpu          = False,
+            n_channel_in     = n_channels,
+            train_patch_size = self.train_patch_size,
+            train_batch_size = 2,
+            )
+
+    def print_nblocks(self, **kwargs):
+        """Predict nuclei with StarDist model."""
+
+        arglist = self._prep_step('print_nblocks', kwargs)
+        self._print_nblocks(0)
+
+    def _print_nblocks(self):
+        """Print the number of blocks to file (for parallel hpc prediction)."""
+
+        blockdir = os.path.dirname(self.outputs['blockfiles'])
+        os.makedirs(blockdir, exist_ok=True)
+        with open(os.path.join(blockdir, 'nblocks.txt'), 'w') as f:
+            f.write(str(len(self._blocks)))
+
+    def predict(self, **kwargs):
+        """Predict nuclei with StarDist model."""
+
+        arglist = self._prep_step('predict', kwargs)
+
+        if self.print_nblocks:
+            self._print_nblocks()
+            return
+
+#        with multiprocessing.Pool(processes=self._n_workers) as pool:
+#            pool.starmap(self._predict_block, arglist)
+        for block_idx in self.blocks:
+            self._predict_block(block_idx)
+
+    def _predict_block(self, block_idx):
+        """Predict nuclei with StarDist model for a block."""
+
+        filepath, block = self._blocks[block_idx]
+        filestem = os.path.basename(os.path.splitext(filepath)[0])
+
+        inputs = self._prep_paths(self.inputs)
+
+        reps = self._find_reps(self.outputs['blockfiles'], filestem, block_idx)
+        # reps = {'f': filestem, 'b': block_idx}
+        outputs = self._prep_paths(self.outputs, reps=reps)
+
+        blockdir = os.path.dirname(outputs['blockfiles'])
+        os.makedirs(blockdir, exist_ok=True)
+        blockstem = outputs['blockfiles'].split('.h5')[0]
+
+        model = load_model(inputs['modeldir'], self.modelname)
+
+        # Load data
+        im = Image(filepath, permission='r')
+        im.load(load_data=False)
+        comps = im.split_path()
+        if filepath.endswith('.ims'):
+            h5ds = im.file['/DataSet/ResolutionLevel 0/TimePoint 0/Channel 0/Data']
+        elif '.h5' in filepath:
+            h5ds = im.file[comps['int']]
+        else:  # czi
+            if self.channel is not None:
+                im.slices[im.axlab.index('c')] = slice(self.channel, self.channel + 1)
+            h5ds = im.slice_dataset()
+
+        props = im.get_props()
+        for al in 'ct':
+            if al in im.axlab:
+                props = im.squeeze_props(props, dim=im.axlab.index(al))
+
+        data = block.read(h5ds, axes=self.axes)
+        data = self._normalize_stardist_data(data)
+
+        labels, polys = self._run_prediction(model, block, data)
+
+        write_labels(f'{blockstem}.h5/{self.ids_lbl}', props, labels)
+        with open(f'{blockstem}.pickle', 'wb') as f:
+            pickle.dump([model._axes_out.replace('C', ''), polys, block], f)
+
+        im.close()
+
+    def _run_prediction(self, model, block, data):
+        """Run stardist prediction on block."""
+
+        axes_out = model._axes_out.replace('C', '')
+
+        labels, polys = model.predict_instances(data)
+        labels = block.crop_context(labels, axes=axes_out)
+        labels, polys = block.filter_objects(labels, polys, axes=axes_out)
+
+        return labels, polys
+
+    def merge(self, **kwargs):
+        """Merge stardistblocks to single volume."""
+
+        arglist = self._prep_step('merge', kwargs)
+        self._mergeblocks()
+
+    def _mergeblocks(self):
+
+        inputs = self._prep_paths(self.inputs)
+        outputs = self._prep_paths(self.outputs)
+
+        filemat = self._pat2mat(inputs['blockfiles'], mat='*')
+        blockpaths = sorted(glob(filemat))
+
+        maxlabels = zipping.get_maxlabels_from_attribute(blockpaths, self.ids_lbl, '')
+
+        im = Image(inputs['data'], permission='r')
+        im.load(load_data=False)
+        props = im.get_props()
+        props['dtype'] = 'int32'
+        for al in 'ct':
+            if al in im.axlab:
+                props = im.squeeze_props(props, dim=im.axlab.index(al))
+        im.close()
+
+        mo = Image(outputs['prediction'], **props)
+        mo.create()
+
+        polys_all = {}
+        for blockpath in blockpaths:
+
+            # read polys
+            picklepath = blockpath.replace('.h5', '.pickle')
+            with open(picklepath, 'rb') as f:
+                (axes_out, polys, block) = pickle.load(f)
+            for k,v in polys.items():
+                polys_all.setdefault(k,[]).append(v)
+
+            # read labels
+            h5_path = f'{blockpath}/{self.ids_lbl}'
+            im = Image(h5_path, permission='r')
+            im.load()
+            labels = im.slice_dataset().astype(props['dtype'])
+            im.close()
+
+            # relabel labels
+            maxlabel = np.sum(maxlabels[:block.id]).astype(props['dtype'])
+            bg_label = 0
+            mask = labels == bg_label
+            labels[~mask] += maxlabel
+
+            # write labels
+            block.write(mo.ds, labels, axes=axes_out)
+
+        mo.ds.attrs.create('maxlabel', maxlabel, dtype='uint32')
+        mo.close()
+
+        polys_all = {k: (np.concatenate(v) if k in OBJECT_KEYS else v[0])
+                     for k,v in polys_all.items()}
+        with open(outputs['polys'], 'wb') as f:
+            pickle.dump(polys_all, f)
+
+    def _prep_blocks(self):
+        pass
+
+    def _prep_blocks_stardist(self):
+        """Generate StarDist blocks for parallel processing."""
+
+        inputs = self._prep_paths(self.inputpaths['predict'])
+
+        try:
+            model = load_model(inputs['modeldir'], self.modelname)
+        except:
+            return
+
+        inpaths = inputs['data']
+        if '{b' in inpaths or '{f' in inpaths:
+            self.filepaths = self.get_filepaths(inpaths)
+        elif os.path.isdir(inpaths):  # TODO: flexible extension
+            self.filepaths = sorted(glob(os.path.join(inpaths, '*.czi')))
+        else:
+            # should be a single file (or a list of files???)
+            self.filepaths = [inpaths]
+
+        self._blocks = []
+        for filepath in self.filepaths:
+
+            im = Image(filepath, permission='r')
+            im.load(load_data=False)
+            dims = [im.dims[im.axlab.index(d) for d in self.axes.lower()]
+            im.close()
+
+            blocks = stardist_blocks(model, dims, self.axes, self.block_size, self.min_overlap, self.context)
+            for b in blocks:
+                self._blocks.append((filepath, b))
+
+    def _normalize_stardist_data(self, x):
+
+        if self.normalizer_intensities:
+            mi = np.array([[[self.normalizer_intensities[0]]]])
+            ma = np.array([[[self.normalizer_intensities[1]]]])
+            x = normalize_mi_ma(x, mi, ma)
+        elif self.normalizer_percentages:
+            mi = self.normalizer_percentages[0]
+            ma = self.normalizer_percentages[1]
+            x = normalize(x, mi, ma, axis=self.axis_norm)
+
+        return x
 
 
 def random_fliprot(img, mask, axis=None):
@@ -141,86 +488,8 @@ def augmenter(x, y,
     return x, y
 
 
-def load_data(filepath, ids, z_range=[]):
-
-    z_slc = slice(z_range[0], z_range[1]) if z_range else slice(None)
-
-    im = Image(f'{filepath}/{ids}', permission='r')
-    im.load()
-    im.slices[im.axlab.index('z')] = z_slc
-    data = im.slice_dataset()
-    im.close()
-
-    return data
-
-
-def get_training_data(datadir, filestem_train, h5_path_pat, z_range, trainblock_list, ids_dapi, ids_label, ids_memb, use_memb, axis_norm, ind_val, normalizer, **kwargs):
-
-    X, Y = [], []
-
-    for trainblock in trainblock_list:
-
-        filename = h5_path_pat.format(filestem_train, trainblock)
-        filepath = os.path.join(datadir, filename)
-
-        data = load_data(filepath, ids_dapi, z_range)
-        if use_memb:
-            data_memb = load_data(filepath, ids_memb, z_range)
-            data = np.stack([data, data_memb], axis=-1)
-
-        lbl = load_data(filepath, ids_label, z_range)
-
-        X.append(data)
-        Y.append(lbl)
-
-    if not normalizer:
-        X = [normalize(x, 1, 99.8, axis=axis_norm) for x in X]
-    else:
-        X = [normalize_mi_ma(x, normalizer[0], normalizer[1]) for x in X]
-
-    Y = [fill_label_holes(y) for y in Y]
-
-    X_trn, Y_trn, X_val, Y_val, ind_train, ind_val = split_training_data(X, Y, ind_val)
-
-    return X_trn, X_val, Y_trn, Y_val, ind_train, ind_val
-
-
-def split_training_data(X, Y, ind_val=[]):
-
-    if ind_val:
-        ind_train = [ind for ind in range(len(X)) if ind not in ind_val]
-    else:
-        rng = np.random.RandomState(42)
-        ind = rng.permutation(len(X))
-        n_val = max(1, int(round(0.15 * len(ind))))
-        ind_train, ind_val = ind[:-n_val], ind[-n_val:]
-
-    X_trn, Y_trn = [X[i] for i in ind_train], [Y[i] for i in ind_train]
-    X_val, Y_val = [X[i] for i in ind_val]  , [Y[i] for i in ind_val]
-
-    return X_trn, Y_trn, X_val, Y_val, ind_train, ind_val
-
-
-def get_config(run, n_channels, Y):
-
-    extents = calculate_extents(Y)
-    anisotropy = tuple(np.max(extents) / extents)
-    grid = run['grid'] or tuple(1 if a > 1.5 else 2 for a in anisotropy)
-    rays = Rays_GoldenSpiral(run['n_rays'], anisotropy=anisotropy)
-    conf = Config3D (
-        rays             = rays,
-        grid             = grid,
-        anisotropy       = anisotropy,
-        use_gpu          = False,
-        n_channel_in     = n_channels,
-        train_patch_size = run['train_patch_size'],
-        train_batch_size = 2,
-        )
-
-    return conf
-
-
 def stardist_normalization_range(image_in, pmin=1, pmax=99.8, axis_norm=(0, 1, 2)):
+    """Find percentiles of dataset (for big dataset normalization presets)."""
 
     im = Image(image_in)
     im.load()
@@ -234,10 +503,15 @@ def stardist_normalization_range(image_in, pmin=1, pmax=99.8, axis_norm=(0, 1, 2
     return mi, ma
 
 
-def stardist_blocks(model, imdims, axes='ZYX', block_size=[106, 1024, 1024], min_overlap=[32, 128, 128], context=[0, 64, 64]):
+def stardist_blocks(model, imdims, axes='ZYX', block_size=[None, 1024, 1024], min_overlap=[32, 128, 128], context=[0, 64, 64]):
+    """Generate StarDist blocks for parallel processing."""
+
+    # TODO: dataset-dependent automatic blocksize
 
     n = len(axes)
     dims = imdims[:n]
+
+    block_size = [b if b is not None else d for b, d in zip(block_size, dims)]
 
     assert 0 <= min_overlap[0] + 2 * context[0] < block_size[0] <= dims[0]
     assert 0 <= min_overlap[1] + 2 * context[1] < block_size[1] <= dims[1]
@@ -277,130 +551,40 @@ def stardist_blocks(model, imdims, axes='ZYX', block_size=[106, 1024, 1024], min
     return blocks
 
 
-def stardist_predict(basedir, modelname, image_in, idx, normalization=[],
-                     axes = 'ZYX', block_size=[106, 1024, 1024], min_overlap=[32, 128, 128], context=[0, 64, 64],
-                     ids_label='labels', outputstem='', print_nblocks=False):
+def load_model(self, modeldir, modelname):
+    """Load StarDist model."""
 
-    # Load model
     if modelname in ['3D_demo']:
         model = StarDist3D.from_pretrained(modelname)
-        #model.optimize_thresholds(X_val, Y_val)
     else:
-        modeldir = os.path.join(basedir, 'models')
         model = StarDist3D(None, name=modelname, basedir=modeldir)
 
-    # Load data
-    im = Image(image_in, permission='r')
-    im.load(load_data=False)
-    comps = im.split_path()
-    if image_in.endswith('.ims'):
-        h5ds = im.file['/DataSet/ResolutionLevel 0/TimePoint 0/Channel 0/Data']
-        props = im.squeeze_props(im.squeeze_props(dim=4), dim=3)
-    else:
-        h5ds = im.file[comps['int']]
-        props = im.get_props()
+    return model
 
-    # Outputdir
-    blockdir = os.path.join(comps['dir'], 'blocks_stardist')  # FIXME
-    os.makedirs(blockdir, exist_ok=True)
-    outputstem = outputstem or os.path.join(blockdir, comps['fname'])
 
-    # Blocks
-    blocks = stardist_blocks(model, im.dims, axes, block_size, min_overlap, context)
-    if print_nblocks:
-        with open(os.path.join(blockdir, 'nblocks.txt'), 'w') as f:
-            f.write("{}".format(len(blocks)))
-        im.close()
-        return
+def load_data(filepath, ids, z_range=[]):
+    """Load data from file."""
 
-    block = blocks[idx]
-    blockstem = os.path.join(blockdir, '{}_block{:05d}'.format(outputstem, block.id))
-    print('# of blocks: {}; processing block: {:05d}'.format(len(blocks), idx))
+    im = Image(f'{filepath}/{ids}', permission='r')
+    im.load()
+    z_slc = slice(z_range[0], z_range[1]) if z_range else slice(None)
+    im.slices[im.axlab.index('z')] = z_slc
+    data = im.slice_dataset()
+    im.close()
 
-    # Normalize
-    if not normalization:
-        img = normalize(block.read(h5ds, axes=axes), 1, 99.8, axis=axis_norm)
-    else:
-        mi, ma = np.array([[[normalization[0]]]]), np.array([[[normalization[1]]]])
-        img = normalize_mi_ma(block.read(h5ds, axes=axes), mi, ma)
+    return data
 
-    # Predict
-    axes_out = model._axes_out.replace('C', '')
-    predict_kwargs = {}
-    labels, polys = model.predict_instances(img, **predict_kwargs)
-    # print(labels.shape, len(np.unique(labels)), len(polys))
-    labels = block.crop_context(labels, axes=axes_out)
-    # print(labels.shape, len(np.unique(labels)), len(polys))
-    labels, polys = block.filter_objects(labels, polys, axes=axes_out)
-    # print(labels.shape, len(np.unique(labels)), len(polys))
 
-    # Save
-    maxlabel = np.amax(labels)
+def write_labels(filepath, props, labels):
+    """Write labels to file."""
+
     props['shape'] = labels.shape
-    mo = Image('{}.h5/{}'.format(blockstem, ids_label), **props)
+    mo = Image(filepath, **props)
     mo.create()
     mo.write(labels)
-    mo.ds.attrs.create('maxlabel', maxlabel, dtype='uint32')
+    mo.ds.attrs.create('maxlabel', np.amax(labels), dtype='uint32')
     mo.close()
 
-    with open('{}.pickle'.format(blockstem), 'wb') as f:
-        pickle.dump([axes_out, polys, block], f)
 
-    im.close()
-
-
-def stardist_mergeblocks(blockdir, image_in_ref, ids_label='labels', postfix='_stardist', dtype='int32'):
-
-    blockpaths = glob(os.path.join(blockdir, '*.pickle'))
-    blockpaths.sort()
-
-    blockstem = blockpaths[0].split('_block')[0]
-    dataset = os.path.split(blockstem)[1]
-
-    maxlabelfile = os.path.join(blockdir, '{}_maxlabels.txt'.format(dataset))
-    maxlabels = np.loadtxt(maxlabelfile, dtype=np.uint32)
-
-    datadir = os.path.split(image_in_ref)[0]
-    filestem = os.path.join(datadir, dataset)
-
-    im = Image(image_in_ref, permission='r')
-    im.load(load_data=False)
-    props = im.squeeze_props(im.squeeze_props(dim=4), dim=3)
-    props['dtype'] = dtype
-    im.close()
-
-    outputstem = os.path.join(datadir, '{}{}'.format(filestem, postfix))
-    outpath = '{}.h5/{}'.format(outputstem, ids_label)
-    mo = Image(outpath, **props)
-    mo.create()
-
-    polys_all = {}
-    for blockpath in blockpaths:
-        # read polys
-        with open(blockpath, 'rb') as f:
-            (axes_out, polys, block) = pickle.load(f)
-        for k,v in polys.items():
-            polys_all.setdefault(k,[]).append(v)
-        # read labels
-        blockstem = os.path.splitext(blockpath)[0]
-        blockpath = os.path.join(datadir, '{}.h5/{}'.format(blockstem, ids_label))
-        im = Image(blockpath, permission='r')
-        im.load()
-        labels = im.slice_dataset().astype(dtype)
-        im.close()
-        # relabel labels
-        maxlabel = np.sum(maxlabels[:block.id])
-        bg_label = 0
-        mask = labels == bg_label
-        labels[~mask] += maxlabel
-        # write labels
-        block.write(mo.ds, labels, axes=axes_out)
-
-    mo.ds.attrs.create('maxlabel', maxlabel, dtype='uint32')
-    mo.close()
-
-    polys_all = {k: (np.concatenate(v) if k in OBJECT_KEYS else v[0])
-                 for k,v in polys_all.items()}
-    outpath = '{}.pickle'.format(outputstem)
-    with open(outpath, 'wb') as f:
-        pickle.dump(polys_all, f)
+if __name__ == "__main__":
+    main(sys.argv[1:])

@@ -3390,6 +3390,16 @@ class Stapl3r(object):
 
         return paths
 
+    def _find_reps(self, filepat, filestem=None, block_idx=-1):
+
+        reps = {}
+        if '{b' in filepat:
+            reps['b'] = block_idx
+        if '{f}' in filepat:
+            reps['f'] = filestem
+
+        return reps
+
     def fill_paths(self, step_id, reps={}, abs=True):
         """Format-in reps by keywords into (absolute) in- and outputpaths."""
 
