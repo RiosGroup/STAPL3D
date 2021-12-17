@@ -3556,16 +3556,16 @@ class Stapl3r(object):
         slices = settings['slices'] if 'slices' in settings.keys() else {}
 
         viewer = napari.Viewer()
+        self.viewer = viewer
 
         if isinstance(input, str):
-            self.view_single(viewer, input, images, labels, slices)
+            self.view_single(input, images, labels, slices)
         if isinstance(input, list):
-            self.view_blocks(viewer, input, images, labels, slices)
+            self.view_blocks(input, images, labels, slices)
 
-        self.viewer = viewer
         self.set_view(settings)
 
-    def view_single(self, viewer, filepath='', images=[], labels=[], slices={}):
+    def view_single(self, filepath='', images=[], labels=[], slices={}):
 
         for ids in images:
             try:
@@ -3573,14 +3573,14 @@ class Stapl3r(object):
             except:
                 pass
             else:
-                viewer.add_image(data, name=ids)
+                self.viewer.add_image(data, name=ids)
         for ids in labels:
             try:
                 data = self._get_h5_dset(filepath, ids, slices)
             except:
                 pass
             else:
-                viewer.add_labels(data, name=ids)
+                self.viewer.add_labels(data, name=ids)
 
         im = Image('{}/{}'.format(filepath, (images + labels)[0]), permission='r')
         im.load(load_data=False)
@@ -3592,7 +3592,7 @@ class Stapl3r(object):
         for lay in viewer.layers:
             lay.scale = elsize
 
-    def view_blocks(self, viewer, block_idxs=[], images=[], labels=[], slices={}):
+    def view_blocks(self, block_idxs=[], images=[], labels=[], slices={}):
 
         block_id0 = self._blocks[block_idxs[0]].id
 
@@ -3611,13 +3611,13 @@ class Stapl3r(object):
                 name = f'{block.id}_{ids}'
                 data = self._get_h5_dset(filepath, ids, slices)
                 if ids in images:
-                    viewer.add_image(data, name=name, affine=affine)
-                    clim = viewer.layers[f'{block_id0}_{ids}'].contrast_limits
-                    viewer.layers[f'{block.id}_{ids}'].contrast_limits = clim
+                    self.viewer.add_image(data, name=name, affine=affine)
+                    clim = self.viewer.layers[f'{block_id0}_{ids}'].contrast_limits
+                    self.viewer.layers[f'{block.id}_{ids}'].contrast_limits = clim
                 if ids in labels:
-                    viewer.add_labels(data, name=name, affine=affine)
+                    self.viewer.add_labels(data, name=name, affine=affine)
 
-        viewer.dims.axis_labels = [al for al in im.axlab]
+        self.viewer.dims.axis_labels = [al for al in im.axlab]
 
     def _view_trans_affine(self, affine, elsize):
         Tt = np.copy(affine)
