@@ -11,6 +11,8 @@ import logging
 import pickle
 import shutil
 import multiprocessing
+import subprocess
+import tempfile
 
 import yaml
 
@@ -98,7 +100,7 @@ class Registrat3r(Stapl3r):
             'centrepoint': {},
             'margin': {'y': 20, 'x': 20},
             'tasks': 1,
-            'method': 'affine',
+            'methods': {'affine': ''},
             'target_voxelsize': {},
             'volumes': [],
             '_empty_slice_volume': '',
@@ -184,35 +186,88 @@ class Registrat3r(Stapl3r):
         slc = self._slc_lowres(inputs)
         moving = load_itk_image(inputs['lowres'], ch=ch, tp=tp, slc=slc)
 
-        parmap, eif = self._elastix_register(fixed, moving, self.method)
+        init_suffix = ''
+        for method, parpath in self.methods.items():
 
-        sitk.WriteParameterFile(parmap, outputs['elastix'])
+            parmap, eif = self._elastix_register(filestem, fixed, moving,
+                                                 method, parpath,
+                                                 init_suffix)
+            tpMap = eif.GetTransformParameterMap()
+            tpMap[0]['FinalBSplineInterpolationOrder'] = '1',
+            tpMap[0]['ResultImagePixelType'] = "uint16",
 
-        tpMap = eif.GetTransformParameterMap()
-        tpMap[0]['FinalBSplineInterpolationOrder'] = '1',
-        tpMap[0]['ResultImagePixelType'] = "uint16",
-        sitk.WriteParameterFile(tpMap[0], outputs['transformix'])
+            k = 'elastix'
+            outpath = outputs[k].replace(f'_{k}.txt', f'_{k}_{method}.txt')
+            sitk.WriteParameterFile(parmap, outpath)
 
-    def _elastix_register(self, fixed, moving, parpath='affine'):
+            k = 'transformix'
+            outpath = outputs[k].replace(f'_{k}.txt', f'_{k}_{method}.txt')
+            sitk.WriteParameterFile(tpMap[0], outpath)
 
-        if parpath in ['rigid', 'affine', 'bspline']:
-            parmap = sitk.GetDefaultParameterMap(parpath)
+            init_suffix = f'{method}'
+
+    def _elastix_register(self, filestem, fixed, moving,
+                          method='affine', parpath='',
+                          init_suffix='', uselandmarks=False):
+
+        elastixImageFilter = self._get_filter()
+
+        if init_suffix:
+            init_path = f"{filestem}_transformix_{init_suffix}.txt"
+            elastixImageFilter.SetInitialTransformParameterFileName(init_path)
+
+        if not parpath:  # ['rigid', 'affine', 'bspline']:
+            parmap = sitk.GetDefaultParameterMap(method)
         else:
             parmap = sitk.ReadParameterFile(parpath)
 
         parmap['AutomaticTransformInitialization'] = "true",
         parmap['AutomaticTransformInitializationMethod'] = "GeometricalCenter",
 
-        elastixImageFilter = sitk.ElastixImageFilter()
-        elastixImageFilter.SetFixedImage(fixed)
-        elastixImageFilter.SetMovingImage(moving)
-        elastixImageFilter.SetParameterMap(parmap)
-        elastixImageFilter.Execute()
+        if uselandmarks:
+            elastixImageFilter.SetFixedPointSetFileName(f"{filestem}_fixed.txt")
+            elastixImageFilter.SetMovingPointSetFileName(f"{filestem}_moving.txt")
+
+        self._run_filter(elastixImageFilter, fixed, moving, parmap)
 
         return parmap, elastixImageFilter
 
+    def _get_filter(self):
+        """Initiate an empty elastix filter."""
+
+        elastixImageFilter = sitk.ElastixImageFilter()
+        elastixImageFilter.LogToFileOn()
+        elastixImageFilter.LogToConsoleOn()
+
+        return elastixImageFilter
+
+    def _run_filter(self, elastixImageFilter, fixed, moving, parmap):
+        """Execute a filter after setting the images and parameters."""
+
+        elastixImageFilter.SetParameterMap(parmap)
+        elastixImageFilter.SetFixedImage(fixed)
+        elastixImageFilter.SetMovingImage(moving)
+        elastixImageFilter.Execute()
+
+    def _write_filter(self, parmap, IF, filestem, suffix):
+        """Write filter result and parameters to file."""
+
+        sitk.WriteParameterFile(parmap, f'{filestem}_elastix_{suffix}.txt')
+        transformParameterMap = IF.GetTransformParameterMap()
+        #transformParameterMap[0]['FinalBSplineInterpolationOrder'] = '1',
+        #transformParameterMap[0]['ResultImagePixelType'] = "uint16",
+        tfpath = f'{filestem}_transformix_{suffix}.txt'
+        sitk.WriteParameterFile(transformParameterMap[0], tfpath)
+        result = IF.GetResultImage()
+        sitk.WriteImage(result, f'{filestem}_{suffix}.nii.gz')
+
+        return result
+
     def apply(self, **kwargs):
         """Co-acquisition image registration."""
+
+        if 'bspline' in self.methods.keys():
+            self._reg_dir = tempfile.mkdtemp(prefix='reg_', dir=self.directory)
 
         arglist = self._prep_step('apply', kwargs)
         # NOTE: ITK is already multithreaded => n_workers = 1
@@ -220,6 +275,8 @@ class Registrat3r(Stapl3r):
         #self._n_workers = 1
         with multiprocessing.Pool(processes=self._n_workers) as pool:
             pool.starmap(self._apply_transform, arglist)
+
+        shutil.rmtree(self._reg_dir)
 
     def _apply_transform(self, filepath):
 
@@ -235,14 +292,7 @@ class Registrat3r(Stapl3r):
         tgt_shape = {d: int( (hr_shape[d] * hr_elsize[d]) / tgt_elsize[d] )
                      for d in 'xyz'}
 
-        # Read transform.
-        tpMap = sitk.ReadParameterFile(inputs['transformix'])
-        tpMap['Size'] = tuple([str(tgt_shape[d]) for d in 'xyz'])
-        tpMap['Spacing'] = tuple([str(tgt_elsize[d]) for d in 'xyz'])
-        affine = tpMap['TransformParameters']
-        unit = ('1', '0', '0', '0', '1', '0', '0', '0', '1', '0', '0', '0')
-
-        # Reorder to process _empty_slice_volume first.
+        # Reorder volumes to process _empty_slice_volume first.
         a = self.volumes.pop(self._empty_slice_volume, {})
         b = {self._empty_slice_volume: a} if a else {}
         volumes = {**b, **self.volumes}
@@ -250,26 +300,52 @@ class Registrat3r(Stapl3r):
         # Perform transformation.
         for ods, vol in volumes.items():
 
-            order = 1 if vol['type'] == 'raw' else 0
-            dtype = 'uint16' if vol['type'] == 'raw' else 'uint32'
-            tpars = affine if vol['resolution'] == 'lowres' else unit
-            slic3 = self._slc_lowres(inputs) if vol['resolution'] == 'lowres' else {}
+            # Read transform.
+            k = 'transformix'
+            if 'method' in vol.keys():
+                method = vol['method']
+            elif vol['resolution'] == 'lowres':
+                method = list(self.methods.keys())[-1]  # typically deformable
+            else:
+                method = list(self.methods.keys())[0]  # typically affine
+            parpath = inputs[k].replace(f'_{k}.txt', f'_{k}_{method}.txt')
+            tpMap = sitk.ReadParameterFile(parpath)
 
+            # Pick dtype
+            dtype = 'uint16' if vol['type'] == 'raw' else 'uint32'
+            dtype = 'float'  # TODO: only float if deformable reg? TODO: test float64?
+            tpMap['ResultImagePixelType'] = dtype,
+
+            # Switch parameters
+            transform = tpMap['TransformParameters']
+            unit = ('1', '0', '0', '0', '1', '0', '0', '0', '1', '0', '0', '0')
+            tpars = transform if vol['resolution'] == 'lowres' else unit
+            tpMap['TransformParameters'] = tpars
+
+            # Set size and spacing
+            tpMap['Size'] = tuple([str(tgt_shape[d]) for d in 'xyz'])
+            tpMap['Spacing'] = tuple([str(tgt_elsize[d]) for d in 'xyz'])
+
+            # Set order
+            order = 1 if vol['type'] == 'raw' else 0
+            tpMap['FinalBSplineInterpolationOrder'] = str(order),
+
+            # Get image
+            slic3 = self._slc_lowres(inputs) if vol['resolution'] == 'lowres' else {}
             if 'moving' in vol.keys():
                 inputs = {**inputs, **{'moving': vol['moving']}}
             inputs = self._prep_paths(inputs, reps={'f': filestem})
             moving = get_moving(inputs, vol, slc=slic3)
 
-            tpMap['FinalBSplineInterpolationOrder'] = str(order),
-            tpMap['TransformParameters'] = tpars
+            if 'bspline' in self.methods.keys():
+                ads = ods.replace('/', '-')
+                data = self._apply_transform_with_binary(moving, tpMap, f'{filestem}_{ads}')
+            else:
+                data = self._apply_transform_with_python(moving, tpMap)
 
-            transformixImageFilter = sitk.TransformixImageFilter()
-            transformixImageFilter.SetTransformParameterMap(tpMap)
-            transformixImageFilter.SetMovingImage(moving)
-            transformixImageFilter.Execute()
-            data = sitk.GetArrayFromImage(transformixImageFilter.GetResultImage())
+            dtype = data.dtype if vol['type'] == 'raw' else 'uint32'
 
-            # Discard empty region.  # FIXME: assuming zyx
+            # Discard empty region.  # FIXME: assuming zyx with axis=0
             if self._empty_slice_volume:
                 if ods == self._empty_slice_volume:
                     idxs = self._identify_empty_slices(data)
@@ -290,6 +366,50 @@ class Registrat3r(Stapl3r):
             mo.create()
             mo.write(data.astype(dtype))
             mo.close()
+
+    def _apply_transform_with_python(self, moving, tpMap):
+
+        transformixImageFilter = sitk.TransformixImageFilter()
+
+        transformixImageFilter.SetTransformParameterMap(tpMap)
+        transformixImageFilter.SetMovingImage(moving)
+        transformixImageFilter.Execute()
+
+        data = sitk.GetArrayFromImage(transformixImageFilter.GetResultImage())
+
+        return data
+
+    def _apply_transform_with_binary(self, moving, tpMap, chanstem):
+
+        chandir = os.path.join(self._reg_dir, chanstem)
+        os.makedirs(chandir, exist_ok=True)
+
+        # Write the adapted parameter file.
+        fpath_moving_par = os.path.join(chandir, f'{chanstem}.txt')
+        sitk.WriteParameterFile(tpMap, fpath_moving_par)
+
+        # Convert to nifti for transformix input
+        fpath_moving_nii = os.path.join(chandir, f'{chanstem}.nii.gz')
+        sitk.WriteImage(moving, fpath_moving_nii)
+
+        # Run transformix
+        cmdlist = [
+            'transformix',
+            '-in',  fpath_moving_nii,
+            '-out', chandir,
+             '-tp', fpath_moving_par,
+        ]
+        subprocess.call(cmdlist)
+
+        # Read nifti from disk.
+        im = Image(os.path.join(chandir, 'result.nii'), permission='r')
+        im.load()
+        data = im.slice_dataset().transpose()
+        im.close()
+
+        print(f'{chanstem} done')
+
+        return data
 
     def postprocess(self, **kwargs):
         """Co-acquisition image registration."""
@@ -359,12 +479,16 @@ def load_itk_image(filepath, ch=0, tp=0, slc={}):
         im.slices[im.axlab.index('t')] = slice(tp, tp + 1, 1)
     for k, v in slc.items():
         im.slices[im.axlab.index(k)] = v
+
     data = im.slice_dataset()
     if data.dtype == 'bool':
         data = data.astype('uint8')
     itk_im = sitk.GetImageFromArray(data)
+    #itk_im = sitk.GetImageFromArray(data.astype('float32'))
     spacing = np.array(im.elsize[:data.ndim][::-1], dtype='float')
     itk_im.SetSpacing(spacing)
+    #itk_im.SetOrigin(get_origin_ims(filepath))
+
     im.close()
 
     return itk_im
@@ -412,3 +536,18 @@ def Image_from_czi(filepath, stack=0):
     im.create()
     im.write(data)
     return im
+
+
+def get_origin_ims(filepath):
+    """Read the origin in world coordinates from an Imarisfile."""
+
+    def att2str(att):
+        return ''.join([t.decode('utf-8') for t in att])
+
+    import h5py
+    f = h5py.File(filepath, 'r')
+    im_info = f['/DataSetInfo/Image']
+    origin = [float(att2str(im_info.attrs[f'ExtMin{i}'])) for i in range(3)]
+    f.close()
+
+    return origin
