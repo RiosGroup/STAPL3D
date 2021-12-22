@@ -173,11 +173,8 @@ class Backproject3r(Stapl3r):
         labels = LabelImage(image_in, permission='r')
         labels.load(load_data=False)
         props = labels.get_props()
-
-        if not self.maxlabel:  # TODO: read maxlabel from attribute (see zipping)
-            labels.set_maxlabel()
-            self.maxlabel = labels.maxlabel
-            labels.close()
+        self.prep_maxlabel(labels)
+        labels.close()
 
         mpi = wmeMPI(usempi=False)
         mpi.set_blocks(labels, self.blocksize or labels.dims)
@@ -267,6 +264,26 @@ class Backproject3r(Stapl3r):
                 mo = write_output(outpath, out, props)
 
         mo.close()
+
+    def prep_maxlabel(self, labels):
+
+        if not self.maxlabel:
+            if 'maxlabel' in labels.ds.attrs.keys():
+                self.maxlabel = labels.ds.attrs['maxlabel']
+
+        try:
+            self.maxlabel = int(self.maxlabel)
+        except ValueError:
+            if self.maxlabel.endswith('.npy'):
+                ulabels = np.load(self.maxlabel, allow_pickle=True)
+                self.maxlabel = max(np.amax(ulabels))
+            else:
+                maxlabels = np.loadtxt(self.maxlabel, dtype=np.uint32)
+                self.maxlabel = max(maxlabels)
+
+        if not self.maxlabel:
+            labels.set_maxlabel()
+            self.maxlabel = int(labels.maxlabel)
 
 
 def scale_fwmap(fw, maxval=65535, replace_nan=False, normalize=False, scale_dtype=False, dtype='uint16'):
