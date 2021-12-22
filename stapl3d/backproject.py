@@ -89,8 +89,6 @@ class Backproject3r(Stapl3r):
             }
 
         default_attr = {
-            'label_image': '',
-            'feature_path': '',
             'features': {},
             'labelkey': 'label',
             'name': '',
@@ -119,22 +117,34 @@ class Backproject3r(Stapl3r):
 
     def _init_paths(self):
 
-        stem = self._build_path()
-        apat = self._build_path(suffixes=[{'a': 'p'}])
+        lbl_path = self._build_basename(
+            prefixes=[self.prefix],
+            suffixes=['segm-labels_full'],
+            ext='h5/segm/labels_full',
+            )
+        ftr_path = self._build_basename(
+            prefixes=[self.prefix],
+            suffixes=['features'],
+            ext='csv',
+            )
+        ims_path = self._build_basename(
+            prefixes=[self.prefix],
+            suffixes=['shading_stitching_ref'],
+            ext='ims',
+            )
+
+        apat = self._build_basename(suffixes=['{a}'], ext='h5/{a}')
+        #apat = self._build_basename(suffixes=['{a}'], ext='ims')
 
         self._paths = {
             'backproject': {
                 'inputs': {
-                    'label_image': self.label_image,
-                    'feature_path': self.feature_path,
-                    'ims_ref': self.ims_ref,
+                    'label_image': lbl_path,
+                    'feature_csv': ftr_path,
+                    'ims_ref': '',
                     },
                 'outputs': {
-                    **{'stem': f'{stem}'},
-                    **{ods: f'{stem}_{ods}.h5/{ods}' for ods in self.features},
-                    #**{ods: f'{apat}.h5/{ods}' for ods in self.features},
-                    #**{ods: f'{apat}.ims' for ods in self.features},
-                    # ims... feats as datasets ... etc
+                    'backproject': f'{apat}',
                     },
                 },
         }
@@ -155,10 +165,10 @@ class Backproject3r(Stapl3r):
 
         inputs = self._prep_paths(self.inputs)
         image_in = inputs['label_image']
-        feat_path = inputs['feature_path']
+        feat_path = inputs['feature_csv']
         ims_ref = inputs['ims_ref']
         outputs = self._prep_paths(self.outputs, reps={'a': key})
-        outpath = outputs[key]
+        outpath = outputs['backproject']
 
         labels = LabelImage(image_in, permission='r')
         labels.load(load_data=False)
