@@ -52,11 +52,8 @@ from stapl3d.blocks import Block3r
 from stapl3d import get_paths  # TODO: into Image/Stapl3r
 from stapl3d.reporting import (
     gen_orthoplot,
-    load_parameters,
     get_centreslice,
     get_centreslices,
-    get_zyx_medians,
-    get_cslc,
     )
 
 logger = logging.getLogger(__name__)
@@ -169,14 +166,16 @@ class Segment3r(Block3r):
         with multiprocessing.Pool(processes=self._n_workers) as pool:
             pool.starmap(self._estimate_block, arglist)
 
-    def _estimate_block(self, block):
+    def _estimate_block(self, block_idx):
         """Segment cells from membrane and nuclear channels."""
 
-        filestem = os.path.basename(self._blocks[block].path.replace('.h5/{ods}', ''))
-        block = self._blocks[block]
+        block = self._blocks[block_idx]
+
+        filepath = self._blocks[block.idx].path.replace('.h5/{ods}', '')
+        filestem = os.path.basename(filepath)
 
         if '{b' in self.inputs['blockfiles']:
-            reps = {'b': block}
+            reps = {'b': block.idx}
         elif '{f}' in self.inputs['blockfiles']:
             reps = {'f': filestem}
         else:
@@ -184,7 +183,7 @@ class Segment3r(Block3r):
         inputs = self._prep_paths(self.inputs, reps=reps)
 
         if '{b' in self.outputs['blockfiles']:
-            reps = {'b': block}
+            reps = {'b': block.idx}
         elif '{f}' in self.outputs['blockfiles']:
             reps = {'f': filestem}
         else:

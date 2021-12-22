@@ -2903,8 +2903,12 @@ class Stapl3r(object):
         Name of output subdirectory.
     prefix : string
         Output prefix.
+    datadir : string
+        Override for datadir [when image_in used to define alternate input].
     max_workers : int
         Maximal number of cores to use for processing.
+    verbosity : int
+        Verbosity level.
 
     Attributes
     ----------
@@ -2922,7 +2926,7 @@ class Stapl3r(object):
         step_id='',
         directory='',
         prefix='',
-        # suffix='',
+        datadir='',
         max_workers=0,
         verbosity=1,
         ):
@@ -2932,21 +2936,22 @@ class Stapl3r(object):
         self._module_id = module_id  # module name
         self.step_id = step_id or self._module_id # yml-file entry
 
-        self.image_in = image_in  # raw input image file (.czi / .lif)
+        self.image_in = image_in
         if '.h5' in image_in:
             image_in = image_in.split('.h5')[0]
-        if os.path.isdir(image_in):
+
+        if os.path.isdir(datadir):
+            self.datadir = datadir
+        elif os.path.isdir(image_in):
             self.datadir = os.path.abspath(image_in)
         else:
             self.datadir = os.path.abspath(os.path.dirname(image_in))
-        # self.image_in = os.path.basename(image_in)  # raw input image file (.czi / .lif)
-        # self.projdir = os.path.dirname(self.datadir)
 
-        self.directory = ''  # output directory
+        self.directory = ''
         self.set_directory(directory)
         self.prefix = prefix
 
-        self.parameter_file = parameter_file  #os.path.abspath(parameter_file)
+        self.parameter_file = parameter_file
         self._cfg = {}
         self.set_config()
 
@@ -2965,7 +2970,7 @@ class Stapl3r(object):
 
         self._set_suffix_formats()
 
-        self._FPAR_NAMES = ('image_in', 'parameter_file', 'directory', 'datadir', 'prefix', 'inputs', 'outputs')  #, 'projdir'  'inputpath', 'outputpath',
+        self._FPAR_NAMES = ('image_in', 'parameter_file', 'directory', 'datadir', 'prefix', 'inputs', 'outputs')
 
         self._fdict = {
             'fontsize': 7,
