@@ -581,9 +581,7 @@ class Splitt3r(Block3r):
         mo_3D = Image(**props)
         mo_3D.squeeze('ct')
 
-
         ## 3D or 4D or 5D input?...
-
 
         if 'c' in im.axlab:
             c_axis = im.axlab.index('c')
@@ -592,8 +590,8 @@ class Splitt3r(Block3r):
             c_axis = None
             idxs = []
 
-        for k, ov in self.volumes.items():
-
+        vols = {k: v for k, v in self.volumes.items()}
+        for k, ov in vols.items():
             default = {
                 'ods': k,
                 'idxs': idxs,
@@ -601,15 +599,15 @@ class Splitt3r(Block3r):
                 'dtype': mo_3D.dtype,
                 'data': np.zeros(mo_3D.shape, dtype='float'),
                 }
-            self.volumes[k] = {**default, **ov}
+            vols[k] = {**default, **ov}
 
         im.slices = block.slices
 
-        idxs_set = set([l for k, v in self.volumes.items() for l in v['idxs']])
+        idxs_set = set([l for k, v in vols.items() for l in v['idxs']])
         for volnr in idxs_set:
 
             if c_axis is not None:
-                im.slices[c_axis] = slice(volnr, volnr + 1, 1)
+                im.slices[c_axis] = slice(volnr, volnr + 1, None)
 
             data = im.slice_dataset(squeeze=False).astype('float')
 
@@ -623,10 +621,10 @@ class Splitt3r(Block3r):
             # FIXME: not written if idxs_set is empty
             if self.output_ND:
                 if c_axis is not None:
-                    mo_ND.slices[c_axis] = slice(volnr, volnr + 1, 1)
+                    mo_ND.slices[c_axis] = slice(volnr, volnr + 1, None)
                 mo_ND.write(data.astype(mo_ND.dtype))
 
-            for name, output in self.volumes.items():
+            for name, output in vols.items():
                 if volnr in output['idxs']:
                     idx = output['idxs'].index(volnr)
                     data *= output['weights'][idx]
@@ -634,7 +632,7 @@ class Splitt3r(Block3r):
 
         mo_ND.close()
 
-        for name, output in self.volumes.items():
+        for name, output in vols.items():
             output['data'] /= len(output['idxs'])
             write_image(mo_3D,
                         block.path.format(ods=output['ods']),
@@ -946,11 +944,12 @@ def write_image(im, outputpath, data):
     return mo
 
 
-def link_blocks(filepath_in, filepath_out, dset_in, dset_out, delete=True, links=True, is_unet=False):
+def link_blocks(filepath_in, filepath_out, dset_in, dset_out,
+                delete=True, links=True, is_unet=False):
 
     def delete_dataset(filepath, dset):
         try:
-            im = Image('{}/{}'.format(filepath, dset), permission='r+')
+            im = Image(f'{filepath}/{dset}', permission='r+')
             im.load()
             del im.file[dset_out]
         except OSError:
@@ -974,7 +973,7 @@ def link_blocks(filepath_in, filepath_out, dset_in, dset_out, delete=True, links
 
     else:
 
-        im = Image('{}/{}'.format(filepath_in, dset_in), permission='r')
+        im = Image(f'{filepath_in}/{dset_in}', permission='r')
         im.load(load_data=False)
 
         props = im.get_props()
@@ -988,7 +987,7 @@ def link_blocks(filepath_in, filepath_out, dset_in, dset_out, delete=True, links
 
         im.close()
 
-        mo = Image('{}/{}'.format(filepath_out, dset_out), permission=mode, **props)
+        mo = Image(f'{filepath_out}/{dset_out}', permission=mode, **props)
         mo.create()
         mo.write(data)
         mo.close()
