@@ -493,7 +493,7 @@ class Splitt3r(Block3r):
             'split': {
                 'inputs': {
                     'data': self.inputpaths['blockinfo']['data'],
-                    'bias': f'{biaspath}/bias',
+                    'bias': '',  #f'{biaspath}/bias',
                     },
                 'outputs': {
                     **{'blockfiles': blockfiles},
