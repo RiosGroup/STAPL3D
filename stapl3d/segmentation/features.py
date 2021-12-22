@@ -145,6 +145,7 @@ class Featur3r(Block3r):
         self._paths.update({
             'estimate': {
                 'inputs': {
+                    'data': self.inputpaths['blockinfo']['data'],
                     'blockfiles': f'{bpat}',
                     },
                 'outputs': {
