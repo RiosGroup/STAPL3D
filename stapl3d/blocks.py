@@ -823,6 +823,7 @@ class Merg3r(Block3r):
 
         if ulabelpath:
             np.save(ulabelpath, np.array(ulabels))
+            mo.ds.attrs['maxlabel'] = max(ulabels)
 
         im.close()
         mo.close()
