@@ -62,7 +62,7 @@ logger = logging.getLogger(__name__)
 def main(argv):
     """Segment cells from membrane and nuclear channels."""
 
-    steps = ['estimate']  # , 'subsegment'
+    steps = ['estimate', 'postprocess']  # , 'subsegment'
     args = parse_args('segmentation', steps, *argv)
 
     segment3r = Segment3r(
@@ -93,10 +93,12 @@ class Segment3r(Block3r):
 
         self._fun_selector.update({
             'estimate': self.estimate,
+            'postprocess': self.postprocess,
             })
 
         self._parallelization.update({
             'estimate': ['blocks'],
+            'postprocess': [],
             })
 
         self._parameter_sets.update({
@@ -104,6 +106,11 @@ class Segment3r(Block3r):
                 'fpar': self._FPAR_NAMES,
                 'ppar': (),
                 'spar': ('_n_workers', 'blocks'),
+                },
+            'postprocess': {
+                'fpar': self._FPAR_NAMES,
+                'ppar': (),
+                'spar': ('_n_workers',),
                 },
             })
 
@@ -142,6 +149,9 @@ class Segment3r(Block3r):
             os.makedirs('blocks', exist_ok=True)
             bpat = self._build_path(moduledir='blocks', prefixes=[self.prefix, 'blocks'], suffixes=[{'b': 'p'}], ext='h5')
 
+        stem = self._build_path()
+        bmat = self._pat2mat(bpat)  # <>_blocks_B{b:05d}.h5  => <>_blocks_B*.h5
+
         self._paths.update({
             'estimate': {
                 'inputs': {
@@ -151,6 +161,14 @@ class Segment3r(Block3r):
                     'blockfiles': f'{bpat}',
                     'report': f'{bpat}'.replace('.h5', '.pdf'),
                     }
+                },
+            'postprocess': {
+                'inputs': {
+                    'report': f'{bmat}'.replace('.h5', '.pdf'),
+                    },
+                'outputs': {
+                    'report': f'{stem}.pdf',
+                    },
                 },
             })
 
@@ -231,6 +249,18 @@ class Segment3r(Block3r):
 
         # self.dump_parameters(self.step, outputs['parameters'])
         self.report(outputs['report'], inputs=inputs, outputs=outputs)
+
+    def postprocess(self, **kwargs):
+        """Merge block reports."""
+
+        self._prep_step('postprocess', kwargs)
+
+        inputs = self._prep_paths(self.inputs)
+        outputs = self._prep_paths(self.outputs)
+
+        pdfs = glob(inputs['report'])
+        pdfs.sort()
+        self._merge_reports(pdfs, outputs['report'])
 
     def _get_info_dict(self, **kwargs):
 
