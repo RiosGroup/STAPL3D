@@ -306,12 +306,16 @@ class Block3r(Stapl3r):
             return {'slices': slcs, 'id': id, 'path': bpat, 'idx': b_idx}
 
         def blockdict(start, stop, axlab, b_idx):
+
             slcs = [slice(sta, sto) for sta, sto in zip(start, stop)]
             id = self._suffix_formats['b'].format(b=b_idx)
 
             if '{f' in block_template:
                 fp = self.filepaths[b_idx]
-                fstem = os.path.basename(os.path.splitext(fp)[0])
+                if '.h5' in fp:
+                    fstem = os.path.basename(fp.split('.h5')[0])
+                else:
+                    fstem = os.path.basename(os.path.splitext(fp)[0])
                 bpat = block_template.format(f=fstem) + '/{ods}'
             elif '{b' in block_template:
                 bpat = block_template.format(b=b_idx) + '/{ods}'
@@ -376,10 +380,14 @@ class Block3r(Stapl3r):
 
             return filepaths
 
-        p = self.image_in.split('.h5')
-        directory = os.path.abspath(os.path.dirname(p[0]))
-
-        return glob_h5(directory, self._pat2mat(filepat))
+        if '.h5' in self.image_in:
+            p = self.image_in.split('.h5')
+            dir, base = os.path.split(p[0])
+            fp = '{}.h5{}'.format(base, p[1])
+            return glob_h5(os.path.abspath(dir), self._pat2mat(fp))
+            # full h5 path???
+        else:
+            return sorted(glob.glob(os.path.abspath(self._pat2mat(filepat))))
 
     def _get_filepaths(self, blocks=[]):
 
