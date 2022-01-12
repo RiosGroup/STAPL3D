@@ -1894,14 +1894,14 @@ function get_cmd_stardist_mergeblocks {
 function get_cmd_unet3d_memb_train {
 
     # copy config file with replacements
-    sed "s?UNETDIR?$unet3d_memb_train__params__unetdir?;\
-         s?MODELNAME?$unet3d_memb_train__params__modelname?;\
-         s?IDS_IMAGE?$unet3d_memb_predict__params__ids_image?;\
-         s?IDS_LABEL?$unet3d_memb_predict__params__ids_label?g" \
+    sed "s?UNETDIR?$unet3d_memb__train__unetdir?;\
+         s?MODELNAME?$unet3d_memb__train__modelname?;\
+         s?IDS_IMAGE?$unet3d_memb__train__ids_image?;\
+         s?IDS_LABEL?$unet3d_memb__train__ids_label?g" \
          "${STAPL3D}/pipelines/unet3d_memb_train.yml" \
-         > "${datadir}/${dataset}_unet3d_memb_train_$unet3d_memb_train__params__modelname.yml"
+         > "${datadir}/${dataset}_unet3d_memb_train_$unet3d_memb__train__modelname.yml"
 
-    echo train3dunet --config "${datadir}/${dataset}_unet3d_memb_train_$unet3d_memb_train__params__modelname.yml"
+    echo train3dunet --config "${datadir}/${dataset}_unet3d_memb_train_$unet3d_memb__train__modelname.yml"
 
 }
 
@@ -1910,14 +1910,14 @@ function get_cmd_unet3d_memb_predict {
     # FIXME: kidney model gives error on load via predict3dunet => needs DataParallel wrapping
 
     # copy config file with replacements
-    sed "s?UNETDIR?$unet3d_memb_predict__params__unetdir?;\
-         s?MODELNAME?$unet3d_memb_predict__params__modelname?;\
-         s?IDS_IMAGE?$unet3d_memb_predict__params__ids_image?;\
+    sed "s?UNETDIR?$unet3d_memb__predict__unetdir?;\
+         s?MODELNAME?$unet3d_memb__predict__modelname?;\
+         s?IDS_IMAGE?$unet3d_memb__predict__ids_image?;\
          s?PATH_TO_THE_TEST_SET?${blockdir}?g" \
          "${STAPL3D}/pipelines/unet3d_memb_predict.yml" \
-         > "${datadir}/${dataset}_unet3d_memb_predict_$unet3d_memb_train__params__modelname.yml"
+         > "${datadir}/${dataset}_unet3d_memb_predict_$unet3d_memb__predict__modelname.yml"
 
-    echo predict3dunet --config "${datadir}/${dataset}_unet3d_memb_predict_$unet3d_memb_train__params__modelname.yml"
+    echo predict3dunet --config "${datadir}/${dataset}_unet3d_memb_predict_$unet3d_memb__predict__modelname.yml"
 
 }
 
@@ -1925,14 +1925,14 @@ function get_cmd_unet3d_memb_predict {
 function get_cmd_unet3d_nucl_train {
 
     # copy config file with replacements
-    sed "s?UNETDIR?$unet3d_nucl_train__params__unetdir?;\
-         s?MODELNAME?$unet3d_nucl_train__params__modelname?;\
-         s?IDS_IMAGE?$unet3d_nucl_predict__params__ids_image?;\
-         s?IDS_LABEL?$unet3d_nucl_predict__params__ids_label?g" \
+    sed "s?UNETDIR?$unet3d_nucl__train__unetdir?;\
+         s?MODELNAME?$unet3d_nucl__train__modelname?;\
+         s?IDS_IMAGE?$unet3d_nucl__train__ids_image?;\
+         s?IDS_LABEL?$unet3d_nucl__train__ids_label?g" \
          "${STAPL3D}/pipelines/unet3d_nucl_train.yml" \
-         > "${datadir}/${dataset}_unet3d_nucl_train_$unet3d_nucl_train__params__modelname.yml"
+         > "${datadir}/${dataset}_unet3d_nucl_train_$unet3d_nucl__train__modelname.yml"
 
-    echo train3dunet --config "${datadir}/${dataset}_unet3d_nucl_train_$unet3d_nucl_train__params__modelname.yml"
+    echo train3dunet --config "${datadir}/${dataset}_unet3d_nucl_train_$unet3d_nucl__train__modelname.yml"
 
 }
 
@@ -1941,14 +1941,14 @@ function get_cmd_unet3d_nucl_predict {
     # FIXME: kidney model gives error on load via predict3dunet => needs DataParallel wrapping
 
     # copy config file with replacements
-    sed "s?UNETDIR?$unet3d_nucl_predict__params__unetdir?;\
-         s?MODELNAME?$unet3d_nucl_predict__params__modelname?;\
-         s?IDS_IMAGE?$unet3d_nucl_predict__params__ids_image?;\
+    sed "s?UNETDIR?$unet3d_nucl__predict__unetdir?;\
+         s?MODELNAME?$unet3d_nucl__predict__modelname?;\
+         s?IDS_IMAGE?$unet3d_nucl__predict__ids_image?;\
          s?PATH_TO_THE_TEST_SET?${blockdir}?g" \
          "${STAPL3D}/pipelines/unet3d_nucl_predict.yml" \
-         > "${datadir}/${dataset}_unet3d_nucl_predict_$unet3d_nucl_predict__params__modelname.yml"
+         > "${datadir}/${dataset}_unet3d_nucl_predict_$unet3d_nucl__predict__modelname.yml"
 
-    echo predict3dunet --config "${datadir}/${dataset}_unet3d_nucl_predict_$unet3d_nucl_predict__params__modelname.yml"
+    echo predict3dunet --config "${datadir}/${dataset}_unet3d_nucl_predict_$unet3d_nucl__predict__modelname.yml"
 
 }
 

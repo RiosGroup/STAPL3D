@@ -47,14 +47,15 @@ done
 ###==========================================================================###
 ### preprocessing
 jid=''
-submit $( generate_script shading ) $jid
-submit $( generate_script shading_postproc ) $jid
-submit $( generate_script shading_apply ) $jid
+submit $( generate_script shading estimate ) $jid
+submit $( generate_script shading postprocess ) $jid
+submit $( generate_script shading apply ) $jid
 
-submit $( generate_script stitching_prep ) $jid
-submit $( generate_script stitching_load ) $jid
-submit $( generate_script stitching_calc ) $jid
-submit $( generate_script stitching_fuse ) $jid
+submit $( generate_script stitching prep ) $jid
+submit $( generate_script stitching load ) $jid
+submit $( generate_script stitching calc ) $jid
+submit $( generate_script stitching fuse ) $jid
+submit $( generate_script stitching postprocess ) $jid
 # load_parameters "${dataset}" -v
 
 jid=''
@@ -137,8 +138,9 @@ submit $( generate_script stardist_mergeblocks ) $jid
 
 ###==========================================================================###
 ### plantseg
-submit $( generate_script unet3d_memb_train ) $jid
-submit $( generate_script unet3d_memb_predict ) $jid  # FIXME: model version error for models trained with multiple GPUs
+submit $( generate_script unet3d_memb train ) $jid
+submit $( generate_script unet3d_memb predict ) $jid  # FIXME: model version error for models trained with multiple GPUs
+
 # copy unet-model to ~/.plantseg_models/
 submit $( generate_script plantseg_predict ) $jid
 submit $( generate_script mergeblocks ) $jid
@@ -146,8 +148,9 @@ submit $( generate_script mergeblocks ) $jid
 
 ###==========================================================================###
 ### unet for nuclei mask
-submit $( generate_script unet3d_nucl_train ) $jid
-submit $( generate_script unet3d_nucl_predict ) $jid
+submit $( generate_script unet3d_nucl train ) $jid
+submit $( generate_script unet3d_nucl predict ) $jid
+
 submit $( generate_script mergeblocks ) $jid
 
 
