@@ -155,6 +155,21 @@ class Block3r(Stapl3r):
             if i in self.blocks:
                 print(f'Block {i:05d} with id {block.id} refers to region {block.slices}')
 
+    def _prep_paths_blockfiles(self, paths, block, key='blockfiles'):
+
+        filepath = self._blocks[block.idx].path.replace('.h5/{ods}', '')
+        filestem = os.path.basename(filepath)
+        reps = {'b': block.idx, 'f': filestem}
+
+        """
+        if '{b' in paths[key]:
+            reps['b'] = block.idx
+        if '{f}' in paths[key]:
+            reps['f'] = filestem
+        """
+
+        return self._prep_paths(paths, reps=reps)
+
     def _prep_blocks(self):
 
         step = 'blockinfo'  #self.step
@@ -514,33 +529,23 @@ class Splitt3r(Block3r):
         with multiprocessing.Pool(processes=self._n_workers) as pool:
             pool.starmap(self._split_with_combinechannels, arglist)
 
-    def _split_with_combinechannels(self, block):
+    def _split_with_combinechannels(self, block_idx):
         """Average membrane and nuclear channels and write as blocks."""
 
-        filestem = os.path.basename(self._blocks[block].path.replace('.h5/{ods}', ''))
-        block = self._blocks[block]
+        block = self._blocks[block_idx]
 
-        if '{b' in self.inputs['data']:
-            reps = {'b': block.idx}
-        elif '{f}' in self.inputs['data']:
-            reps = {'f': filestem}
-        else:
-            reps = {}
-        inputs = self._prep_paths(self.inputs, reps=reps)
-
-        if '{b' in self.outputs['blockfiles']:
-            reps = {'b': block.idx}
-        elif '{f}' in self.outputs['blockfiles']:
-            reps = {'f': filestem}
-        else:
-            reps = {}
-        outputs = self._prep_paths(self.outputs, reps=reps)
+        inputs = self._prep_paths_blockfiles(self.inputs, block, key='data')
+        print(inputs)
+        outputs = self._prep_paths_blockfiles(self.outputs, block)
 
         # INPUT
+        infile = inputs['data']
+        """
         if self.filepaths:
             infile = self.filepaths[block.idx]
         else:
             infile = inputs['data'].format(b=block.idx)
+        """
 
         print('Writing block with id {} to {}'.format(block.id, block.path))
 
@@ -647,7 +652,6 @@ class Splitt3r(Block3r):
             input = input or self._blocks[0].path.replace('/{ods}', '')
         elif isinstance(input, (int, float)):
             input = self._blocks[input].path.replace('/{ods}', '')
-            print(input, images, labels)
         elif isinstance(input, list):
             input = input or list(range(len(self._blocks)))
 
