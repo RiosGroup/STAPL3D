@@ -1694,6 +1694,30 @@ function get_cmd_features_postproc {
 }
 
 
+function get_py_registration {
+    echo ''
+    echo "from stapl3d.segmentation import stardist_nuclei"
+    echo "registrat3r = registration.Registrat3r(image_in, parameter_file)"
+}
+function get_py_registration_estimate {
+    get_py_header
+    get_py_registration
+    echo "registrat3r.${step}()"
+}
+function get_cmd_registration_estimate { get_cmd ; }
+function get_py_registration_apply {
+    get_py_header
+    get_py_registration
+    echo "registrat3r.${step}()"
+}
+function get_cmd_registration_apply { get_cmd ; }
+function get_py_registration_postprocess {
+    get_py_header
+    get_py_registration
+    echo "registrat3r.${step}()"
+}
+function get_cmd_registration_postprocess { get_cmd ; }
+
 
 function get_py_stardist {
     echo ''
