@@ -386,6 +386,7 @@ function set_blockstems {
     unset blockstems
     blockstems=()
 
+    i=0
     for x in `seq 0 $bs $(( X-1 ))`; do
         bX=$( get_coords_upper $x $bm $bs $X)
         bx=$( get_coords_lower $x $bm )
@@ -396,7 +397,9 @@ function set_blockstems {
                 bZ=$( get_coords_upper $z 0 $Z $Z)
                 bz=$( get_coords_lower $z 0 )
 
-                block_id="$( get_block_id $bx $bX $by $bY $bz $bZ )"
+                #block_id="$( get_block_id $bx $bX $by $bY $bz $bZ )"
+                block_id="${dataset}_B`printf %05d $i`"
+
                 block_ids+=( "$block_id" )
                 if [ "$verbose" == "-v" ]; then
                     echo "$block_id"
@@ -407,6 +410,8 @@ function set_blockstems {
                 if [ "$verbose" == "-v" ]; then
                     echo "$dstem"
                 fi
+
+                i=$((i+1))
 
             done
         done
