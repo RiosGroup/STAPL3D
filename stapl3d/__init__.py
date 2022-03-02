@@ -2951,6 +2951,9 @@ class Stapl3r(object):
         self.set_directory(directory)
         self.prefix = prefix
 
+        self._logdir = 'logs'
+        os.makedirs(self._logdir, exist_ok=True)
+
         self.parameter_file = parameter_file
         self._cfg = {}
         self.set_config()
@@ -3189,7 +3192,7 @@ class Stapl3r(object):
         """
 
         if directory:
-            self.directory = directory
+            self.directory = os.path.abspath(directory)
         elif subdirectory:
             self.directory = os.path.join(self.datadir, subdirectory)
 
@@ -3220,7 +3223,7 @@ class Stapl3r(object):
         if write:
             if not filestem:
                 prefixes = [self.prefix, self._module_id, step]
-                filestem = self._build_path(prefixes=prefixes)
+                filestem = self._build_path(moduledir=self._logdir, prefixes=prefixes)
             filepath = self._abs(f'{filestem}.yml')
             with open(filepath, 'w') as f:
                 yaml.dump(module_dict, f, default_flow_style=False)
@@ -3667,7 +3670,7 @@ class Stapl3r(object):
 
     def _init_log(self):
 
-        logfile = self._build_path(ext='log', rel=False)
+        logfile = self._build_path(moduledir=self._logdir, ext='log', rel=False)
 
         if self.verbosity == 0:
             handlers = [logging.FileHandler(logfile)]
