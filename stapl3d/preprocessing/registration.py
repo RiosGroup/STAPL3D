@@ -98,6 +98,7 @@ class Registrat3r(Stapl3r):
             'timepoint': 0,
             'filepaths': [],
             'centrepoint': {},
+            'centrepoints': {},
             'margin': {'y': 20, 'x': 20},
             'tasks': 1,
             'methods': {'affine': ''},
@@ -431,11 +432,17 @@ class Registrat3r(Stapl3r):
         hr_elsize, hr_shape = get_shapes(inputs['highres'])
         lr_elsize, lr_shape = get_shapes(inputs['lowres'])
 
-        centrepoint_lr_def = {d: lrs / 2 for d, lrs in lr_shape.items()}
-        cp = {**centrepoint_lr_def, **self.centrepoint}
+        name = inputs['lowres'].replace(f'{self.LR_suffix}.czi', '')
+        if name in self.centrepoints.keys():
+            cp = self.centrepoints[name]
+        else:
+            cp = self.centrepoint
 
-        slc = {}
-        dims = {**self.centrepoint, **self.margin}.keys()
+        centrepoint_lr_def = {d: lrs / 2 for d, lrs in lr_shape.items()}
+        cp = {**centrepoint_lr_def, **cp}
+
+        slc, slc_f, pad = {}, {}, {}
+        dims = {**cp, **self.margin}.keys()
         for d in dims:
             halfwidth = (hr_elsize[d] * hr_shape[d]) / 2
             extent = halfwidth / lr_elsize[d] + self.margin[d]
