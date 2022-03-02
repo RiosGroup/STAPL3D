@@ -497,6 +497,20 @@ function set_channelstems {
 }
 
 
+function set_filepaths {
+
+    local filepat=$1
+
+    unset filepaths
+    filepaths=()
+
+    for fp in `ls $filepat`; do
+        filepaths+=( "$fp" )
+    done
+
+}
+
+
 ###==========================================================================###
 ### some utils
 ###==========================================================================###
@@ -998,6 +1012,9 @@ function set_submit_pars {
             ;;
         'block')
             array_stop="${#blockstems[@]}"
+            ;;
+        'filepaths')
+            array_stop="${#filepaths[@]}"
             ;;
         'stardistblock')
             array_stop="${nblocks}"
