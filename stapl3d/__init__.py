@@ -3849,7 +3849,8 @@ class Stapl3r(object):
             v = [np.round(x, 4) if isinstance(x, float) else x for x in v]
             cellText.append([name, ', '.join(str(x) for x in v)])
 
-        axdict['p'].table(cellText, loc='bottom')
+        if len(cellText):
+            axdict['p'].table(cellText, loc='bottom')
         axdict['p'].axis('off')
 
     def _draw_thresholds(self, ax, thresholds, colors, linestyles, labels, legend='upper right'):
