@@ -321,7 +321,12 @@ class Registrat3r(Stapl3r):
             # Switch parameters
             transform = tpMap['TransformParameters']
             unit = ('1', '0', '0', '0', '1', '0', '0', '0', '1', '0', '0', '0')
+
             tpars = transform if vol['resolution'] == 'lowres' else unit
+            if 'transform' in vol.keys():
+                if vol['transform'] == 'unit':
+                    tpars = unit
+
             tpMap['TransformParameters'] = tpars
 
             # Set size and spacing
