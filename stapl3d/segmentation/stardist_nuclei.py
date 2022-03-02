@@ -122,6 +122,7 @@ class StarDist3r(Block3r):
             'blocks': [],
             '_blocks': [],
             'channel': None,
+            'block_filter': {},
         }
         for k, v in default_attr.items():
             setattr(self, k, v)
@@ -285,20 +286,28 @@ class StarDist3r(Block3r):
         im.load(load_data=False)
         comps = im.split_path()
         if filepath.endswith('.ims'):
-            h5ds = im.file['/DataSet/ResolutionLevel 0/TimePoint 0/Channel 0/Data']
+            rl = 2
+            tp = block.blocks_for_axes('T')[0].slice_read.start
+            ch = block.blocks_for_axes('C')[0].slice_read.start
+            h5ds = im.file[f'/DataSet/ResolutionLevel {2}/TimePoint {tp}/Channel {ch}/Data']
+            axes = 'ZYX'
+
         elif '.h5' in filepath:
             h5ds = im.file[comps['int']]
+            axes = self.axes
+
         else:  # czi
             if self.channel is not None:
                 im.slices[im.axlab.index('c')] = slice(self.channel, self.channel + 1)
             h5ds = im.slice_dataset()
+            axes = self.axes
 
         props = im.get_props()
         for al in 'ct':
-            if al in im.axlab:
-                props = im.squeeze_props(props, dim=im.axlab.index(al))
+            if al in props['axlab']:
+                props = im.squeeze_props(props, dim=props['axlab'].index(al))
 
-        data = block.read(h5ds, axes=self.axes)
+        data = block.read(h5ds, axes=axes)
         data = self._normalize_stardist_data(data)
 
         labels, polys = self._run_prediction(model, block, data)
@@ -336,13 +345,14 @@ class StarDist3r(Block3r):
 
         maxlabels = zipping.get_maxlabels_from_attribute(blockpaths, self.ids_lbl, '')
 
-        im = Image(inputs['data'], permission='r')
+        rl = 2
+        im = Image(inputs['data'], permission='r', reslev=rl)
         im.load(load_data=False)
         props = im.get_props()
         props['dtype'] = 'int32'
-        for al in 'ct':
-            if al in im.axlab:
-                props = im.squeeze_props(props, dim=im.axlab.index(al))
+        for al in 'c':
+            if al in props['axlab']:
+                props = im.squeeze_props(props, dim=props['axlab'].index(al))
         im.close()
 
         mo = Image(outputs['prediction'], **props)
@@ -407,14 +417,34 @@ class StarDist3r(Block3r):
         self._blocks = []
         for filepath in self.filepaths:
 
-            im = Image(filepath, permission='r')
+            rl = 2
+            im = Image(filepath, permission='r', reslev=rl)
             im.load(load_data=False)
-            dims = [im.dims[im.axlab.index(d) for d in self.axes.lower()]
+            dims = [im.dims[im.axlab.index(d)] for d in self.axes.lower()]
+            # TODO: slices subset here?
             im.close()
 
             blocks = stardist_blocks(model, dims, self.axes, self.block_size, self.min_overlap, self.context)
             for b in blocks:
                 self._blocks.append((filepath, b))
+
+        self._blocks = self._filter_blocks_stardist(self._blocks, self.block_filter)
+
+    def _filter_blocks_stardist(self, blocks, filter={}):
+        """Generate StarDist blocks for parallel processing."""
+
+        blocks_filtered = []
+        for fn, block in blocks:
+            keep = True
+            for al, idxs in filter.items():
+                idx = block.blocks_for_axes(al)[0].slice_read.start
+                if idx not in idxs:
+                    keep = False
+
+        if keep:
+            blocks_filtered.append((fn, block))
+
+        return blocks_filtered
 
     def _normalize_stardist_data(self, x):
 
@@ -493,7 +523,6 @@ def stardist_normalization_range(image_in, pmin=1, pmax=99.8, axis_norm=(0, 1, 2
 
     im = Image(image_in)
     im.load()
-    props = im.get_props()
     X = im.slice_dataset()
     im.close()
 
@@ -533,10 +562,10 @@ def stardist_blocks(model, imdims, axes='ZYX', block_size=[None, 1024, 1024], mi
     block_size, min_overlap, context = list(block_size), list(min_overlap), list(context)
     assert n == len(block_size) == len(min_overlap) == len(context)
 
-    if 'C' in axes:
-        i = axes_dict(axes)['C']
-        block_size[i] = imdims[i]
-        min_overlap[i] = context[i] = 0
+    # if 'C' in axes:
+    #     i = axes_dict(axes)['C']
+    #     block_size[i] = imdims[i]
+    #     min_overlap[i] = context[i] = 0
 
     block_size = tuple(_grid_divisible(g, v, name='block_size', verbose=False)
                        for v, g, a in zip(block_size, grid, axes))
@@ -546,6 +575,7 @@ def stardist_blocks(model, imdims, axes='ZYX', block_size=[None, 1024, 1024], mi
                     for v,g,a in zip(context, grid, axes))
 
     # Define blocks
+
     blocks = BlockND.cover(dims, axes, block_size, min_overlap, context, grid)
 
     return blocks

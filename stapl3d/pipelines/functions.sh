@@ -1738,157 +1738,41 @@ function get_cmd_features_postproc {
 }
 
 
+
+function get_py_stardist {
+    echo ''
+    echo "from stapl3d.segmentation import stardist_nuclei"
+    echo "stardist3r = stardist_nuclei.StarDist3r(image_in, parameter_file)"
+}
 function get_py_stardist_train {
-
-    echo '#!/usr/bin/env python'
-    echo ''
-    echo 'import sys'
-    echo 'basedir = sys.argv[1]'
-    echo 'run_name = sys.argv[2]'
-    echo ''
-    echo 'from stapl3d.segmentation import stardist_nuclei'
-    echo "stardist_nuclei.stardist_train(basedir, run_name)"
-
+    get_py_header
+    get_py_stardist
+    echo "stardist3r.${step}()"
 }
-function get_cmd_stardist_train {
+function get_cmd_stardist_train { get_cmd ; }
 
-    pyfile="${datadir}/${jobname}.py"
-    eval get_py_${stage} > "$pyfile"
-
-    echo python "${pyfile}" \
-        "${stardist_train__params__stardir}" \
-        "${stardist_train__params__model_name}"
-
+function get_py_stardist_nblocks {
+    get_py_header
+    get_py_stardist
+    echo "stardist3r.predict(print_nblocks=True)"
 }
+function get_cmd_stardist_nblocks { get_cmd ; }
 
 function get_py_stardist_predict {
-
-    echo '#!/usr/bin/env python'
-    echo ''
-    echo 'import sys'
-    echo 'modeldir = sys.argv[1]'
-    echo 'modelname = sys.argv[2]'
-    echo 'image_in = sys.argv[3]'
-    echo 'idx = int(sys.argv[4])'
-    echo 'nomi = float(sys.argv[5])'
-    echo 'noma = float(sys.argv[6])'
-    echo 'print_nblocks = bool(sys.argv[7])'
-    echo ''
-    echo 'from stapl3d.segmentation import stardist_nuclei'
-    echo "stardist_nuclei.stardist_predict(
-        modeldir,
-        modelname,
-        image_in,
-        idx,
-        normalization=[nomi, noma],
-        print_nblocks=False,
-        )"
-
+    get_py_header
+    get_py_stardist
+    echo "stardist3r.${step}(blocks=[idx])"
 }
-function get_cmd_stardist_predict {
+function get_cmd_stardist_predict { get_cmd "\${idx}" ; }
 
-    pyfile="${datadir}/${jobname}.py"
-    eval get_py_${stage} > "$pyfile"
-
-    echo python "${pyfile}" \
-        "${stardist_predict__params__stardir}" \
-        "${stardist_predict__params__model_name}" \
-        "\${filestem}${stardist_predict__params__dapi_postfix}.ims" \
-        "\${idx}" \
-        "${stardist_predict__params__nomi}" "${stardist_predict__params__noma}" \
-        "False"
-
-    # echo python "${pyfile}" \
-    #     "${stardist_predict__params__stardir}" \
-    #     "${stardist_predict__params__model_name}" \
-    #     "\${biasfield_stem}${stardist_predict__params__dapi_postfix}.ims" \
-    #     "\${idx}" \
-    #     "${stardist_predict__params__nomi}" "${stardist_predict__params__noma}"
-
+function get_py_stardist_merge {
+    get_py_header
+    get_py_stardist
+    echo "stardist3r.${step}()"
 }
-function get_py_stardist_nblocks {
-
-    echo '#!/usr/bin/env python'
-    echo ''
-    echo 'import sys'
-    echo 'modeldir = sys.argv[1]'
-    echo 'modelname = sys.argv[2]'
-    echo 'image_in = sys.argv[3]'
-    echo 'idx = int(sys.argv[4])'
-    echo 'nomi = float(sys.argv[5])'
-    echo 'noma = float(sys.argv[6])'
-    echo 'print_nblocks = bool(sys.argv[7])'
-    echo ''
-    echo 'from stapl3d.segmentation import stardist_nuclei'
-    echo "stardist_nuclei.stardist_predict(
-        modeldir,
-        modelname,
-        image_in,
-        idx,
-        normalization=[nomi, noma],
-        print_nblocks=True,
-        )"
-
-}
-function get_cmd_stardist_nblocks {
-
-    pyfile="${datadir}/${jobname}.py"
-    eval get_py_${stage} > "$pyfile"
-
-    echo python "${pyfile}" \
-        "${stardist_predict__params__stardir}" \
-        "${stardist_predict__params__model_name}" \
-        "\${filestem}${stardist_predict__params__dapi_postfix}.ims" \
-        "\${idx}" \
-        "${stardist_predict__params__nomi}" "${stardist_predict__params__noma}" \
-        "True"
-
-}
+function get_cmd_stardist_merge { get_cmd ; }
 
 
-function get_cmd_stardist_gather {
-
-    local stage="${1}"
-
-    stardistblock_parallelization
-
-    eval postfix="\${${stage}__params__postfix}"
-    echo set_images_in_stardist \
-        "\${blockdir_stardist}/\${dataset_preproc}${stardist_predict__params__dapi_postfix}" \
-        "${stardist__params__segments_ods}${postfix}"
-    echo maxlabelfile="\${blockdir_stardist}/\${dataset_preproc}${stardist_predict__params__dapi_postfix}_maxlabels${postfix}.txt"
-    echo gather_maxlabels "\${maxlabelfile}"
-
-}
-
-
-function get_py_stardist_mergeblocks {
-
-    echo '#!/usr/bin/env python'
-    echo ''
-    echo 'import sys'
-    echo 'blockdir = sys.argv[1]'
-    echo 'image_in_ref = sys.argv[2]'
-    echo ''
-    echo 'from stapl3d.segmentation import stardist_nuclei'
-    echo "stardist_nuclei.stardist_mergeblocks(
-        blockdir,
-        image_in_ref,
-        )"
-
-}
-function get_cmd_stardist_mergeblocks {
-
-    pyfile="${datadir}/${jobname}.py"
-    eval get_py_${stage} > "$pyfile"
-
-    stardistblock_parallelization
-
-    echo python "${pyfile}" \
-        "\${blockdir_stardist}" \
-        "\${filestem}${stardist_predict__params__dapi_postfix}.ims"
-
-}
 
 
 function get_cmd_unet3d_memb_train {
