@@ -3381,26 +3381,23 @@ class Stapl3r(object):
     def _abspaths(self, paths, ):
         return {ids: self._abs(paths[ids]) for ids in paths.keys()}
 
+    def _l2p(self, p):
+        return os.path.join(*p) if isinstance(p, list) else p
+
     def _prep_paths(self, paths, reps={}, abs=True):
         """Format-in reps by keywords into (absolute) in- and outputpaths."""
 
-        # convert lists to strings
-        def l2p(p):
-            return os.path.join(*p) if isinstance(p, list) else p
+        class FormatDict(dict):
+            def __missing__(self, key):
+                return '{' + key + '}'
 
-        paths = {ids: l2p(p) for ids, p in paths.items()}
+        reps = FormatDict(**reps)
 
-        # string formatting
-        if reps:
-            for ids, p in paths.items():
-                for sf, rep in reps.items():
-                    try:
-                        p = p.format(**{sf: rep})
-                    except:
-                        pass
-                paths[ids] = p
+        paths = {ids: self._l2p(p) for ids, p in paths.items()}
 
-        # absolute paths
+        for ids, p in paths.items():
+            paths[ids] = p.format_map(reps)
+
         if abs:
             paths = {ids: self._abs(p) for ids, p in paths.items()}
 
@@ -3527,7 +3524,7 @@ class Stapl3r(object):
     def _pat2mat(self, s, mat='*', pat=r"{[^{}]+}"):
         """Replace all sets of curly brackets with wildcard."""
 
-        return re.sub(pat, mat, s)
+        return re.sub(pat, mat, self._l2p(s))
 
     def _set_paths_step(self):
         self.inputs = self.inputpaths[self.step]
