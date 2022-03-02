@@ -184,8 +184,8 @@ class Registrat3r(Stapl3r):
         tp = self.timepoint
 
         fixed = load_itk_image(inputs['highres'], ch=ch, tp=tp)
-        slc = self._slc_lowres(inputs)
-        moving = load_itk_image(inputs['lowres'], ch=ch, tp=tp, slc=slc)
+        slc, pad = self._slc_lowres(inputs)
+        moving = load_itk_image(inputs['lowres'], ch=ch, tp=tp, slc=slc, padding=pad)
 
         init_suffix = ''
         for method, parpath in self.methods.items():
@@ -333,11 +333,14 @@ class Registrat3r(Stapl3r):
             tpMap['FinalBSplineInterpolationOrder'] = str(order),
 
             # Get image
-            slic3 = self._slc_lowres(inputs) if vol['resolution'] == 'lowres' else {}
+            if vol['resolution'] == 'lowres':
+                slic3, pad = self._slc_lowres(inputs)
+            else:
+                slic3, pad = {}, {}
             if 'moving' in vol.keys():
                 inputs = {**inputs, **{'moving': vol['moving']}}
             inputs = self._prep_paths(inputs, reps={'f': filestem})
-            moving = get_moving(inputs, vol, slc=slic3)
+            moving = get_moving(inputs, vol, slc=slic3, padding=pad)
 
             if 'bspline' in self.methods.keys():
                 ads = ods.replace('/', '-')
@@ -450,7 +453,14 @@ class Registrat3r(Stapl3r):
             slc_end = min(lr_shape[d], int(cp[d] + extent))
             slc[d] = slice(slc_start, slc_end)
 
-        return slc
+            slc_start_f = int(cp[d] - extent)
+            slc_end_f = int(cp[d] + extent)
+
+            pad_lower = max(0, -slc_start_f)
+            pad_upper = max(0, -lr_shape[d] + slc_end_f)
+            pad[d] = [pad_lower, pad_upper]
+
+        return slc, pad
 
     def _identify_empty_slices(self, data, ods='raw_nucl'):
         """Find empty slices."""
@@ -468,7 +478,7 @@ class Registrat3r(Stapl3r):
         return data
 
 
-def load_itk_image(filepath, ch=0, tp=0, slc={}):
+def load_itk_image(filepath, ch=0, tp=0, slc={}, padding={}):
     """Read a 3D volume."""
 
     if '.nii' in filepath:  # NOTE: assuming 3D nifti here
@@ -491,6 +501,11 @@ def load_itk_image(filepath, ch=0, tp=0, slc={}):
     data = im.slice_dataset()
     if data.dtype == 'bool':
         data = data.astype('uint8')
+
+    if padding:
+        pad_width = tuple(padding[al] for al in im.axlab if al in padding.keys())
+        data = np.pad(data, pad_width)
+
     itk_im = sitk.GetImageFromArray(data)
     #itk_im = sitk.GetImageFromArray(data.astype('float32'))
     spacing = np.array(im.elsize[:data.ndim][::-1], dtype='float')
@@ -511,7 +526,7 @@ def get_shapes(filepath):
     return elsize, shape
 
 
-def get_moving(inputs, vol, slc={}):
+def get_moving(inputs, vol, slc={}, padding={}):
 
     if 'moving' in vol.keys():
         movingfile = inputs['moving']
@@ -524,7 +539,7 @@ def get_moving(inputs, vol, slc={}):
     ch = vol['channel'] if 'channel' in vol.keys() else 0
     tp = vol['timepoint'] if 'timepoint' in vol.keys() else 0
 
-    moving = load_itk_image(movingfile, ch=ch, tp=tp, slc=slc)
+    moving = load_itk_image(movingfile, ch=ch, tp=tp, slc=slc, padding=padding)
 
     return moving
 
