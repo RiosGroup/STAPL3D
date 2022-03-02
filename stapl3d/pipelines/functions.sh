@@ -1365,107 +1365,46 @@ function get_cmd_ims_aggregate2 {
 # }
 
 
-function get_py_blocks {
+function get_py_splitter {
     echo "from stapl3d import blocks"
-    echo "splitter = blocks.Splitter(image_in, parameter_file)"
+    echo "splitt3r = blocks.Splitt3r(image_in, parameter_file)"
 }
-function get_py_blocks_split {
+function get_py_splitter_split {
     get_py_header
-    get_py_splitblocks
-    echo "splitter.${step}(blocks=[idx])"
+    get_py_splitter
+    echo "splitt3r.${step}(blocks=[idx])"
 }
-function get_cmd_blocks_split { get_cmd "\${idx}" ; }
+function get_cmd_splitter_split { get_cmd "\${idx}" ; }
 
 
 function get_py_membrane_enhancement {
-
-    echo '#!/usr/bin/env python'
-    echo ''
-    echo 'import sys'
-    echo 'image_in = sys.argv[1]'
-    echo 'parameter_file = sys.argv[2]'
-    echo 'idx = int(sys.argv[3])'
-    echo ''
     echo "from stapl3d.segmentation import enhance"
-    echo "enhance.estimate(
-        image_in,
-        parameter_file,
-        blocks=[idx],
-        )"
+    echo "enhanc3r = enhance.Enhanc3r(image_in, parameter_file)"
 }
-function get_cmd_membrane_enhancement {
-
-    pyfile="${datadir}/${jobname}.py"
-    eval get_py_${stage} > "${pyfile}"
-
-    echo python "${pyfile}" \
-        "\${biasfield_stem}.ims" \
-        "${parfile}" \
-        "\${idx}"
-
-    # TODO: pull into python function
-    echo ''
-    echo "rm \${blockdir}/${dataset_preproc}_\${block_id}_memb-eigen.mha"
-    echo "rm \${blockdir}/${dataset_preproc}_\${block_id}_memb-*.nii.gz"
-
+function get_py_membrane_enhancement_estimate {
+    get_py_header
+    get_py_membrane_enhancement
+    echo "enhanc3r.${step}(blocks=[idx])"
 }
+function get_cmd_membrane_enhancement_estimate { get_cmd "\${idx}" ; }
 
 
 function get_py_segmentation {
-
-    echo '#!/usr/bin/env python'
-    echo ''
-    echo 'import sys'
-    echo 'image_in = sys.argv[1]'
-    echo 'parameter_file = sys.argv[2]'
-    echo 'idx = int(sys.argv[3])'
-    echo ''
     echo "from stapl3d.segmentation import segment"
-    echo "segment.estimate(
-        image_in,
-        parameter_file,
-        blocks=[idx],
-        )"
+    echo "segment3r = segment.Segment3r(image_in, parameter_file)"
 }
-function get_cmd_segmentation {
-
-    pyfile="${datadir}/${jobname}.py"
-    eval get_py_${stage} > "${pyfile}"
-
-    echo python "${pyfile}" \
-        "\${biasfield_stem}.ims" \
-        "${parfile}" \
-        "\${idx}"
-
+function get_py_segmentation_estimate {
+    get_py_header
+    get_py_segmentation
+    echo "segment3r.${step}(blocks=[idx])"
 }
-
-
-# TODO: move glob inside function
+function get_cmd_segmentation_estimate { get_cmd "\${idx}" ; }
 function get_py_segmentation_postproc {
-
-    echo '#!/usr/bin/env python'
-    echo ''
-    echo "from glob import glob"
-    echo "from stapl3d.reporting import merge_reports"
-    echo "pdfs = glob('${blockdir}/${dataset_preproc}_?????-?????_?????-?????_?????-?????_seg.pdf')"
-    echo "pdfs.sort()"
-    echo "merge_reports(
-        pdfs,
-        '${blockdir}/${dataset_preproc}_seg.pdf',
-        )"
-
+    get_py_header
+    get_py_segmentation
+    echo "segment3r.${step}()"
 }
-function get_cmd_segmentation_postproc {
-
-    pyfile="${datadir}/${jobname}.py"
-    eval get_py_${stage} > "${pyfile}"
-
-    echo python "${pyfile}"
-
-    # TODO: pull into python function
-    echo "rm ${blockdir}/${dataset_preproc}_?????-?????_?????-?????_?????-?????_seg.pdf"
-
-}
+function get_cmd_segmentation_postproc { get_cmd "" ; }
 
 
 function get_py_relabel {
