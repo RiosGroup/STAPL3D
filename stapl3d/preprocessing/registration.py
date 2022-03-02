@@ -276,7 +276,8 @@ class Registrat3r(Stapl3r):
         with multiprocessing.Pool(processes=self._n_workers) as pool:
             pool.starmap(self._apply_transform, arglist)
 
-        shutil.rmtree(self._reg_dir)
+        if 'bspline' in self.methods.keys():
+            shutil.rmtree(self._reg_dir)
 
     def _apply_transform(self, filepath):
 
