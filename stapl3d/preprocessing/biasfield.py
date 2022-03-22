@@ -86,7 +86,8 @@ class Homogeniz3r(Stapl3r):
         self._parameter_sets = {
             'estimate': {
                 'fpar': self._FPAR_NAMES,
-                'ppar': ('resolution_level', 'downsample_factors',
+                'ppar': ('method',
+                         'resolution_level', 'target_yx', 'downsample_factors',
                          'n_iterations', 'n_fitlevels', 'n_bspline_cps'),
                 'spar': ('_n_workers', 'channels', 'n_threads'),
                 },
@@ -111,6 +112,7 @@ class Homogeniz3r(Stapl3r):
             }
 
         default_attr = {
+            'method': 'biasfield',
             'channels': [],
             'resolution_level': -1,
             'target_yx': 20,
@@ -120,7 +122,6 @@ class Homogeniz3r(Stapl3r):
             'n_iterations': 50,
             'n_fitlevels': {'z': 4, 'y': 4, 'x': 4},
             'n_bspline_cps': {'z': 5, 'y': 5, 'x': 5},
-            'inputstem': True,
             'blocksize_xy': 1280,
             'n_threads': 1,
         }
@@ -237,8 +238,9 @@ class Homogeniz3r(Stapl3r):
         self.set_downsample_factors(self.inputpaths['estimate']['data'])
 
         # NOTE: ITK is already multithreaded => n_workers = 1
-        self.n_threads = min(self.tasks, multiprocessing.cpu_count())
-        self._n_workers = 1
+        if self.method == 'biasfield':
+            self.n_threads = min(self.tasks, multiprocessing.cpu_count())
+            self._n_workers = 1
         with multiprocessing.Pool(processes=self._n_workers) as pool:
             pool.starmap(self._estimate_channel, arglist)
 
@@ -259,14 +261,26 @@ class Homogeniz3r(Stapl3r):
             self.downsample_factors, True,
             outputs['mask'],
             )
-        ds_bf = calculate_bias_field(
-            ds_im, ds_ma,
-            self.n_iterations,
-            [self.n_fitlevels[dim] for dim in ds_im.axlab],
-            [self.n_bspline_cps[dim] for dim in ds_im.axlab],
-            self.n_threads,
-            outputs['bias'],
-            )
+
+        if self.method == 'smooth_division':
+            ds_bf = smooth_division(
+                ds_im, self.sigma, self.normalize_bias,
+                outputs['bias'],
+                )
+        elif self.method == 'attenuation':
+            ds_bf = attenuation_correction(
+                ds_im, 2, None,
+                outputs['bias'],
+                )
+        else:
+            ds_bf = calculate_bias_field(
+                ds_im, ds_ma,
+                self.n_iterations,
+                [self.n_fitlevels[dim] for dim in ds_im.axlab],
+                [self.n_bspline_cps[dim] for dim in ds_im.axlab],
+                self.n_threads,
+                outputs['bias'],
+                )
         ds_cr = divide_bias_field(
             ds_im, ds_bf,
             outputs['corr'],
@@ -279,8 +293,10 @@ class Homogeniz3r(Stapl3r):
                 pass
 
         self.dump_parameters(self.step, outputs['parameters'])
+        pars = {k: getattr(self, k) for k in self._parameter_table.keys()}
         self.report(outputs['report'],
                     channel=channel,
+                    parameters=pars,
                     inputs=inputs, outputs=outputs)
 
     def set_downsample_factors(self, inputpath, resolution_level=-1):
@@ -374,6 +390,28 @@ class Homogeniz3r(Stapl3r):
         in_place = inputs['data'] == outputs['channels']
         im = Image(inputs['data'], permission='r+' if in_place else 'r')
         im.load(load_data=False)
+
+        if self.method == 'attenuation':
+
+            filepath = inputs['bias'].replace('.h5/bias', '_att.npz')
+            npzfile = np.load(filepath)
+            means = npzfile['means']
+            stds = npzfile['stds']
+
+            if self.ref_idx is None:
+                self.ref_idx = np.argmax(means)
+            ref_mean = means[self.ref_idx]
+            ref_std = stds[self.ref_idx]
+
+            #im_ch = im.extract_channel(channel)
+            #attenuation_correction_apply(im_ch, npzfile['means'], npzfile['stds'], ref_idx=None, outputpath=outputs['channels'])
+            #im.close()
+            #return
+
+            print(ref_mean, ref_std)
+            for m, s in zip(means, stds):
+                print(m, s)
+
         bf = Image(inputs['bias'], permission='r')
         bf.load(load_data=False)
 
@@ -389,6 +427,7 @@ class Homogeniz3r(Stapl3r):
                 props = im.squeeze_props(props, dim=4)
             if len(im.dims) > 3:
                 props = im.squeeze_props(props, dim=3)
+            props['dtype'] = 'float'
             mo = Image(outputs['channels'], **props)
             mo.create()
 
@@ -452,10 +491,16 @@ class Homogeniz3r(Stapl3r):
             data = im.slice_dataset().astype('float')
 
             # Get the upsampled bias field.
-            bias = get_bias_field_block(bf, im.slices, data.shape,
-                                        downsample_factors)
-            data /= bias
-            data = np.nan_to_num(data, copy=False)
+            if self.method == 'attenuation':
+                data_corr = np.zeros_like(data)
+                for i, slc in enumerate(data):
+                    data_corr[i, :, :] = ref_mean + ref_std * ((slc - means[i]) / stds[i])
+                data = data_corr
+            else:
+                bias = get_bias_field_block(bf, im.slices, data.shape,
+                                            downsample_factors)
+                data /= bias
+                data = np.nan_to_num(data, copy=False)
 
             # Write the corrected data.
             mo.slices = block_nm['slices']
@@ -649,11 +694,71 @@ def downsample_channel(inputpath, resolution_level, channel,
     dsfacs_rl = dict(zip(im.axlab, im.find_downsample_factors()))
     im_ch = im.extract_channel(channel)
     im.close()
-    ds_im = im_ch.downsampled(downsample_factors, ismask, outputpath)
+    if downsample_factors is not None:
+        ds_im = im_ch.downsampled(downsample_factors, ismask, outputpath)
+    else:
+        ds_im = im
 
     im_ch.close()
 
     return ds_im
+
+
+def smooth_division(im, sigma={}, normalize_bias=False, outputpath=''):
+
+    from skimage.filters import gaussian
+    vol = im.slice_dataset()
+    s = [sigma[d] for d in im.axlab if d in 'zyx']
+    bias = gaussian(vol, sigma=s)
+    if normalize_bias:
+        from stapl3d.segmentation import segment
+        bias, dr = segment.normalize_data(bias, a=1.00, b=5.00)
+
+    mo = write_image(im, outputpath, bias)
+
+    return mo
+
+
+def attenuation_correction(im, radius=2, ref_idx=None, outputpath=''):
+    from skimage.morphology import opening, disk
+    selem = disk(radius)
+    vol = im.slice_dataset()
+    vol_open = np.zeros_like(vol)
+    for i, slc in enumerate(vol):
+        vol_open[i, :, :] = opening(slc, selem)
+
+    # TODO: write slicewise mean and std instead of bias
+    means = np.mean(vol_open, axis=(1, 2))
+    stds = np.std(vol_open, axis=(1, 2))
+    filepath = outputpath.replace('.h5/bias', '_att.npz')
+    with open(filepath, 'wb') as f:
+        np.savez(f, means=means, stds=stds)
+
+    if ref_idx is None:
+        ref_idx = np.argmax(means)
+    ref_mean = means[ref_idx]
+    ref_std = stds[ref_idx]
+
+    vol_corr = np.zeros_like(vol)
+    for i, slc in enumerate(vol):
+        vol_corr[i, :, :] = ref_mean + ref_std * ((slc - means[i]) / stds[i])
+
+    bias = vol / vol_corr
+
+    mo = write_image(im, outputpath, bias)
+
+    return mo
+
+
+def attenuation_correction_apply(im, means, stds, ref_idx=None):
+
+    vol_corr = np.zeros_like(vol)
+    for i, slc in enumerate(vol):
+        vol_corr[i, :, :] = ref_mean + ref_std * ((slc - means[i]) / stds[i])
+
+    mo = write_image(im, outputpath, vol_corr)
+
+    return mo
 
 
 def calculate_bias_field(im, mask=None, n_iter=50, n_fitlev=[4, 4, 4], n_cps=[5, 5, 5],
