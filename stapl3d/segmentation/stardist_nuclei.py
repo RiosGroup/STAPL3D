@@ -581,7 +581,7 @@ def stardist_blocks(model, imdims, axes='ZYX', block_size=[None, 1024, 1024], mi
     return blocks
 
 
-def load_model(self, modeldir, modelname):
+def load_model(modeldir, modelname):
     """Load StarDist model."""
 
     if modelname in ['3D_demo']:
