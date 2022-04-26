@@ -441,8 +441,8 @@ class StarDist3r(Block3r):
                 if idx not in idxs:
                     keep = False
 
-        if keep:
-            blocks_filtered.append((fn, block))
+            if keep:
+                blocks_filtered.append((fn, block))
 
         return blocks_filtered
 
