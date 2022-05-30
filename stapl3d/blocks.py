@@ -767,6 +767,7 @@ class Merg3r(Block3r):
             'elsize': [],
             'inlayout': '',
             'squeeze': '',
+            '_volumes': {},
         }
         for k, v in default_attr.items():
             setattr(self, k, v)
@@ -794,16 +795,16 @@ class Merg3r(Block3r):
             'merge': {
                 'inputs': {
                     # 'data': ,  # TODO: template...
-                    ods: f"{bmat}.{vol['format'] if 'format' in vol.keys() else 'h5'}/{ods}" for volume in self.volumes for ods, vol in volume.items()
+                    ods: f"{bmat}.{vol['format'] if 'format' in vol.keys() else 'h5'}/{ods}" for volume in self._volumes for ods, vol in volume.items()
                     },
                 'outputs': {
-                    **{ods: self.get_outputpath(volume) for volume in self.volumes for ods, vol in volume.items()},
-                    **{f'{ods}_ulabels': self.get_outputpath(volume, 'npy') for volume in self.volumes for ods, vol in volume.items() if 'is_labelimage' in vol.keys() and vol['is_labelimage']},
+                    **{ods: self.get_outputpath(volume) for volume in self._volumes for ods, vol in volume.items()},
+                    **{f'{ods}_ulabels': self.get_outputpath(volume, 'npy') for volume in self._volumes for ods, vol in volume.items() if 'is_labelimage' in vol.keys() and vol['is_labelimage']},
                     },
                 },
             'postprocess': {
                 'inputs': {
-                    ods: self.get_outputpath(volume, fullpath=False) for volume in self.volumes for ods, vol in volume.items()
+                    ods: self.get_outputpath(volume, fullpath=False) for volume in self._volumes for ods, vol in volume.items()
                     },
                 'outputs': {
                     'aggregate': self._build_path(prefixes=['merged'], ext='h5'),
@@ -825,41 +826,47 @@ class Merg3r(Block3r):
         with multiprocessing.Pool(processes=self._n_workers) as pool:
             pool.starmap(self._mergeblocks, arglist)
 
-    def _mergeblocks(self, volume):
+    def _mergeblocks(self, volume_idx):
         """Merge blocks of data into a single hdf5 file."""
 
         # inputs = self._prep_paths(self.inputs)
         outputs = self._prep_paths(self.outputs)
 
-        ids = list(volume.keys())[0]
+        volume = self._volumes[volume_idx]
+        volname = list(volume.keys())[0]
 
-        ukey = f'{ids}_ulabels'
+        ukey = f'{volname}_ulabels'
         ulabelpath = outputs[ukey] if ukey in outputs.keys() else ''
 
-        # PROPS  # TODO: cleanup
-        bpath = self._blocks[0].path.format(ods=ids)
-        im = Image(bpath, permission='r')
+        # Properties of the input blocks
+        im = Image(self._blocks[self.blocks[0]].path.format(ods=volname), permission='r')
         im.load()
         props = im.get_props2()
         im.close()
 
-        props['path'] = outputs[ids]  #f'{outstem}.h5/{ids}'
+        props['path'] = outputs[volname]  #f'{outstem}.h5/{volname}'
         props['permission'] = 'r+'
         props['axlab'] = self.inlayout or props['axlab']
         props['elsize'] = self.elsize or props['elsize']
         props['dtype'] = self.datatype or props['dtype']
         props['chunks'] = props['chunks'] or None
 
-        if not self.fullsize:
-            self.fullsize = {d: self._blocks[-1].slices[im.axlab.index(d)].stop
-                             for d in props['axlab']}
+        merge_axes = ''
+        for al in im.axlab:
+            # 1. check if the volume was split over dimension K
+            block0 = self._blocks[0]
+            ax_idx = block0.axlab.index(al)
+            axis_blocked = block0.slices[ax_idx].stop != self.fullsize[al]
+            # 2. check if merging is desired (default: True if axis_blocked)
+            if axis_blocked:
+                merge_axes += al
 
-        dims = [self.fullsize[d] for d in im.axlab]
-        ndim = im.get_ndim()
-        if ndim == 4:
-            c_idx = props['axlab'].index('c')
-            dims.insert(c_idx, im.ds.shape[c_idx])
+        dims = [self.fullsize[al] if al in merge_axes else props['dims'][im.axlab.index(al)]
+                for al in props['axlab']]
+
+        props['dims'] = dims
         props['shape'] = dims
+        props['slices'] = None
 
         for ax in self.squeeze:
             props = im.squeeze_props(props, dim=props['axlab'].index(ax))
@@ -867,26 +874,22 @@ class Merg3r(Block3r):
         mo = LabelImage(**props)
         mo.create()
 
-        # select block subset  # TODO: also for splitter
-        if not self.blocks:
-            self.blocks = list(range(len(self._blocks)))
-        blocks_wm = [block for i, block in enumerate(self._blocks)
-                     if i in self.blocks]
-        # blocks_nm = [block for i, block in enumerate(self._blocks_nomargin)
-        #              if i in self.blocks]  # unused for now
+        # Select a subset blocks
+        self.blocks = self.blocks or list(range(len(self._blocks)))
 
         # Merge the blocks sequentially (TODO: reintroduce MPI with h5-para).
         ulabels = set([])
-        # for block, block_nm in zip(blocks_wm, blocks_nm):
-        for block in blocks_wm:
-            inpath = block.path.format(ods=ids)
-            print('processing volume {} block {} from {}'.format(ids, block.id, inpath))
-            im = Image(inpath, permission='r')
+        for block_idx in self.blocks:
+            block = self._blocks[block_idx]
+            blockpath = block.path.format(ods=volname)
+            print('processing volume {} block {} from {}'.format(volname, block.id, blockpath))
+            im = Image(blockpath, permission='r')
             im.load(load_data=False)
-            self.set_slices(im, mo, block)
+            self.set_slices(im, mo, block, merge_axes)
             data = im.slice_dataset()
             mo.write(data)
             im.close()
+
             if ulabelpath:
                 ulabels |= set(np.unique(data))
 
@@ -897,28 +900,24 @@ class Merg3r(Block3r):
         im.close()
         mo.close()
 
-    def set_slices(self, im, mo, block=None):
+    def set_slices(self, im, mo, block, merge_axes=''):
+        """Set the block's slices on the input block and output volume.
 
-        if block is None:
-            comps = im.split_path()
-            dset_info = split_filename(comps['file'])[0]
+        for the axes which need to be merged
+        """
 
-        for d in im.axlab:
-
-            if block is None:
-                l = dset_info[d.lower()]
-                h = dset_info[d.upper()]
-            else:
-                l = block.slices[im.axlab.index(d)].start
-                h = block.slices[im.axlab.index(d)].stop
-
-            bs = self.blocksize[d]
-            bm = self.blockmargin[d]
-            fs = self.fullsize[d]
-
-            (ol, oh), (il, ih) = self._margins(l, h, bs, bm, fs)
-            im.slices[im.axlab.index(d)] = slice(il, ih)
-            mo.slices[mo.axlab.index(d)] = slice(ol, oh)
+        merge_axes = merge_axes or im.axlab
+        for al in merge_axes:
+            l = block.slices[block.axlab.index(al)].start
+            u = block.slices[block.axlab.index(al)].stop
+            (ol, ou), (il, iu) = self._margins(
+                l, u,
+                self.blocksize[al],
+                self.blockmargin[al],
+                self.fullsize[al],
+            )
+            im.slices[im.axlab.index(al)] = slice(il, iu)
+            mo.slices[mo.axlab.index(al)] = slice(ol, ou)
 
     def postprocess(self):
 
