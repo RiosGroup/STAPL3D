@@ -966,28 +966,11 @@ class Image(object):
         """Get the shape of the sliced dataset."""
 
         if slices is None:
-            if self.slices is None:
-                self.set_slices()
-            slices = self.slices
+            slices = self.set_slices() if self.slices is None else self.slices
 
-        return (len(range(*slc.indices(slc.stop))) for slc in slices)
-
-#         if len(slices) == 1:
-#             shape = (len(range(*slices[0].indices(slices[0].stop))))
-#         if len(slices) == 2:
-#             shape = (len(range(*slices[0].indices(slices[0].stop))),
-#                      len(range(*slices[1].indices(slices[1].stop))))
-#         if len(slices) == 3:
-#             shape = (len(range(*slices[0].indices(slices[0].stop))),
-#                      len(range(*slices[1].indices(slices[1].stop))),
-#                      len(range(*slices[2].indices(slices[2].stop))))
-#         elif len(slices) == 4:
-#             shape = (len(range(*slices[0].indices(slices[0].stop))),
-#                      len(range(*slices[1].indices(slices[1].stop))),
-#                      len(range(*slices[2].indices(slices[2].stop))),
-#                      len(range(*slices[3].indices(slices[3].stop))))
-#
-#         return shape
+        # FIXME: assuming step=1
+        return (slc.stop - slc.start for slc in slices)
+        #return (len(range(*slc.indices(slc.stop))) for slc in slices)
 
     def get_elsize(self):
         """Get the element sizes."""
