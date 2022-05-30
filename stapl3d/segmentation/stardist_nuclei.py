@@ -267,56 +267,61 @@ class StarDist3r(Block3r):
         """Predict nuclei with StarDist model for a block."""
 
         filepath, block = self._blocks[block_idx]
-        filestem = os.path.basename(os.path.splitext(filepath)[0])
+        im = Image(filepath, permission='r')
+        im.load(load_data=False)
 
         inputs = self._prep_paths(self.inputs)
 
-        reps = self._find_reps(self.outputs['blockfiles'], filestem, block_idx)
-        # reps = {'f': filestem, 'b': block_idx}
-        outputs = self._prep_paths(self.outputs, reps=reps)
+        model = load_model(inputs['modeldir'], self.modelname)
 
+        data = self._prep_data_predict(im, block)
+
+        labels, polys = self._run_prediction(model, block, data)
+
+        blockstem = self._prep_output_predict(im, block_idx)
+        write_labels(f'{blockstem}.h5/{self.ids_lbl}', im, labels)
+        with open(f'{blockstem}.pickle', 'wb') as f:
+            pickle.dump([model._axes_out.replace('C', ''), polys, block], f)
+
+        im.close()
+
+    def _prep_output_predict(self, im, block_idx):
+
+        filestem = im.split_path()['fname']
+        reps = self._find_reps(self.outputs['blockfiles'], filestem, block_idx)
+        outputs = self._prep_paths(self.outputs, reps=reps)
         blockdir = os.path.dirname(outputs['blockfiles'])
         os.makedirs(blockdir, exist_ok=True)
         blockstem = outputs['blockfiles'].split('.h5')[0]
 
-        model = load_model(inputs['modeldir'], self.modelname)
+        return blockstem
 
-        # Load data
-        im = Image(filepath, permission='r')
-        im.load(load_data=False)
-        comps = im.split_path()
-        if filepath.endswith('.ims'):
-            rl = 2
+    def _prep_data_predict(self, im, block, rl=2):
+
+        if im.path.endswith('.ims'):
+
             tp = block.blocks_for_axes('T')[0].slice_read.start
             ch = block.blocks_for_axes('C')[0].slice_read.start
-            h5ds = im.file[f'/DataSet/ResolutionLevel {2}/TimePoint {tp}/Channel {ch}/Data']
+
+            ids = f'/DataSet/ResolutionLevel {rl}/TimePoint {tp}/Channel {ch}/Data'
+            h5ds = im.file[ids]
             axes = 'ZYX'
 
-        elif '.h5' in filepath:
-            h5ds = im.file[comps['int']]
+        elif '.h5' in im.path:
+            ids = comps['int']
+            h5ds = im.file[ids]
             axes = self.axes
 
-        else:  # czi
+        else:  # czi-like assumed
             if self.channel is not None:
                 im.slices[im.axlab.index('c')] = slice(self.channel, self.channel + 1)
             h5ds = im.slice_dataset()
             axes = self.axes
 
-        props = im.get_props()
-        for al in 'ct':
-            if al in props['axlab']:
-                props = im.squeeze_props(props, dim=props['axlab'].index(al))
-
         data = block.read(h5ds, axes=axes)
         data = self._normalize_stardist_data(data)
 
-        labels, polys = self._run_prediction(model, block, data)
-
-        write_labels(f'{blockstem}.h5/{self.ids_lbl}', props, labels)
-        with open(f'{blockstem}.pickle', 'wb') as f:
-            pickle.dump([model._axes_out.replace('C', ''), polys, block], f)
-
-        im.close()
+        return data
 
     def _run_prediction(self, model, block, data):
         """Run stardist prediction on block."""
@@ -441,8 +446,8 @@ class StarDist3r(Block3r):
                 if idx not in idxs:
                     keep = False
 
-        if keep:
-            blocks_filtered.append((fn, block))
+            if keep:
+                blocks_filtered.append((fn, block))
 
         return blocks_filtered
 
@@ -581,7 +586,7 @@ def stardist_blocks(model, imdims, axes='ZYX', block_size=[None, 1024, 1024], mi
     return blocks
 
 
-def load_model(self, modeldir, modelname):
+def load_model(modeldir, modelname):
     """Load StarDist model."""
 
     if modelname in ['3D_demo']:
@@ -605,10 +610,17 @@ def load_data(filepath, ids, z_range=[]):
     return data
 
 
-def write_labels(filepath, props, labels):
+def write_labels(filepath, im, labels):
     """Write labels to file."""
 
+    props = im.get_props()
+
+    for al in 'ct':
+        if al in props['axlab']:
+            props = im.squeeze_props(props, dim=props['axlab'].index(al))
+
     props['shape'] = labels.shape
+
     mo = Image(filepath, **props)
     mo.create()
     mo.write(labels)
