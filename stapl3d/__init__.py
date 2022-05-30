@@ -3199,8 +3199,6 @@ class Stapl3r(object):
         if not self.directory:
             self.directory = os.path.join(self.datadir, self.step_id)
 
-        os.makedirs(self.directory, exist_ok=True)
-
         self.directory = os.path.relpath(self.directory, self.datadir)
 
     def _step_pars(self, parsets, pdict):
