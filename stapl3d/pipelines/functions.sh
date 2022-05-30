@@ -6,11 +6,26 @@
 ###==========================================================================###
 
 function load_dataset {
+    # --
+    ## Go to the dataset directory.
+    ##
+    ## PARAMETERS:
+    ##   projectdir: project directory
+    ##   dataset: name of the dataset
+    ##
+    ## SHELL VARIABLES required:
+    ##
+    ## SHELL VARIABLES set:
+    ##   datadir: dataset directory
+    # --
 
     local projectdir="${1}"
     local dataset="${2}"
 
-    set_datadir "${projectdir}" "${dataset}"
+    mkdir -p "${projectdir}"
+
+    datadir="${projectdir}/${dataset}"
+    mkdir -p "${datadir}" && cd "${datadir}"
 
     echo ""
     echo " ### project directory is '${projectdir}'"
@@ -21,20 +36,19 @@ function load_dataset {
 }
 
 
-function set_datadir {
-
-    local projectdir="${1}"
-    local dataset="${2}"
-
-    mkdir -p "${projectdir}"
-
-    datadir="${projectdir}/${dataset}"
-    mkdir -p "${datadir}" && cd "${datadir}"
-
-}
-
-
 function init_dataset {
+    # --
+    ## Copy default parameter file to dataset directory.
+    ##
+    ## PARAMETERS:
+    ##
+    ## SHELL VARIABLES required:
+    ##   STAPL3D: path to STAPL3D installation
+    ##   datadir: dataset directory
+    ##   dataset: name of the dataset
+    ##
+    ## SHELL VARIABLES set:
+    # --
 
     cp "${STAPL3D}/pipelines/params.yml" "${datadir}/${dataset}.yml"
 
@@ -49,12 +63,25 @@ function init_dataset {
 
 
 function load_parameters {
+    # --
+    ## Load the processing parameters from a yaml parameter file.
+    ##
+    ## PARAMETERS:
+    ##   dataset: name of the dataset
+    ##   verbose: use '-v' for printing messages
+    ##   parfile: path to the parameter file (default: datadir/dataset.yml)
+    ##
+    ## SHELL VARIABLES required:
+    ## ...TODO
+    ##
+    ## SHELL VARIABLES set:
+    ## ...TODO
+    # --
 
     local dataset="${1}"
     local verbose="${2}"
     local parfile="${3}"
 
-    # TODO: make two-spaced indentation possible
     [[ -z $parfile ]] && parfile="${datadir}/${dataset}.yml"
     eval $( parse_yaml "${parfile}" "" )
 
@@ -64,8 +91,6 @@ function load_parameters {
         echo ""
         parse_yaml "${parfile}"
         echo "" ; }
-
-    # set_dirtree "${datadir}"
 
     dataset_shading="${dataset}${shading__params__postfix}"
     dataset_stitching="${dataset_shading}${stitching__params__postfix}"
@@ -103,6 +128,8 @@ function load_parameters {
         echo ""
     fi
 
+    # UNUSED?
+    # TODO: this naming has become more flexible
     if ! [ -z "$C" ]
     then
         set_channelstems "${dataset_preproc}"
@@ -120,13 +147,30 @@ function load_parameters {
 
 
 function parse_yaml {
-    # https://gist.github.com/pkuczynski/8665367
-    # consider: https://github.com/0k/shyaml
+    # --
+    ## Parse a (4-space-indented) yaml-file and create variable for entries.
+    ##
+    ## from https://gist.github.com/pkuczynski/8665367
+    ## TODO: make two-spaced indentation possible
+    ##  (each double-space creates an underscore in the variable name)
+    ## consider: https://github.com/0k/shyaml
+    ##
+    ## PARAMETERS:
+    ##   filepath: path to yaml file
+    ##   prefix: prefix to the variable names
+    ##
+    ## SHELL VARIABLES required:
+    ##
+    ## SHELL VARIABLES set:
+    ##   all parsed yaml-entries in the format <prefix>__<key0>__<key1>__<key2>
+    # --
 
+    local filepath=$1
     local prefix=$2
     local s='[[:space:]]*' w='[a-zA-Z0-9_]*' fs=$(echo @|tr @ '\034')
+
     sed -ne "s|^\($s\)\($w\)$s:$s\"\(.*\)\"$s\$|\1$fs\2$fs\3|p" \
-         -e "s|^\($s\)\($w\)$s:$s\(.*\)$s\$|\1$fs\2$fs\3|p"  $1 |
+         -e "s|^\($s\)\($w\)$s:$s\(.*\)$s\$|\1$fs\2$fs\3|p" $filepath |
     awk -F$fs '{
         indent = length($1)/2;
         vname[indent] = $2;
@@ -252,40 +296,6 @@ function get_elsizes {
 }
 
 
-function set_dirtree {
-
-    local datadir="${1}"
-
-    stackdir="${datadir}/${dirtree__datadir__stacks}"
-    mkdir -p "${stackdir}"
-
-    blockdir="${datadir}/${dirtree__datadir__blocks}"
-    mkdir -p "${blockdir}"
-
-    channeldir="${datadir}/${dirtree__datadir__channels}"
-    mkdir -p "${channeldir}"
-
-    shadingdir="${datadir}/${dirtree__datadir__shading}"
-    mkdir -p "${shadingdir}"
-
-    stitchingdir="${datadir}/${dirtree__datadir__stitching}"
-    mkdir -p "${stitchingdir}"
-
-    biasfielddir="${datadir}/${dirtree__datadir__biasfield}"
-    mkdir -p "${biasfielddir}"
-
-    profdir="${datadir}/${dirtree__datadir__profiling}"
-    mkdir -p "${profdir}"
-
-    featdir="${datadir}/${dirtree__datadir__blocks}"
-    mkdir -p "${featdir}"
-
-    jobdir="${datadir}/${dirtree__datadir__jobfiles}"
-    mkdir -p "${jobdir}"
-
-}
-
-
 function set_blocksize {
 
     # TODO: determine from $Z
@@ -294,20 +304,10 @@ function set_blocksize {
 }
 
 
-function set_blocks {
-
-    local bs="${1}"
-    local bm="${2}"
-
-    blocksize="$Z $bs $bs $C $T"
-    blockmargin="0 $bm $bm 0 0"
-    set_blockdims
-    set_blockstems "${dataset_preproc}"
-
-}
-
-
 function set_ZYXCT_ims {
+    # --
+    ## Set the dimension variables for an Imarisfile.
+    # --
 
     local verbose=$1
     shift 1
@@ -324,9 +324,10 @@ function set_ZYXCT_ims {
 
 
 }
-
-
 function get_dim_ims {
+    # --
+    ## Extract dataset dimension from an Imarisfile.
+    # --
 
     local dim=${1}
     shift 1
@@ -341,9 +342,11 @@ function get_dim_ims {
     fi
 
 }
-
-
 function find_dim_from_h5 {
+    # --
+    ## Extract dataset dimension from an Imarisfile for Z/Y/X.
+    # --
+
 
     local dim=${1}
     shift 1
@@ -360,25 +363,82 @@ function find_dim_from_h5 {
 }
 
 
-function set_blockdims {
+function set_blocks {
+    # --
+    ## Set the blockgrid and blockstems variables for the dataset.
+    ##
+    ## PARAMETERS:
+    ##   bs: blocksize Y/X
+    ##   bm: blockmargin Y/X
+    ##
+    ## SHELL VARIABLES required:
+    ##   Z/Y/X/C/T: dataset dimensions
+    ##   dataset_preproc
+    ##
+    ## SHELL VARIABLES set:
+    ##   nx: number of rows in blockgrid
+    ##   ny: number of columns in blockgrid
+    ##   nb: number of blocks
+    # --
 
-    # FIXME: evaluates to 0 on dataset smaller than blocksize
+    local bs="${1}"
+    local bm="${2}"
+
+    blocksize="$Z $bs $bs $C $T"
+    blockmargin="0 $bm $bm 0 0"
+    set_blockdims $bs $X $Y
+    set_blockstems "${dataset_preproc}"
+
+}
+function set_blockdims {
+    # --
+    ## Set the variables holding the number of blocks, rows and columns.
+    ## FIXME: evaluates to 0 on dataset smaller than blocksize
+    ##
+    ## PARAMETERS:
+    ##   bs: blocksize Y/X
+    ##   Y: dataset Y dimension
+    ##   X: dataset X dimension
+    ##
+    ## SHELL VARIABLES set:
+    ##   nx: number of rows in blockgrid
+    ##   ny: number of columns in blockgrid
+    ##   nb: number of blocks
+    # --
+
+    local bs="${1}"
+    local X="${2}"
+    local Y="${2}"
+
     nx=`python -c "from math import ceil; print(int(ceil($X/$bs)))"`
     ny=`python -c "from math import ceil; print(int(ceil($Y/$bs)))"`
     nb=$((nx*ny))
 
 }
-
-
 function set_blockstems {
-    # Generate an array <blockstems> of block identifiers.
-    # taking the form "dataset_x-X_y-Y_z-Z"
-    # with voxel coordinates zero-padded to 5 digits
+    # --
+    ## Generate an array <blockstems> of block identifiers.
+    ## taking the form "dataset_B?????"
+    ## taking the form "dataset_x-X_y-Y_z-Z"
+    ## with voxel coordinates zero-padded to 5 digits
+    ##
+    ## TODO: bring in line with filenaming option in python (w / wo prefix)
+    ## TODO: implement switch to enable both options?
+    ## TODO: 'block_ids' may be removed (but used in plantseg?)
+    ##
+    ## PARAMETERS:
+    ##   dataset: dataset name
+    ##   verbose: use '-v' to print blockstems
+    ##
+    ## SHELL VARIABLES set:
+    ##   blockstems: array of block filenames (wo extension / h5 dataset path)
+    ##
+    # --
 
     local dataset=$1
     local verbose=$2
     local bx bX by bY bz bZ
-    local dstem
+    local block_id dstem
 
     unset block_ids
     block_ids=()
@@ -398,17 +458,17 @@ function set_blockstems {
                 bz=$( get_coords_lower $z 0 )
 
                 #block_id="$( get_block_id $bx $bX $by $bY $bz $bZ )"
-                block_id="${dataset}_B`printf %05d $i`"
-
-                block_ids+=( "$block_id" )
-                if [ "$verbose" == "-v" ]; then
-                    echo "$block_id"
-                fi
+                block_id="B`printf %05d $i`"
 
                 dstem="${dataset}_${block_id}"
                 blockstems+=( "$dstem" )
                 if [ "$verbose" == "-v" ]; then
                     echo "$dstem"
+                fi
+
+                block_ids+=( "$block_id" )
+                if [ "$verbose" == "-v" ]; then
+                    echo "$block_id"
                 fi
 
                 i=$((i+1))
@@ -420,21 +480,30 @@ function set_blockstems {
 }
 
 
+# UNUSED?
 function set_blockstems_stardist {
+    # --
+    ## Generate an array 'datastems' and 'blockstems' from 'dataset'.
+    ## suffixed with _block<.....>
+    # --
+
     unset blockstems
     blockstems=()
+
     for block_id in `seq -f "%05g" 0 ${nblocks}`; do
         blockstems+=( ${dataset}_block$block_id )
     done
+
     datastems=( "${blockstems[@]}" )
+
 }
 
 
 function get_coords_upper {
-    # Get upper coordinate of the block.
-    # Adds the blocksize and margin to lower coordinate,
-    # and picks between that value and max extent of the dimension,
-    # whichever is lower
+    # --
+    ## Get upper coordinate of the block.
+    ## NOTE: adds blocksize and margin, bounded by the dimension's extent
+    # --
 
     local co=$1
     local margin=$2
@@ -451,10 +520,10 @@ function get_coords_upper {
 
 
 function get_coords_lower {
-    # Get lower coordinate of the block.
-    # Subtracts the margin,
-    # and picks between that value and 0,
-    # whichever is higher
+    # --
+    ## Get lower coordinate of the block.
+    ## NOTE: subtracts margin, with 0-bound
+    # --
 
     local co=$1
     local margin=$2
@@ -468,7 +537,10 @@ function get_coords_lower {
 
 
 function get_block_id {
-    # Get a block identifier from coordinates.
+    # --
+    ## Get a block identifier from coordinates.
+    ## NOTE: format xxxxx-XXXXX_yyyyy-YYYYY_zzzzz-ZZZZZ
+    # --
 
     local x=$1
     local X=$2
@@ -488,7 +560,11 @@ function get_block_id {
 }
 
 
+# UNUSED?
 function set_channelstems {
+    # --
+    ## Generate an array 'channelstems' from the 'dataset' and 'C' variables.
+    # --
 
     local dataset="$1"
 
@@ -503,11 +579,17 @@ function set_channelstems {
 
 
 function set_filepaths {
+    # --
+    ## Generate an array 'filepaths' with filepaths matching a pattern.
+    ## NOTE: '{f}' is matched as wildcard.
+    # --
 
     local filepat=$1
 
     unset filepaths
     filepaths=()
+
+    filepat=$( echo "${filepat}" | sed "s#{f}#\*#" )
 
     for fp in `ls $filepat`; do
         filepaths+=( "$fp" )
@@ -521,6 +603,9 @@ function set_filepaths {
 ###==========================================================================###
 
 function check_dims {
+    # --
+    ## Check if the variable is set and is a number.
+    # --
 
     re='^[0-9]+$'
     if [[ -z $2 ]] ; then
@@ -544,8 +629,6 @@ function check_dims {
 #         tr -d ,`
 #
 # }
-
-
 # function get_reversed_sentence {
 #
 #     echo "${1}" | awk '{ for (i=NF; i>1; i--) printf("%s ",$i); print $1; }'
@@ -554,6 +637,10 @@ function check_dims {
 
 
 function set_images_in {
+    # --
+    ## Generate an array variable with paths to a set of h5-datasets.
+    ## TODO: make the regex an argument/variable and merge with 'set_images_in_stardist'
+    # --
 
     local filestem="${1}"
     local ids="${2}"
@@ -572,11 +659,18 @@ function set_images_in {
 
 }
 
-# TODO: make the regex an argument
+
+# UNUSED?
 function set_images_in_stardist {
+    # --
+    ## Generate an array variable with paths to a set of h5-datasets.
+    ## TODO: make the regex an argument/variable and merge with 'set_images_in'
+    # --
+
     local filestem="${1}"
     local ids="${2}"
     local verbose="${3}"
+
     images_in=()
     for fname in `ls ${filestem}_block?????.h5`; do
         images_in+=( ${fname}/$ids )
@@ -588,21 +682,35 @@ function set_images_in_stardist {
         done
     fi
 }
+
+
 function find_missing_datastems {
+    # --
+    ## Find failed block-processing jobs by checking for generated files.
+    # --
+
     local datadir=$1
     local postfix=$2
     local ext=$3
+
     unset missing
     declare -a missing
+
     for datastem in "${datastems[@]}"; do
         [ -f "$datadir$datastem.$ext" ] ||
             { missing+=( "$datastem" ); echo $datastem ; }
     done
+
     datastems=( "${missing[@]}" )
 }
 
 
+#UNUSED?
 function set_channels_in {
+    # --
+    ## Generate an array with filenames for channel-separated Imaris files.
+    ## TODO: generalize suffix/extension?
+    # --
 
     local filestem="${1}"
 
@@ -615,6 +723,10 @@ function set_channels_in {
 
 
 function gather_maxlabels {
+    # --
+    ## Write a text file with the maximal label id for each h5 LabelImage.
+    ## NOTE: 'maxlabel' attribute has to be set on the datasets.
+    # --
 
     local maxlabelfile="${1}"
 
@@ -628,6 +740,9 @@ function gather_maxlabels {
 
 
 function set_zipquads {
+    # --
+    ## Generate a array of zipquad linear indices.
+    # --
 
     local start_x="${1}"
     local start_y="${2}"
@@ -648,6 +763,9 @@ function set_zipquads {
 
 
 function set_seamnumbers {
+    # --
+    ## Set the indices of the ziplines tackled in a specific zipping job.
+    # --
 
     local axis="${1}"
     local TASK_ID="${2}"
@@ -657,7 +775,7 @@ function set_seamnumbers {
     local nseams_y="${6}"
 
     if [ "${axis}" == "0" ]
-    then
+    then  # zipquads
         local idx=$((TASK_ID - 1))
         set_zipquads "${start_x}" "${start_y}" 2 2 "${nseams_x}" "${nseams_y}"
         local seamnumber="${zipquads[idx]}"
@@ -665,10 +783,10 @@ function set_seamnumbers {
     	local seam_y=$((seamnumber % nseams_y))
         seamnumbers="-1 ${seam_y} ${seam_x}"
     elif [ "${axis}" == "1" ]
-    then
+    then  # y-ziplines
         seamnumbers="-1 $((TASK_ID - 1)) -1"
     elif [ "${axis}" == "2" ]
-    then
+    then  # x-ziplines
         seamnumbers="-1 -1 $((TASK_ID - 1))"
     else
         seamnumbers="-1 -1 -1"
@@ -679,6 +797,11 @@ function set_seamnumbers {
 
 
 function set_idss {
+    # --
+    ## Generate an array with the mergeblock volumes.
+    ## (as present in bash variables parsed from the yaml parameter file).
+    ## (FIXME: find a safer way to implement this)
+    # --
 
     local pattern=$1
     local sep=$2
@@ -689,14 +812,17 @@ function set_idss {
 }
 
 
+# UNUSED?
 function mergeblocks_outputpath {
+    # --
+    ## Set a target path for block merging; copy Imaris ref file to output path.
+    # --
 
     local format=$1
     local ids=$2
 
     if [ "${format}" == "ims" ]
     then
-        # ng_CROP1nucl/dapi_mask_nuclei_.ims
         out_path="${datadir}/${dataset}_${ids////-}.ims"
         cp ${datadir}/${dataset}${dataset__ims_ref_postfix}.ims ${out_path}
     elif [ "${format}" == "h5" ]
@@ -709,8 +835,11 @@ function mergeblocks_outputpath {
 }
 
 
+# UNUSED?
 function get_blockstem_index {
-    # Locate a block identifier in an array and return it's index.
+    # --
+    ## Locate a block identifier in an array and return it's index.
+    # --
 
     local blockstem=$1
 
@@ -728,31 +857,38 @@ function get_blockstem_index {
 ###==========================================================================###
 
 function submit {
+    # --
+    ## Submit script to the job scheduler.
+    # --
 
     local scriptfile="${1}"
     local dep_jid="${2}"
 
     case "${compute_env}" in
         'SGE')
+            # dependency and array specifiers
             [[ -z $dep_jid ]] && dep='' || dep="-hold_jid $dep_jid"
             [[ -z $array ]] && arrayspec='' || arrayspec="-t $range"
+
             if [ "$dep_jid" == 'h' ]
-            then
+            then  # dry run: print command
                 echo "not submitting $scriptfile"
                 echo "qsub -cwd $arrayspec $dep $scriptfile"
-            else
+            else  # submit job and save job_id in 'jid' variable
                 jid=$( qsub -cwd $arrayspec $dep $scriptfile )
                 jid=`echo $jid | awk 'match($0,/[0-9]+/){print substr($0, RSTART, RLENGTH)}'`
                 echo "submitted $scriptfile as ${jid} with ${dep}"
             fi
             ;;
         'SLURM')
+            # dependency specifier
             [[ -z $dep_jid ]] && dep='' || dep="--dependency=afterok:$dep_jid"
+
             if [ "$dep_jid" == 'h' ]
-            then
+            then  # dry run: print command
                 echo "not submitting $scriptfile"
                 echo "sbatch --parsable $dep $scriptfile"
-            else
+            else  # submit job and save job_id in 'jid' variable
                 jid=$( sbatch --parsable $dep $scriptfile )
                 echo "submitted $scriptfile as ${jid} with ${dep}"
             fi
@@ -763,7 +899,9 @@ function submit {
 
 
 function bash_directives {
-    # Generate bash directives for submission script.
+    # --
+    ## Generate bash directives for submission script.
+    # --
 
     echo '#!/usr/bin/env bash'
     # echo 'set -ux'
@@ -773,10 +911,13 @@ function bash_directives {
 
 
 function sbatch_directives {
-    # Generate sbatch directives for submission script.
+    # --
+    ## Generate sbatch directives for submission script.
+    # --
 
     expand_submit_pars "$@"
 
+    # Slurm directives.
     echo "#SBATCH --job-name=$jobname"
     echo "#SBATCH --partition=$partition"
     [[ "$partition" == 'gpu' ]] &&
@@ -793,14 +934,22 @@ function sbatch_directives {
     echo "#SBATCH --error=$error"
     echo ''
 
+    # Set the array job TASK_ID (1-based) and idx for python (0-based).
+    echo TASK_ID="\${SLURM_ARRAY_TASK_ID}"
+    echo idx="\$((TASK_ID - 1))"
+    echo ''
+
 }
 
 
 function pbs_directives {
-    # Generate pbs directives for submission script.
+    # --
+    ## Generate pbs directives for submission script.
+    # --
 
     expand_submit_pars "$@"
 
+    # SGE directives.
     echo "#PBS -N EM_$jobname"
     echo "#PBS -l mem=$mem"
     echo "#PBS -l walltime=$wtime"
@@ -809,19 +958,28 @@ function pbs_directives {
     echo "#PBS -V"
     echo ''
 
+    # Set the array job TASK_ID (1-based) and idx for python (0-based).
+    echo TASK_ID="\${SGE_TASK_ID}"
+    echo idx="\$((TASK_ID - 1))"
+    echo ''
+
 }
 
 
 function conda_cmds {
-    # Generate conda directives for submission script.
+    # --
+    ## Generate conda directives for submission script.
+    # --
+
+    local action=$1
 
     eval conda_env="\$${stage}__${step}__submit__conda_env"
     [[ -z "${conda_env}" ]] && conda_env=${submit_defaults__submit__conda_env}
-
     if [ ! -z $conda_env ]
     then
-        echo source "${CONDA_SH}"
-        echo conda activate "${conda_env}"
+        [[ "${action}" == "activate" ]] && echo source "${CONDA_SH}"
+        [[ "${action}" == "activate" ]] && echo conda "${action}" "${conda_env}"
+        [[ "${action}" == "deactivate" ]] && echo conda "${action}"
         echo ''
     fi
 
@@ -829,157 +987,82 @@ function conda_cmds {
 
 
 function base_cmds {
-    # Generate basic dataset directives.
+    # --
+    ## Generate basic dataset directives.
+    # --
 
-    case "${compute_env}" in
-        'SGE')
-            echo TASK_ID="\${SGE_TASK_ID}"
-            ;;
-        'SLURM')
-            echo TASK_ID="\${SLURM_ARRAY_TASK_ID}"
-            ;;
-    esac
-    echo ''
-    echo idx="\$((TASK_ID - 1))"
-    echo ''
-
-    # FIXME: these are overwritten by load_parameters "${dataset}": handle or remove
+    # Load the bash functions, dataset and parameters on the compute node.
     echo ''
     echo source "${STAPL3D}/pipelines/functions.sh"
     echo load_dataset "${projectdir}" "${dataset}"
     echo load_parameters "${dataset}"
     echo ''
 
-    # echo dataset="${dataset}"
-    # echo projectdir="${projectdir}"
-    # echo datadir="${datadir}"
-    # echo stackdir="${stackdir}"
-    # echo channeldir="${channeldir}"
-    # echo blockdir="${blockdir}"
-    # echo profdir="${profdir}"
-    # echo featdir="${featdir}"
-    # echo jobdir="${jobdir}"
-    # echo ''
-
-    if [ "$array" == 'channel_plane' ]
-    then
-        echo ch_idx="\$((idx/Z))"
-        echo pl_idx="\$((idx%Z))"
-    #     echo channelstem="\${channeldir}/\${channelstems[ch_idx]}"
-    # else
-    #     echo channelstem="\${channeldir}/\${channelstems[idx]}"
-    fi
-
-    # echo filestem="\${datadir}/\${dataset}"
-    # echo shading_stem="\${filestem}${shading__params__postfix}"
-    # echo stitching_stem="\${shading_stem}${stitching__params__postfix}"
-    # # echo biasfield_stem="\${stitching_stem}${biasfield__params__postfix}"
-    # echo biasfield_stem="\${filestem}"
-    # echo block_id="\${block_ids[idx]}"
-    # #echo blockstem="\${blockdir}/\${dataset_preproc}_\${block_id}"
-    # echo blockstem="\${blockdir}/\${dataset}_\${block_id}"
+    # # Special case for dual-mode parallelization (shading correction).
+    # if [ "$array" == 'channel_plane' ]
+    # then
+    #     echo ch_idx="\$((idx/Z))"
+    #     echo pl_idx="\$((idx%Z))"
+    # fi
 
 }
 
 
-function no_parallelization {
-    # Generate directives for processing without parallelization.
+function parallelization_cmds {
+    # --
+    ## Generate directives for processing with specific parallelization modes.
+    # --
 
-    echo ''
+    local array_mode=$1
 
-}
-
-
-function stack_parallelization {
-    # Generate directives for parallel stacks.
-
-    echo ''
-
-}
-
-
-function channel_plane_parallelization {
-    # Generate directives for parallel channels.
-
-    echo ''
+    case "$array_mode" in
+        'idss')
+            idss_parallelization
+            ;;
+        'stardistblock')
+            stardistblock_parallelization
+            ;;
+        *)
+            echo ''
+            ;;
+    esac
 
 }
-
-
-function channel_parallelization {
-    # Generate directives for parallel channels.
-
-    echo ''
-
-}
-
-
-function block_parallelization {
-    # Generate directives for parallel blocks.
-
-    echo ''
-
-}
-
-
-function zipline_parallelization {
-
-    echo ''
-
-}
-
-
-function zipquad_parallelization {
-
-    echo ''
-
-}
-
-
 function idss_parallelization {
-    # Generate directives for parallel channels.
+    # --
+    ## Generate directives for parallel volumes.
+    # --
 
-    echo "set_idss ${stage}__ids..__ids= ="
+    # echo "set_idss ${stage}__ids..__ids= ="
     echo ''
 
 }
-
-
+# PROBABLY SUPERFLUOUS NOW
 function stardistblock_parallelization {
-    # Generate directives for parallel blocks.
-    echo ''
-    echo blockd_id=\`printf %05d \$idx\`
-    echo blockdir_stardist="${blockdir}_stardist"
-    echo dataset_preproc="\${dataset}"
-    echo blockstem_stardist="\${blockdir_stardist}/\${dataset_preproc}_\${block_id}"
-    echo ''
-}
-
-
-function _parallelization {
+    # --
+    ## Generate directives for parallel blocks (stardist blocking method).
+    # --
 
     echo ''
-
+    # echo blockd_id=\`printf %05d \$idx\`
+    # echo blockdir_stardist="${blockdir}_stardist"
+    # echo dataset_preproc="\${dataset}"
+    # echo blockstem_stardist="\${blockdir_stardist}/\${dataset_preproc}_\${block_id}"
+    # echo ''
 }
 
 
 function finishing_directives {
-    # Generate directives for parallel channels.
+    # --
+    ## Generate directives for finishing up the job.
+    # --
 
-    eval conda_env="\$${stage}__${step}__submit__conda_env"
-    [[ -z "${conda_env}" ]] && conda_env=${submit_defaults__submit__conda_env}
-    if [ ! -z $conda_env ]
-    then
-        echo ''
-        echo conda deactivate
-        echo ''
-    fi
-
+    # Write job accounting information.
     # echo "sacct --format=JobID,Timelimit,elapsed,ReqMem,MaxRss,AllocCPUs,AveVMSize,MaxVMSize,CPUTime,ExitCode -j \${SLURM_JOB_ID} > ${subfile}.a\${SLURM_JOB_ID}"  # TODO $PBS_JOBID
-    # echo ''
+
+    echo ''
 
 }
-
 
 
 ###==========================================================================###
@@ -987,10 +1070,14 @@ function finishing_directives {
 ###==========================================================================###
 
 function set_submit_pars {
+    # --
+    ## Create submit_pars array holding job specification.
+    # --
 
     local stage=$1
     local step=$2
 
+    # Create basic array.
     unset submit_pars
     submit_pars=()
     add_submit_par $stage $step 'array' 'no'
@@ -999,6 +1086,8 @@ function set_submit_pars {
     add_submit_par $stage $step 'mem' '10G'
     add_submit_par $stage $step 'wtime' '01:00:00'
 
+    # Generate array job specifier.
+    #    Switch between parallelization modes.
     case "${submit_pars[0]}" in
         'no')
             array_stop="1"
@@ -1012,9 +1101,9 @@ function set_submit_pars {
         'channel')
             array_stop="$C"
             ;;
-        'channel_plane')
-            array_stop="$((C*Z))"
-            ;;
+        # 'channel_plane')
+        #     array_stop="$((C*Z))"
+        #     ;;
         'block')
             array_stop="${#blockstems[@]}"
             ;;
@@ -1034,19 +1123,21 @@ function set_submit_pars {
             array_stop="${#zipquads[@]}"
             ;;
         'idss')
-            set_idss "${stage}__params__ids..__ids=" '='
-            array_stop="${#idss[@]}"
+            # FIXME: # invalid for new pars -> needs to be set as stage:step:submit:stop in parameter file for now
+            #set_idss "${stage}__params__ids..__ids=" '='
+            #array_stop="${#idss[@]}"
             ;;
     esac
 
+    #    Build the specifier 'array_range' variable.
     unset array_range
     build_array_range $stage $step 'start' '1' ''
     build_array_range $stage $step 'stop'  '1' '-'
     build_array_range $stage $step 'step'  '1' ':'
     build_array_range $stage $step 'simul' '0' '%'
-
     submit_pars+=( $array_range )
 
+    # Add cpu/gpu specifications.
     add_submit_par $stage $step 'partition' 'cpu'
     add_submit_par $stage $step 'gpus_per_node' '1'
 
@@ -1054,6 +1145,9 @@ function set_submit_pars {
 
 
 function add_submit_par {
+    # --
+    ## Add submit parameter to array (default or from shell variable if set).
+    # --
 
     local stage="${1}"
     local step="${2}"
@@ -1070,6 +1164,9 @@ function add_submit_par {
 
 
 function build_array_range {
+    # --
+    ## Build a SLURM array job specifier (start-stop:step%simul).
+    # --
 
     local stage="${1}"
     local step="${2}"
@@ -1077,10 +1174,10 @@ function build_array_range {
     local default="${4}"
     local divider="${5}"
 
-    eval var=\$array_${varname}
-    [[ -z "${var}" ]] && eval var=\$${stage}__${step}__submit__${varname}
-    [[ -z "${var}" ]] && eval var=\$submit_defaults__submit__${varname}
-    [[ -z "${var}" ]] && var="${default}"
+    eval var=\$array_${varname}  # set in set_submit_pars
+    [[ -z "${var}" ]] && eval var=\$${stage}__${step}__submit__${varname}  # specified in parameter file stage:step entry
+    [[ -z "${var}" ]] && eval var=\$submit_defaults__submit__${varname}  # specified in parameter file default entry
+    [[ -z "${var}" ]] && var="${default}"  # default
 
     [[ "${var}" != "0" ]] && array_range+="${divider}${var}"
 
@@ -1088,6 +1185,9 @@ function build_array_range {
 
 
 function expand_submit_pars {
+    # --
+    ## Expand the cells from the submit_pars array to variables.
+    # --
 
     [[ -z "$1" ]] && export array='' || export array=$1
     export nodes=$2
@@ -1102,68 +1202,131 @@ function expand_submit_pars {
 
 
 function generate_script {
+    #---
+    ## Create a bash script for job submission.
+    ## PARAMETERS:
+    ##   stage:
+    ##   step:
+    ##   OPT: submit_pars: array nodes tasks mem wtime array_range partition gpus_per_node
+    ## SHELL VARIABLES required:
+    ##   dataset_alias
+    ##   datadir
+    ##   compute_env
+    ## SHELL VARIABLES set:
+    ##   jobname
+    ##   subfile
+    ##   submit_pars
+    #---
 
     local stage=$1
     local step=$2
-    shift 2
+    [[ "${3}" == "LOCAL" ]] && { local compute_env=$3 ; shift 3 ; } || shift 2
 
+    # Generate jobname and script filepath.
     jobname="go_${dataset__alias}_${stage}_${step}"
     subfile="${datadir}/${jobname}.sh"
 
+    # Set the submission parameters.
+    [[ "${stage}" == ziplines* ]] && stage='ziplines'  # Reduce zipping stage.
+    [[ "${stage}" == zipquads* ]] && stage='zipquads'  # Reduce zipping stage.
+    # Initialize from arguments or set from variables / defaults.
     local submit_pars=( "$@" )
-    [[ "${stage}" == ziplines* ]] && stage='ziplines'
-    [[ "${stage}" == zipquads* ]] && stage='zipquads'
     [[ ${#submit_pars[@]} -eq 0 ]] && set_submit_pars ${stage} ${step}
 
-    bash_directives > "${subfile}"
+    # Write submission script.
+    bash_directives > "${subfile}" # shebang
 
     case "${compute_env}" in
         'SGE')
             pbs_directives "${submit_pars[@]}" >> "${subfile}"
+            base_cmds >> "${subfile}"  # dataset initialization
+            parallelization_cmds "${submit_pars[0]}" >> "${subfile}"  # TODO: test
             ;;
         'SLURM')
             sbatch_directives "${submit_pars[@]}" >> "${subfile}"
+            base_cmds >> "${subfile}"  # dataset initialization
+            parallelization_cmds "${submit_pars[0]}" >> "${subfile}"  # TODO: test
             ;;
-    esac
+    esac  # job scheduler
 
-    base_cmds >> "${subfile}"
+    conda_cmds "activate" >> "${subfile}"  # activate conda environment
 
-    eval "${submit_pars[0]}"_parallelization >> "${subfile}"
+    eval get_cmd_${stage}_${step} >> "${subfile}"  # processing function
 
-    conda_cmds >> "${subfile}"
-
-    eval get_cmd_${stage}_${step} >> "${subfile}"
+    conda_cmds "deactivate" >> "${subfile}"  # deactivate conda environment
 
     finishing_directives >> "${subfile}"
 
-    echo "${subfile}"
+    echo "${subfile}"  # return filepath
 
 }
 
 
 ###==========================================================================###
 ### functions to generate bash commands
+# function get_py_<module>_<step> {
+#     get_py_header
+#     get_py_<module>
+#     echo "deshader.${step}(planes=[idx])"
+# }
+# function get_cmd_<module>_<step> { get_cmd "\${idx}" ; }
+
 ###==========================================================================###
 
 ## TODO: sensible submit defaults for each step => autoselect of parallelization in blocks/channels/stacks/planes etc
 # in add_submit_par: if ${stage}__${step}__submit__${varname} not specified ==> default
 # now goes to global default, we want a dictionary of specifics for steps here
 
+
 function get_cmd {
     write_pyfile
     echo_pyfile "$@"
 }
+
 
 function write_pyfile {
     pyfile="${datadir}/${jobname}.py"
     eval get_py_${stage}_${step} > "${pyfile}"
 }
 
+
 function echo_pyfile {
     echo python "${pyfile}" "${image_in}" "${parfile}" "$@"
 }
 
+
 function get_py_header {
+    # --
+    ## Print initial common stanza of python script.
+    ##
+    ## It defines the parameters:
+    ##   image_in: inputfile
+    ##   parameter_file: the yaml file
+    ##   TODO?: prefix:
+    ##   idx: index for parallelization
+    ##   idx2: aux index for dual parallelization (TODO: remove to simplify)
+    ##
+        # image_in : string
+        #     Path to dataset.
+        # parameter_file : string
+        #     Path to yaml parameter file.
+        # module_id : string
+        #     Name of the STAPL3D module.
+        # step_id: string
+        #     Identifier of the yaml parameterfile entry.
+        # directory : string
+        #     Name of output subdirectory.
+        # prefix : string
+        #     Output prefix.
+        # datadir : string
+        #     Override for datadir [when image_in used to define alternate input].
+        # max_workers : int
+        #     Maximal number of cores to use for processing.
+        # verbosity : int
+        #     Verbosity level.
+    ##
+    # --
+
     echo '#!/usr/bin/env python'
     echo ''
     echo 'import sys'
@@ -1171,8 +1334,9 @@ function get_py_header {
     echo 'parameter_file = sys.argv[2]'
     echo 'if len(sys.argv) > 3:'
     echo '    idx = int(sys.argv[3])'
-    echo 'if len(sys.argv) > 4:'
-    echo '    idx2 = int(sys.argv[4])'
+    # echo 'if len(sys.argv) > 4:'
+    # echo '    idx2 = int(sys.argv[4])'
+
 }
 
 
@@ -1184,10 +1348,12 @@ function get_py_shading {
 function get_py_shading_estimate {
     get_py_header
     get_py_shading
-    echo "deshader.${step}(channels=[idx], planes=[idx2])"
+    # echo "deshader.${step}(channels=[idx], planes=[idx2])"
+    echo "deshader.${step}(planes=[idx])"
 }
 # FIXME: too much io overhead for plane*channel paralellization
-function get_cmd_shading_estimate { get_cmd "\${ch_idx}" "\${pl_idx}" ; }
+# function get_cmd_shading_estimate { get_cmd "\${ch_idx}" "\${pl_idx}" ; }
+function get_cmd_shading_estimate { get_cmd "\${idx}" ; }
 function get_py_shading_postprocess {
     get_py_header
     get_py_shading
@@ -1360,16 +1526,6 @@ function get_cmd_ims_aggregate2 {
 ### <<< TODO
 
 
-# function get_cmd_block_segmentation {
-#     jobname="go_${dataset__alias}_blocks_split"
-#     get_cmd_blocks_split
-#     jobname="go_${dataset__alias}_membrane_enhancement"
-#     get_cmd_membrane_enhancement
-#     jobname="go_${dataset__alias}_segmentation"
-#     get_cmd_segmentation
-# }
-
-
 function get_py_splitter {
     echo "from stapl3d import blocks"
     echo "splitt3r = blocks.Splitt3r(image_in, parameter_file)"
@@ -1392,6 +1548,7 @@ function get_py_membrane_enhancement_estimate {
     echo "enhanc3r.${step}(blocks=[idx])"
 }
 function get_cmd_membrane_enhancement_estimate { get_cmd "\${idx}" ; }
+
 
 
 function get_py_segmentation {
@@ -1581,34 +1738,31 @@ function get_cmd_gather {
 }
 
 
-function get_py_subsegment {
 
-    echo '#!/usr/bin/env python'
-    echo ''
-    echo 'import sys'
-    echo 'image_in = sys.argv[1]'
-    echo 'parameter_file = sys.argv[2]'
-    echo 'idx = int(sys.argv[3])'
-    echo ''
-    echo 'from stapl3d.segmentation import segment'
-    echo "segment.subsegment(
-        image_in,
-        parameter_file,
-        blocks=[idx],
-        )"
 
+function get_py_subsegmentation {
+    echo "from stapl3d.segmentation import segment"
+    echo "subsegment3r = segment.Subsegment3r(image_in, parameter_file)"
 }
-function get_cmd_subsegment {
-
-    pyfile="${datadir}/${jobname}.py"
-    eval get_py_${stage} > "$pyfile"
-
-    echo python "${pyfile}" \
-        "\${biasfield_stem}.ims" \
-        "${parfile}" \
-        "\${idx}"
-
+function get_py_subsegmentation_estimate {
+    get_py_header
+    get_py_subsegmentation
+    echo "subsegment3r.${step}(blocks=[idx])"
 }
+function get_cmd_subsegmentation_estimate { get_cmd "\${idx}" ; }
+
+
+function get_py_merger {
+    echo "from stapl3d import blocks"
+    echo "merg3r = blocks.Merg3r(image_in, parameter_file)"
+}
+function get_py_merger_merge {
+    get_py_header
+    get_py_merger
+    echo "merg3r.${step}(volumes=[idx])"
+}
+function get_cmd_merger_merge { get_cmd "\${idx}" ; }
+
 
 
 function get_py_mergeblocks {
@@ -1701,7 +1855,7 @@ function get_cmd_features_postproc {
 
 function get_py_registration {
     echo ''
-    echo "from stapl3d.segmentation import stardist_nuclei"
+    echo "from stapl3d.segmentation import stardist_nuclei"  # FIXME!!!
     echo "registrat3r = registration.Registrat3r(image_in, parameter_file)"
 }
 function get_py_registration_estimate {
