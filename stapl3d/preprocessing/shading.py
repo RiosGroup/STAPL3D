@@ -151,11 +151,11 @@ class Deshad3r(Stapl3r):
                 },
             }
 
-        self._parameter_table = {
-            'noise_threshold': 'Noise threshold',
-            'metric': 'Metric',
-            'quantile_threshold': 'Quantile threshold',
-            'polynomial_order': 'Polynomial order',
+        self._parameter_table = {  # FIXME: causes error in report generation
+#            'noise_threshold': 'Noise threshold',
+#            'metric': 'Metric',
+#            'quantile_threshold': 'Quantile threshold',
+#            'polynomial_order': 'Polynomial order',
             }
 
         default_attr = {
@@ -252,7 +252,8 @@ class Deshad3r(Stapl3r):
         outputs = self._prep_paths(self.outputs, reps={'c': channel, 'z': plane})
 
         # Compute median values per plane for X and Y concatenation.
-        dstack = read_tiled_plane(inputs['data'], channel, plane)
+        fp = inputs['data']    # for testing stacks in files '{f}.czi'  #
+        dstack = read_tiled_plane(fp, channel, plane)
         out = {}
         for axis in [0, 1]:
             dstacked = np.concatenate(dstack, axis=0)
@@ -371,8 +372,8 @@ class Deshad3r(Stapl3r):
     def _apply_stack(self, stack=0):
         """Apply zstack shading correction for a channel."""
 
-        inputs = self._prep_paths(self.inputs)
-        outputs = self._prep_paths(self.outputs)
+        inputs = self.inputs
+        outputs = self.outputs
 
         iminfo = get_image_info(self.image_in)
         out = create_output(None, iminfo['zstack_shape'], iminfo['dtype'])
@@ -595,14 +596,24 @@ def read_tiled_plane(image_in, channel, plane):
 
     if image_in.endswith('.czi'):
 
-        # order of subblock_directory: CZM
-        czi = czifile.CziFile(image_in)
-        n_planes = czi.shape[czi.axes.index('Z')]
-        n_channels = czi.shape[czi.axes.index('C')]
-        sbd_channel = [sbd for sbd in czi.subblock_directory[channel::n_channels]]
+        if '{f}' in image_in:
+            import re
+            mat = '*'
+            pat = r"{[^{}]+}"
+            foo = re.sub(pat, mat, image_in)
+            fps = sorted(glob(os.path.abspath(foo)))
+        else:
+            fps = [image_in]
 
-        for sbd in sbd_channel[plane::n_planes]:
-            dstack.append(np.squeeze(sbd.data_segment().data()))
+        for fp in fps:
+            # order of subblock_directory: CZM
+            czi = czifile.CziFile(fp)
+            n_planes = czi.shape[czi.axes.index('Z')]
+            n_channels = czi.shape[czi.axes.index('C')]
+            sbd_channel = [sbd for sbd in czi.subblock_directory[channel::n_channels]]
+
+            for sbd in sbd_channel[plane::n_planes]:
+                dstack.append(np.squeeze(sbd.data_segment().data()))
 
     elif image_in.endswith('.lif'):
 
@@ -710,6 +721,15 @@ def get_image_info(image_in):
 
     if image_in.endswith('.czi'):
 
+        if '{f}' in image_in:
+            import re
+            mat = '*'
+            pat = r"{[^{}]+}"
+            foo = re.sub(pat, mat, image_in)
+            fps = sorted(glob(os.path.abspath(foo)))
+            image_in = fps[0]
+            iminfo['nstacks'] = len(fps)
+
         czi = czifile.CziFile(image_in)
 
         iminfo['dtype'] = czi.dtype
@@ -720,7 +740,8 @@ def get_image_info(image_in):
         iminfo['ncols'] = czi.shape[czi.axes.index('Y')]
         iminfo['nrows'] = czi.shape[czi.axes.index('X')]
         n = iminfo['nchannels'] * iminfo['ntimepoints'] * iminfo['nplanes']
-        iminfo['nstacks'] = len(czi.filtered_subblock_directory) // n
+        if not '{f}' in image_in:
+            iminfo['nstacks'] = len(czi.filtered_subblock_directory) // n
 
         zstack_shape = list(czi.filtered_subblock_directory[0].shape)
         zstack_shape[czi.axes.index('C')] = iminfo['nchannels']
