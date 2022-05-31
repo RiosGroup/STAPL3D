@@ -772,11 +772,17 @@ def get_image_info(image_in):
         # TODO: take group of h5 channels as input
         from stapl3d import get_imageprops
         props = get_imageprops(image_in)
+
+        def dimfinder(props, al):
+            return props['shape'][props['axlab'].index(al)]  if al in props['axlab'] else 1
+
         iminfo = {
-            'nchannels': props['shape'][props['axlab'].index('c')]  if 'c' in props['axlab'] else 1,
-            'ntimepoints': props['shape'][props['axlab'].index('t')] if 't' in props['axlab'] else 1,
-            'nplanes': props['shape'][props['axlab'].index('z')] if 'z' in props['axlab'] else 1,
-            'nstacks': 1,
+            'nchannels': dimfinder(props, 'c'),
+            'ntimepoints': dimfinder(props, 't'),
+            'nplanes': dimfinder(props, 'z'),
+            'ncols': dimfinder(props, 'y'),
+            'nrows': dimfinder(props, 'x'),
+            'nstacks': dimfinder(props, 'm'),
             }
 
     else:
