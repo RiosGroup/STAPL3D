@@ -1129,12 +1129,17 @@ function set_submit_pars {
             ;;
     esac
 
-    #    Build the specifier 'array_range' variable.
     unset array_range
-    build_array_range $stage $step 'start' '1' ''
-    build_array_range $stage $step 'stop'  '1' '-'
-    build_array_range $stage $step 'step'  '1' ':'
-    build_array_range $stage $step 'simul' '0' '%'
+    # Check if array_range is specified for $stage_$step
+    eval array_range=\$${stage}__${step}__submit__array_range
+    if [ -z "${array_range}" ]
+    then
+        # Build the specifier 'array_range' variable.
+        build_array_range $stage $step 'start' '1' ''
+        build_array_range $stage $step 'stop'  '1' '-'
+        build_array_range $stage $step 'step'  '1' ':'
+        build_array_range $stage $step 'simul' '0' '%'
+    fi
     submit_pars+=( $array_range )
 
     # Add cpu/gpu specifications.
