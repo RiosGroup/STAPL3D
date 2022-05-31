@@ -151,9 +151,9 @@ class Stitch3r(Stapl3r):
     Examples
     --------
     >>> from stapl3d.preprocessing import stitching
-    >>> stitcher = stitching.Stitcher(image_in, parameter_file, prefix=dataset)
-    >>> stitcher.FIJI = '/Applications/Fiji.app/Contents/MacOS/ImageJ-macosx'
-    >>> stitcher.run()
+    >>> stitch3r = stitching.Stitch3r(image_in, parameter_file, prefix=dataset)
+    >>> stitch3r.FIJI = '/Applications/Fiji.app/Contents/MacOS/ImageJ-macosx'
+    >>> stitch3r.run()
 
     """
 
