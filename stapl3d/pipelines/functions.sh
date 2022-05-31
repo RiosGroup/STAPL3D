@@ -128,21 +128,6 @@ function load_parameters {
         echo ""
     fi
 
-    # UNUSED?
-    # TODO: this naming has become more flexible
-    if ! [ -z "$C" ]
-    then
-        set_channelstems "${dataset_preproc}"
-        echo ""
-        echo " ### parallelization: ${#channelstems[@]} channels"
-        echo ""
-    else
-        echo ""
-        echo " ### WARNING: could not determine number of channels"
-        echo " ### please check your configuration"
-        echo ""
-    fi
-
 }
 
 
@@ -556,24 +541,6 @@ function get_block_id {
     local block_id=${xrange}_${yrange}_${zrange}
 
     echo "$block_id"
-
-}
-
-
-# UNUSED?
-function set_channelstems {
-    # --
-    ## Generate an array 'channelstems' from the 'dataset' and 'C' variables.
-    # --
-
-    local dataset="$1"
-
-    unset channelstems
-    channelstems=()
-
-    for c in `seq 0 $(( C - 1 ))`; do
-        channelstems+=( "${dataset}_ch`printf %02d $c`" )
-    done
 
 }
 
