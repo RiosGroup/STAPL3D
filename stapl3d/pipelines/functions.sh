@@ -89,7 +89,7 @@ function load_parameters {
         echo ""
         echo " ### parameters imported from parameter file:"
         echo ""
-        parse_yaml "${parfile}"
+        echo `parse_yaml "${parfile}"` | tr ' ' '\n' | awk '{print "\t", $0}'
         echo "" ; }
 
     dataset_shading="${dataset}${shading__params__postfix}"
@@ -97,36 +97,19 @@ function load_parameters {
     dataset_biasfield="${dataset_stitching}${biasfield__params__postfix}"
     dataset_preproc="${dataset_biasfield}"
 
-    check_dims M "$M" || set_dims_tiled "${datadir}/${dataset}_dims_tiled.yml"
-    if ! [ -z "$M" ]
-    then
-        echo ""
-        echo " ### tiled dimensions are M * Z-tY-tX-C-T='${M} * ${Z} ${tY} ${tX} ${C} ${T}'"
-        echo " ### parallelization: ${M} Z-stacks"
-        echo ""
-    else
-        echo ""
-        echo " ### WARNING: could not determine tilescan dimensions"
-        echo " ### please check your configuration"
-        echo ""
-    fi
+    set_dims "${datadir}/${dataset}_dims.yml"
 
-    check_dims X "$X" || set_ZYXCT "${datadir}/${dataset}_dims_stitched.yml"
-    if ! [ -z "$X" ]
-    then
-        bs="${dataset__blocksize_xy}" && check_dims bs "$bs" || set_blocksize
-        bm="${dataset__blockmargin_xy}" && check_dims bm "$bm" || bm=64
-        set_blocks "${bs}" "${bm}"
+    set_blocks
+    [[ "${verbose}" == '-v' ]] && {
         echo ""
-        echo " ### stitched dimensions are ZYXCT='${Z} ${Y} ${X} ${C} ${T}'"
-        echo " ### parallelization: ${#blockstems[@]} blocks (${nx} x ${ny}) of blocksize ${bs} with margin ${bm}"
+        echo " ### Block parallelization:"
         echo ""
-    else
-        echo ""
-        echo " ### WARNING: could not determine stitched dimensions"
-        echo " ### please check your configuration"
-        echo ""
-    fi
+        printf "\t%-12s%-8s\n" "blocks: " "${nb}"
+        printf "\t%-12s%-8s\n" "dims: " "${dims[*]}"
+        printf "\t%-12s%-8s\n" "sizes: " "${blocksize[*]}"
+        printf "\t%-12s%-8s\n" "margins: " "${blockmargin[*]}"
+        printf "\t%-12s%-8s\n" "grid: " "${blockgrid[*]}"
+        echo "" ; }
 
 }
 
@@ -169,88 +152,53 @@ function parse_yaml {
 }
 
 
-function set_dims_tiled {
+function set_dims {
 
-    if ! [ -z "${dataset__M}" ]
-    then
-        # TODO: check all individually (at the end)
-        # [[ -z "${dataset__M}" ]] || M="${dataset__M}"
-        Z="${dataset__Z}"
-        Z="${dataset__Z}"
-        tY="${dataset__tY}"
-        tX="${dataset__tX}"
-        C="${dataset__C}"
-        T="${dataset__T}"
-        M="${dataset__M}"
-        elsize_z="${dataset__elsize_z}"
-        elsize_y="${dataset__elsize_y}"
-        elsize_x="${dataset__elsize_x}"
-    elif [ -f ${1} ]
-    then
-        eval $( parse_yaml "${1}" "" )
-    else
-        fpath="${datadir}/${dataset}.${dataset__file_format}"
-        [[ -f "${fpath}" ]] && get_tiled_dims "${fpath}" && get_elsizes "${fpath}"
-        write_tiled_to_yml "${1}"
-    fi
+    local vars=(Z Y X C T M tZ tY tX elsize_z elsize_y elsize_x)
+    local varname var
+    local im_M im_tZ im_tY im_tX im_Z im_Y im_X im_C im_T
+    local im_elsize_z im_elsize_y im_elsize_x
 
-}
-function set_ZYXCT {
+    echo " ### dataset dimensions"
 
-    if ! [ -z "${dataset__X}" ]
-    then
-        # TODO: check all individually (at the end)
-        # [[ -z "${dataset__X}" ]] || M="${dataset__X}"
-        Z="${dataset__Z}"
-        Y="${dataset__Y}"
-        X="${dataset__X}"
-        C="${dataset__C}"
-        T="${dataset__T}"
-    elif [ -f ${1} ]
-    then
-        eval $( parse_yaml "${1}" "" )
-    elif [ -f "${datadir}/${dataset}.ims" ]
-    then
-        set_ZYXCT_ims '-v' "${datadir}/${dataset}.ims"
-        write_ZYXCT_to_yml "${1}"
-    elif [ -f "${datadir}/${dataset_stitching}.ims" ]
-    then
-        set_ZYXCT_ims '-v' "${datadir}/${dataset_stitching}.ims"
-        write_ZYXCT_to_yml "${1}"
-    fi
+    eval `get_tiled_dims "${image_in}"`
+    eval `get_dims "${image_in}"`
+    eval `get_elsizes "${image_in}"`
+
+    for varname in "${vars[@]}"; do
+        eval var="\$dataset__${varname}"
+        if ! [ -z "${var}" ]
+        then  # already specified as environment variable (eg imported from parameterfile)
+            src="environment variable dataset__${varname}"
+        elif [ -f "${1}" ]
+        then  # import via previously written dims-yml
+            eval var=`cat "${1}" | grep "$varname: " | sed "s/$varname: //g"`
+            src="${1}"
+        else  # import via STAPL3D python functions
+            eval var="\$im_${varname}"
+            src="${image_in}"
+        fi
+        eval $varname="${var}" && printf "\t%-8s = %-20s loaded from %s \n" "$varname" "$var" "$src"
+    done
+
+    echo ""
+
+    [[ -f "${1}" ]] || write_dims_to_yml "${1}"
 
 }
 
 
-function write_tiled_to_yml {
+function write_dims_to_yml {
 
     local parfile="${1}"
+    local vars=(Z Y X C T M tZ tY tX elsize_z elsize_y elsize_x)
+    local varname var
 
-    echo "Z: ${Z}" > "${parfile}"
-    echo "tY: ${tY}" >> "${parfile}"
-    echo "tX: ${tX}" >> "${parfile}"
-    echo "C: ${C}" >> "${parfile}"
-    echo "T: ${T}" >> "${parfile}"
-    echo "M: ${M}" >> "${parfile}"
-    echo "elsize_z: ${elsize_z}" >> "${parfile}"
-    echo "elsize_y: ${elsize_y}" >> "${parfile}"
-    echo "elsize_x: ${elsize_x}" >> "${parfile}"
-
-    echo " ### written M-Z-tY-tX-C-T='${M} ${Z} ${tY} ${tX} ${C} ${T}' to ${parfile}"
-    echo " ### written elsize_zyx='${elsize_z} ${elsize_y} ${telsize_x}' to ${parfile}"
-
-}
-function write_ZYXCT_to_yml {
-
-    local parfile="${1}"
-
-    echo "Z: ${Z}" > "${parfile}"
-    echo "Y: ${Y}" >> "${parfile}"
-    echo "X: ${X}" >> "${parfile}"
-    echo "C: ${C}" >> "${parfile}"
-    echo "T: ${T}" >> "${parfile}"
-
-    echo " ### written Z-Y-X-C-T='${Z} ${Y} ${X} ${C} ${T}' to ${parfile}"
+    > "${parfile}"
+    for varname in "${vars[@]}"; do
+        eval var=\$$varname
+        echo "$varname: ${var}" >> "${parfile}"
+    done
 
 }
 
@@ -258,33 +206,36 @@ function write_ZYXCT_to_yml {
 function get_tiled_dims {
 
     local filepath="${1}"
+    local dims
 
     source "${CONDA_SH}"
     conda activate ${submit_defaults__submit__conda_env}
-    tiled_dims=`python -c "import os; from stapl3d.preprocessing import shading; iminfo = shading.get_image_info('${filepath}'); print('M={};C={};Z={};tY={};tX={};T={};'.format(int(iminfo['nstacks']), int(iminfo['nchannels']), int(iminfo['nplanes']), int(iminfo['ncols']), int(iminfo['nrows']), int(iminfo['ntimepoints'])));"`
-    eval $tiled_dims
+    dims=`python -c "import os; from stapl3d.preprocessing import shading; iminfo = shading.get_image_info('${filepath}'); print('im_M={};im_C={};im_tZ={};im_tY={};im_tX={};im_T={};'.format(int(iminfo['nstacks']), int(iminfo['nchannels']), int(iminfo['nplanes']), int(iminfo['ncols']), int(iminfo['nrows']), int(iminfo['ntimepoints'])));"`
     conda deactivate
+    echo $dims
 
 }
+function get_dims {
 
+    local filepath="${1}"
+    local dims
 
+    source "${CONDA_SH}"
+    conda activate ${submit_defaults__submit__conda_env}
+    dims=`python -c "import os; from stapl3d import Image; im = Image('${filepath}', permission='r'); im.load(); print(';'.join([f'im_{al.upper()}={sh}' for sh, al in zip(im.dims, im.axlab)]));"`
+    conda deactivate
+    echo $dims
+
+}
 function get_elsizes {
 
     local filepath="${1}"
 
     source "${CONDA_SH}"
     conda activate ${submit_defaults__submit__conda_env}
-    elsize_xyz=`python -c "import os; from stapl3d.preprocessing import shading; iminfo = shading.get_image_info('${filepath}'); print('elsize_x={};elsize_y={};elsize_z={}'.format(float(iminfo['elsize_zyxc'][2]), float(iminfo['elsize_zyxc'][1]), float(iminfo['elsize_zyxc'][0])));"`
-    eval $elsize_xyz
+    elsize_xyz=`python -c "import os; from stapl3d import Image; im = Image('${filepath}', permission='r'); im.load(); print('im_elsize_x={};im_elsize_y={};im_elsize_z={}'.format(*[im.elsize[im.axlab.index(al)] for al in 'xyz']));"`
     conda deactivate
-
-}
-
-
-function set_blocksize {
-
-    # TODO: determine from $Z
-    bs=640
+    echo $elsize_xyz
 
 }
 
@@ -346,34 +297,66 @@ function find_dim_from_h5 {
     echo "$line" | tr -d ' ' | tr -d , | tr -d '"'
 
 }
+function find_axlab_from_hdf5 {
+    # --
+    ## Extract dataset axis labels from an STAPL3D Image HDF5.
+    # --
+
+
+    local hdf5path="${*}"
+
+    local line=`h5ls -v ${hdf5path} | grep -A 2 "Attribute: DIMENSION_LABELS scalar" | tail -n 1 | grep "Data" | sed 's/ //g'`
+    echo "$line" | tr -d ' ' | tr -d , | tr -d '"' | tr -d 'Data:'
+
+}
+function find_dims_from_hdf5 {
+    # --
+    ## Extract dataset dimensions from an STAPL3D Image HDF5.
+    # --
+
+
+    local hdf5path="${*}"
+
+    echo `h5ls "${hdf5path}" | cut -d "{" -f2 | tr -d "," | tr -d '}'`
+
+}
 
 
 function set_blocks {
-    # --
-    ## Set the blockgrid and blockstems variables for the dataset.
-    ##
-    ## PARAMETERS:
-    ##   bs: blocksize Y/X
-    ##   bm: blockmargin Y/X
-    ##
-    ## SHELL VARIABLES required:
-    ##   Z/Y/X/C/T: dataset dimensions
-    ##   dataset_preproc
-    ##
-    ## SHELL VARIABLES set:
-    ##   nx: number of rows in blockgrid
-    ##   ny: number of columns in blockgrid
-    ##   nb: number of blocks
-    # --
 
-    local bs="${1}"
-    local bm="${2}"
-
-    blocksize="$Z $bs $bs $C $T"
-    blockmargin="0 $bm $bm 0 0"
-    set_blockdims $bs $X $Y
+    dims=(z y x t)  # FIXME/TODO: find what dims are in the dataset
+    set_blocksizes  # FIXME/TODO: defaults => full dataset ranges
+    set_blockdims
     set_blockstems "${dataset_preproc}"
 
+}
+function set_blocksizes {
+
+    unset blocksize
+    blocksize=()
+
+    unset blockmargin
+    blockmargin=()
+
+    unset blockgrid
+    blockgrid=()
+
+
+    # FIXME/TODO: defaults
+    for dim in ${dims[@]}; do
+        eval bs="\$blocks__blockinfo__blocksize__${dim}"
+        blocksize+=( $bs )
+        eval bm="\$blocks__blockinfo__blockmargin__${dim}"
+        blockmargin+=( $bm )
+        eval upper="\$${dim^}"
+        bg=`python -c "from math import ceil; print(int(ceil(${upper}/$bs)))"`
+        blockgrid+=( $bg )
+    done
+
+}
+function multiply_array {
+    local IFS='*'
+    echo "$(( $* ))"
 }
 function set_blockdims {
     # --
@@ -381,48 +364,28 @@ function set_blockdims {
     ## FIXME: evaluates to 0 on dataset smaller than blocksize
     ##
     ## PARAMETERS:
-    ##   bs: blocksize Y/X
-    ##   Y: dataset Y dimension
-    ##   X: dataset X dimension
+    ##
+    ## SHELL VARIABLES required:
     ##
     ## SHELL VARIABLES set:
-    ##   nx: number of rows in blockgrid
-    ##   ny: number of columns in blockgrid
-    ##   nb: number of blocks
+    ##
     # --
 
-    local bs="${1}"
-    local X="${2}"
-    local Y="${2}"
+    i=0
+    for dim in ${dims[@]}; do
+        bg="${blockgrid[$i]}"
+        eval n${dim}="${blockgrid[$i]}"
+        i=$(($i+1))
+    done
 
-    nx=`python -c "from math import ceil; print(int(ceil($X/$bs)))"`
-    ny=`python -c "from math import ceil; print(int(ceil($Y/$bs)))"`
-    nb=$((nx*ny))
+
+    nb=`multiply_array ${blockgrid[@]}`
 
 }
 function set_blockstems {
-    # --
-    ## Generate an array <blockstems> of block identifiers.
-    ## taking the form "dataset_B?????"
-    ## taking the form "dataset_x-X_y-Y_z-Z"
-    ## with voxel coordinates zero-padded to 5 digits
-    ##
-    ## TODO: bring in line with filenaming option in python (w / wo prefix)
-    ## TODO: implement switch to enable both options?
-    ## TODO: 'block_ids' may be removed (but used in plantseg?)
-    ##
-    ## PARAMETERS:
-    ##   dataset: dataset name
-    ##   verbose: use '-v' to print blockstems
-    ##
-    ## SHELL VARIABLES set:
-    ##   blockstems: array of block filenames (wo extension / h5 dataset path)
-    ##
-    # --
 
     local dataset=$1
     local verbose=$2
-    local bx bX by bY bz bZ
     local block_id dstem
 
     unset block_ids
@@ -431,52 +394,18 @@ function set_blockstems {
     unset blockstems
     blockstems=()
 
-    i=0
-    for x in `seq 0 $bs $(( X-1 ))`; do
-        bX=$( get_coords_upper $x $bm $bs $X)
-        bx=$( get_coords_lower $x $bm )
-        for y in `seq 0 $bs $(( Y-1 ))`; do
-            bY=$( get_coords_upper $y $bm $bs $Y)
-            by=$( get_coords_lower $y $bm )
-            for z in `seq 0 $Z $(( Z-1 ))`; do
-                bZ=$( get_coords_upper $z 0 $Z $Z)
-                bz=$( get_coords_lower $z 0 )
+    for i in `seq -f "%05g" 0 ${nb}`; do
+        block_id="B$i"
+        dstem="${dataset}_${block_id}"
+        blockstems+=( "$dstem" )
+        if [ "$verbose" == "-v" ]; then
+            echo "$dstem"
+        fi
 
-                #block_id="$( get_block_id $bx $bX $by $bY $bz $bZ )"
-                block_id="B`printf %05d $i`"
-
-                dstem="${dataset}_${block_id}"
-                blockstems+=( "$dstem" )
-                if [ "$verbose" == "-v" ]; then
-                    echo "$dstem"
-                fi
-
-                block_ids+=( "$block_id" )
-                if [ "$verbose" == "-v" ]; then
-                    echo "$block_id"
-                fi
-
-                i=$((i+1))
-
-            done
-        done
-    done
-
-}
-
-
-# UNUSED?
-function set_blockstems_stardist {
-    # --
-    ## Generate an array 'datastems' and 'blockstems' from 'dataset'.
-    ## suffixed with _block<.....>
-    # --
-
-    unset blockstems
-    blockstems=()
-
-    for block_id in `seq -f "%05g" 0 ${nblocks}`; do
-        blockstems+=( ${dataset}_block$block_id )
+        block_ids+=( "$block_id" )
+        if [ "$verbose" == "-v" ]; then
+            echo "$block_id"
+        fi
     done
 
     datastems=( "${blockstems[@]}" )
@@ -484,39 +413,36 @@ function set_blockstems_stardist {
 }
 
 
-function get_coords_upper {
-    # --
-    ## Get upper coordinate of the block.
-    ## NOTE: adds blocksize and margin, bounded by the dimension's extent
-    # --
-
-    local co=$1
-    local margin=$2
-    local size=$3
-    local comax=$4
-    local CO
-
-    CO=$(( co + size + margin )) &&
-        CO=$(( CO < comax ? CO : comax ))
-
-    echo "$CO"
-
-}
 
 
-function get_coords_lower {
-    # --
-    ## Get lower coordinate of the block.
-    ## NOTE: subtracts margin, with 0-bound
-    # --
+###==========================================================================###
+### some utils
+###==========================================================================###
 
-    local co=$1
-    local margin=$2
 
-    co=$(( co - margin )) &&
-        co=$(( co > 0 ? co : 0 ))
+function set_ZYXCT {
 
-    echo "$co"
+    if ! [ -z "${dataset__X}" ]
+    then
+        # TODO: check all individually (at the end)
+        # [[ -z "${dataset__X}" ]] || M="${dataset__X}"
+        Z="${dataset__Z}"
+        Y="${dataset__Y}"
+        X="${dataset__X}"
+        C="${dataset__C}"
+        T="${dataset__T}"
+    elif [ -f ${1} ]
+    then
+        eval $( parse_yaml "${1}" "" )
+    elif [ -f "${datadir}/${dataset}.ims" ]
+    then
+        set_ZYXCT_ims '-v' "${datadir}/${dataset}.ims"
+        write_ZYXCT_to_yml "${1}"
+    elif [ -f "${datadir}/${dataset_stitching}.ims" ]
+    then
+        set_ZYXCT_ims '-v' "${datadir}/${dataset_stitching}.ims"
+        write_ZYXCT_to_yml "${1}"
+    fi
 
 }
 
@@ -565,10 +491,6 @@ function set_filepaths {
 }
 
 
-###==========================================================================###
-### some utils
-###==========================================================================###
-
 function check_dims {
     # --
     ## Check if the variable is set and is a number.
@@ -584,6 +506,43 @@ function check_dims {
     else
         return 0
     fi
+
+}
+
+
+function get_coords_upper {
+    # --
+    ## Get upper coordinate of the block.
+    ## NOTE: adds blocksize and margin, bounded by the dimension's extent
+    # --
+
+    local co=$1
+    local margin=$2
+    local size=$3
+    local comax=$4
+    local CO
+
+    CO=$(( co + size + margin )) &&
+        CO=$(( CO < comax ? CO : comax ))
+
+    echo "$CO"
+
+}
+
+
+function get_coords_lower {
+    # --
+    ## Get lower coordinate of the block.
+    ## NOTE: subtracts margin, with 0-bound
+    # --
+
+    local co=$1
+    local margin=$2
+
+    co=$(( co - margin )) &&
+        co=$(( co > 0 ? co : 0 ))
+
+    echo "$co"
 
 }
 
