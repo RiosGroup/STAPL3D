@@ -65,7 +65,8 @@ class Block(object):
         self.blocker_info = blocker_info
 
         self.affine = np.eye(4)
-        for i, slc in enumerate(slices[:3]):  # TODO: zyx selection
+        slices_sel = [slc for slc, al in zip(slices, axlab) if al in 'xyz']
+        for i, slc in enumerate(slices_sel):
             self.affine[i, 3] = slc.start
 
     def __str__(self):
