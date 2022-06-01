@@ -97,18 +97,18 @@ function load_parameters {
     dataset_biasfield="${dataset_stitching}${biasfield__params__postfix}"
     dataset_preproc="${dataset_biasfield}"
 
-    set_dims "${datadir}/${dataset}_dims.yml"
+    set_dims "${image_in}" "${datadir}/${dataset}_dims.yml" -v
 
-    set_blocks
+    set_blocks "${axlab[@]}"
     [[ "${verbose}" == '-v' ]] && {
         echo ""
         echo " ### Block parallelization:"
         echo ""
-        printf "\t%-12s%-8s\n" "blocks: " "${nb}"
-        printf "\t%-12s%-8s\n" "dims: " "${dims[*]}"
+        printf "\t%-12s%-8s\n" "axlab: " "${axlab[*]}"
         printf "\t%-12s%-8s\n" "sizes: " "${blocksize[*]}"
         printf "\t%-12s%-8s\n" "margins: " "${blockmargin[*]}"
         printf "\t%-12s%-8s\n" "grid: " "${blockgrid[*]}"
+        printf "\t%-12s%-8s\n" "Nblocks: " "${nb}"
         echo "" ; }
 
 }
@@ -154,36 +154,47 @@ function parse_yaml {
 
 function set_dims {
 
+    local image_in="${1}"
+    local dimsfile="${2}"
+    local verbose="${3}"
+
     local vars=(Z Y X C T M tZ tY tX elsize_z elsize_y elsize_x)
     local varname var
     local im_M im_tZ im_tY im_tX im_Z im_Y im_X im_C im_T
     local im_elsize_z im_elsize_y im_elsize_x
 
-    echo " ### dataset dimensions"
+    [[ "${verbose}" == '-v' ]] && {
+        echo ""
+        echo " ### dataset dimensions:"
+        echo "" ; }
 
-    eval `get_tiled_dims "${image_in}"`
-    eval `get_dims "${image_in}"`
+    # TODO: only execute if necessary
+    axlab=($(echo `get_axlab "${image_in}"` | fold -w1))
+    eval `get_shape "${image_in}"`
     eval `get_elsizes "${image_in}"`
+    eval `get_tiled_dims "${image_in}"`
 
     for varname in "${vars[@]}"; do
         eval var="\$dataset__${varname}"
         if ! [ -z "${var}" ]
         then  # already specified as environment variable (eg imported from parameterfile)
             src="environment variable dataset__${varname}"
-        elif [ -f "${1}" ]
+        elif [ -f "${dimsfile}" ]
         then  # import via previously written dims-yml
-            eval var=`cat "${1}" | grep "$varname: " | sed "s/$varname: //g"`
-            src="${1}"
+            eval var=`cat "${dimsfile}" | grep "^$varname: " | sed "s/$varname: //g"`
+            src="${dimsfile}"
         else  # import via STAPL3D python functions
             eval var="\$im_${varname}"
             src="${image_in}"
         fi
-        eval $varname="${var}" && printf "\t%-8s = %-20s loaded from %s \n" "$varname" "$var" "$src"
+        eval $varname="${var}"
+        [[ "${verbose}" == '-v' ]] && {
+            printf "\t%-8s = %-20s loaded from %s \n" "$varname" "$var" "$src" ; }
     done
 
     echo ""
 
-    [[ -f "${1}" ]] || write_dims_to_yml "${1}"
+    [[ -f "${dimsfile}" ]] || write_dims_to_yml "${dimsfile}"
 
 }
 
@@ -191,6 +202,7 @@ function set_dims {
 function write_dims_to_yml {
 
     local parfile="${1}"
+
     local vars=(Z Y X C T M tZ tY tX elsize_z elsize_y elsize_x)
     local varname var
 
@@ -210,19 +222,19 @@ function get_tiled_dims {
 
     source "${CONDA_SH}"
     conda activate ${submit_defaults__submit__conda_env}
-    dims=`python -c "import os; from stapl3d.preprocessing import shading; iminfo = shading.get_image_info('${filepath}'); print('im_M={};im_C={};im_tZ={};im_tY={};im_tX={};im_T={};'.format(int(iminfo['nstacks']), int(iminfo['nchannels']), int(iminfo['nplanes']), int(iminfo['ncols']), int(iminfo['nrows']), int(iminfo['ntimepoints'])));"`
+    dims=`python -c "import os; from stapl3d.preprocessing import shading; iminfo = shading.get_image_info('${filepath}'); print('im_M={};im_tZ={};im_tY={};im_tX={};'.format(int(iminfo['nstacks']), int(iminfo['nplanes']), int(iminfo['ncols']), int(iminfo['nrows'])));"`
     conda deactivate
     echo $dims
 
 }
-function get_dims {
+function get_shape {
 
     local filepath="${1}"
     local dims
 
     source "${CONDA_SH}"
     conda activate ${submit_defaults__submit__conda_env}
-    dims=`python -c "import os; from stapl3d import Image; im = Image('${filepath}', permission='r'); im.load(); print(';'.join([f'im_{al.upper()}={sh}' for sh, al in zip(im.dims, im.axlab)]));"`
+    dims=`python -c "import os; from stapl3d import Image; im = Image('${filepath}', permission='r'); im.load(); print(';'.join([f'im_{al.upper()}={sh}' for sh, al in zip(im.dims, im.axlab)])); im.close();"`
     conda deactivate
     echo $dims
 
@@ -233,9 +245,20 @@ function get_elsizes {
 
     source "${CONDA_SH}"
     conda activate ${submit_defaults__submit__conda_env}
-    elsize_xyz=`python -c "import os; from stapl3d import Image; im = Image('${filepath}', permission='r'); im.load(); print('im_elsize_x={};im_elsize_y={};im_elsize_z={}'.format(*[im.elsize[im.axlab.index(al)] for al in 'xyz']));"`
+    elsize=`python -c "import os; from stapl3d import Image; im = Image('${filepath}', permission='r'); im.load(); print(';'.join([f'im_elsize_{al}={es}' for es, al in zip(im.elsize, im.axlab)]));"`
     conda deactivate
-    echo $elsize_xyz
+    echo $elsize
+
+}
+function get_axlab {
+
+    local filepath="${1}"
+
+    source "${CONDA_SH}"
+    conda activate ${submit_defaults__submit__conda_env}
+    axlab=`python -c "import os; from stapl3d import Image; im = Image('${filepath}', permission='r'); im.load(); print(im.axlab); im.close();"`
+    conda deactivate
+    echo $axlab
 
 }
 
@@ -324,13 +347,16 @@ function find_dims_from_hdf5 {
 
 function set_blocks {
 
-    dims=(z y x t)  # FIXME/TODO: find what dims are in the dataset
-    set_blocksizes  # FIXME/TODO: defaults => full dataset ranges
+    local axlab=("$@")
+
+    set_blocksizes "${axlab[@]}"  # FIXME/TODO: defaults => full dataset ranges
     set_blockdims
     set_blockstems "${dataset_preproc}"
 
 }
 function set_blocksizes {
+
+    local axlab=("$@")
 
     unset blocksize
     blocksize=()
@@ -341,15 +367,14 @@ function set_blocksizes {
     unset blockgrid
     blockgrid=()
 
-
     # FIXME/TODO: defaults
-    for dim in ${dims[@]}; do
-        eval bs="\$blocks__blockinfo__blocksize__${dim}"
+    for al in "${axlab[@]}"; do
+        eval bs="\$blocks__blockinfo__blocksize__${al}"
         blocksize+=( $bs )
-        eval bm="\$blocks__blockinfo__blockmargin__${dim}"
+        eval bm="\$blocks__blockinfo__blockmargin__${al}"
         blockmargin+=( $bm )
-        eval upper="\$${dim^}"
-        bg=`python -c "from math import ceil; print(int(ceil(${upper}/$bs)))"`
+        eval upper="\$${al^}"
+        bg=`python -c "from math import ceil; print(int(ceil(${upper}./$bs.)))"`
         blockgrid+=( $bg )
     done
 
@@ -371,15 +396,16 @@ function set_blockdims {
     ##
     # --
 
+    local axlab=("$@")
+
     i=0
-    for dim in ${dims[@]}; do
+    for al in "${axlab[@]}"; do
         bg="${blockgrid[$i]}"
-        eval n${dim}="${blockgrid[$i]}"
+        eval n${al}="${blockgrid[$i]}"
         i=$(($i+1))
     done
 
-
-    nb=`multiply_array ${blockgrid[@]}`
+    nb=`multiply_array "${blockgrid[@]}"`
 
 }
 function set_blockstems {
@@ -921,7 +947,7 @@ function base_cmds {
     echo ''
     echo source "${STAPL3D}/pipelines/functions.sh"
     echo load_dataset "${projectdir}" "${dataset}"
-    echo load_parameters "${dataset}"
+    echo load_parameters "${dataset}" -v
     echo ''
 
     # # Special case for dual-mode parallelization (shading correction).
