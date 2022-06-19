@@ -205,5 +205,173 @@ def write_structure_tensor(filepath, odss, props):
         write_data(filepath, ods, newprops, data)
 
 
+class Protrus3r(Block3r):
+    """...."""
+
+    def __init__(self, image_in='', parameter_file='', **kwargs):
+
+        if 'module_id' not in kwargs.keys():
+            kwargs['module_id'] = 'protruser'
+
+        super(Protrus3r, self).__init__(
+            image_in, parameter_file,
+            **kwargs,
+            )
+
+        self._fun_selector.update({
+            'predict': self.predict,
+            })
+
+        self._parallelization.update({
+            'predict': ['blocks'],
+            })
+
+        self._parameter_sets.update({
+            'predict': {
+                'fpar': self._FPAR_NAMES,
+                'ppar': (),
+                'spar': ('_n_workers', 'blocksize', 'blockmargin', 'blocks'),
+                },
+            })
+
+        self._parameter_table.update({
+            })
+
+        default_attr = {
+            'ods': 'data',
+            'squeeze': '',
+            'outlayout': '',
+            'remove_margins': False,
+            'merged_output': False,
+        }
+        for k, v in default_attr.items():
+            setattr(self, k, v)
+
+        for step in self._fun_selector.keys():
+            step_id = 'blocks' if step=='blockinfo' else self.step_id
+            self.set_parameters(step, step_id=step_id)
+
+        self._init_paths_protruser()
+
+        self._init_log()
+
+        self._prep_blocks()
+
+        self._images = []
+        self._labels = []
+
+    def _init_paths_protruser(self):
+        """...."""
+
+        self._paths.update({
+            'predict': {
+                'inputs': {
+                    'data': self.inputpaths['blockinfo']['data'],
+                    },
+                'outputs': {
+                    'blockfiles': self.outputpaths['blockinfo']['blockfiles'],
+                    },
+                },
+            })
+
+        for step in self._fun_selector.keys():
+            step_id = 'blocks' if step=='blockinfo' else self.step_id
+            self.inputpaths[step]  = self._merge_paths(self._paths[step], step, 'inputs', step_id)
+            self.outputpaths[step] = self._merge_paths(self._paths[step], step, 'outputs', step_id)
+
+    def predict(self, **kwargs):
+        """...."""
+
+        # TODO: needs mpi-enabled parallelization instead of multiprocessing
+        if self.merged_output:
+            self._create_output_merged()
+
+        arglist = self._prep_step('predict', kwargs)
+        with multiprocessing.Pool(processes=self._n_workers) as pool:
+            pool.starmap(self._predict_block, arglist)
+
+    def _predict_block(self, block_idx):
+        """...."""
+
+        block = self._blocks[block_idx]
+
+        inputs = self._prep_paths_blockfiles(self.inputs, block, key='data')
+        outputs = self._prep_paths_blockfiles(self.outputs, block)
+
+        self.input_image = Image(inputs['data'], permission='r')
+        self.input_image.load()
+
+        im = self.read_block(self.input_image, block)  # always return as inputlayout Image object
+
+        mo = self.process_block(im)  # always return as inputlayout Image object (optionally with new dimensions added in)
+
+        self.write_block(
+            mo, block,
+            ods=self.ods,
+            squeeze=self.squeeze,
+            outlayout=self.outlayout,
+            remove_margins=self.remove_margins,
+            merged_output=self.merged_output,
+            )
+
+        self.input_image.close()
+
+    def process_block(self, im):
+        """Process datablock."""
+
+        ref_props = im.get_props2()
+
+        data = im.ds
+
+        testcase = 'simple'  # 'simple', 'squeezed', 'channel', 'tensor'
+        axis = -1  # 0 or -1 for start and end
+        C, M, N = 3, 3, 3
+
+        if testcase == 'simple':
+            result = data
+
+        elif testcase == 'squeezed':  # not prefered?, but will test anyway
+            im.slices[0] = slice(0, 1, None)
+            result = im.slice_dataset(squeeze=True)
+            ref_props = im.squeeze_props(ref_props, dim=im.axlab.index('t'))
+            ref_props['axlab'] = ''.join(ref_props['axlab'])
+            # FIXME: returned as list and tuples => choose the best option
+            # TODO: check if dim is indeed squeezable (ie is of size 1)
+
+        elif testcase == 'channel':
+            result = np.stack([data] * C, axis)
+            ref_props = self._insert_dim(ref_props, {axis: {'axlab': 'c', 'elsize': 1, 'chunks': C}})
+
+        elif testcase == 'tensor':
+            result = np.stack([np.stack([data] * M, axis) * N], axis)
+            ref_props = self._insert_dim(ref_props, {axis: {'axlab': 'm', 'elsize': 1, 'chunks': M}})
+            ref_props = self._insert_dim(ref_props, {axis: {'axlab': 'n', 'elsize': 1, 'chunks': N}})
+
+        return self._create_block_image(result, ref_props)
+
+    def _insert_dim(self, props, insert={}):
+        """Insert a dimension into props dict {pos: props}.
+
+        TODO: move to Image class method
+        """
+
+        propnames = ['axlab', 'elsize', 'chunks']  # , 'dims', 'shape', 'slices'
+        # NOTE: , 'dims', 'shape', 'slices' are reset in _create_block_image
+        for pos, newprops in insert.items():
+
+            if pos == -1:
+                pos = len(props['axlab'])
+
+            for propname in propnames:
+
+                list_ins = list(props[propname])
+                list_ins.insert(pos, newprops[propname])
+                props[propname] = list_ins
+
+        props['axlab'] = ''.join(props['axlab'])
+
+        return props
+
+
 if __name__ == "__main__":
     main(sys.argv[1:])
