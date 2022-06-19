@@ -1877,8 +1877,12 @@ class Image(object):
 
         self.axlab = outlayout
         self.elsize = np.array(self.elsize)[in2out]
-        self.ds[:] = np.transpose(self.ds[:], in2out)  # FIXME: fail for proxies
+        self.ds = np.transpose(self.ds, in2out)  # FIXME: fail for proxies
         self.slices = [self.slices[i] for i in in2out]
+        self.dims = np.array(self.dims)[in2out]
+        self.shape = np.array(self.shape)[in2out]
+        if self.chunks is not None:
+            self.chunks = np.array(self.chunks)[in2out]
 
     def squeeze(self, dims):
 
@@ -1888,6 +1892,7 @@ class Image(object):
         for dim in dims:
             if dim not in self.axlab:
                 continue
+            self.ds = np.squeeze(self.ds, self.axlab.index(dim))
             for attr in squeezable:
                 attr_val = getattr(self, attr)
                 if attr_val is not None:
@@ -2695,13 +2700,17 @@ def transpose_props(props, outlayout=''):
 
     if not outlayout:
         outlayout = props['axlab'][::-1]
+
     in2out = [props['axlab'].index(l) for l in outlayout]
+
     props['elsize'] = np.array(props['elsize'])[in2out]
     props['shape'] = np.array(props['shape'])[in2out]
     props['axlab'] = ''.join([props['axlab'][i] for i in in2out])
+
     if 'chunks' in props.keys():
         if props['chunks'] is not None:
             props['chunks'] = np.array(props['chunks'])[in2out]
+
     if 'slices' in props.keys():
         if props['slices'] is not None:
             props['slices'] = [props['slices'][i] for i in in2out]
@@ -2908,7 +2917,7 @@ class Stapl3r(object):
         step_id='',
         directory='',
         prefix='',
-        datadir='',
+        datadir='',  # use this if specified paths are not absolute and Stapl3r not executed from datadir
         max_workers=0,
         verbosity=1,
         ):
@@ -2933,7 +2942,7 @@ class Stapl3r(object):
         self.set_directory(directory)
         self.prefix = prefix
 
-        self._logdir = 'logs'
+        self._logdir = os.path.join(self.datadir, 'logs')
         os.makedirs(self._logdir, exist_ok=True)
 
         self.parameter_file = parameter_file
@@ -2965,6 +2974,8 @@ class Stapl3r(object):
 
         self._images = []
         self._labels = []
+        self._view_stacked = False
+        self._view_layout = []
 
     def __str__(self):
         """Print attributes in yml structure."""
@@ -3180,8 +3191,6 @@ class Stapl3r(object):
 
         if not self.directory:
             self.directory = os.path.join(self.datadir, self.step_id)
-
-        os.makedirs(self.directory, exist_ok=True)
 
         self.directory = os.path.relpath(self.directory, self.datadir)
 
@@ -3555,10 +3564,10 @@ class Stapl3r(object):
         viewer = napari.Viewer()
         self.viewer = viewer
 
-        if isinstance(input, str):
-            self.view_single(input, images, labels, slices)
         if isinstance(input, list):
             self.view_blocks(input, images, labels, slices)
+        elif isinstance(input, str):
+            self.view_single(input, images, labels, slices)
 
         self.set_view(settings)
 
@@ -3583,31 +3592,86 @@ class Stapl3r(object):
 
     def view_blocks(self, block_idxs=[], images=[], labels=[], slices={}):
 
-        block_id0 = self._blocks[block_idxs[0]].id
+        def create_grid(shape, dtype='uint16', labelval=1, thickness=1):
+
+            # FIXME: correct padding for dimensions smaller than thinkness * 2
+            shape = [max(1, sh - thickness * 2) for sh in shape]
+            pad_width = ((thickness, thickness),) * len(shape)
+            data = np.pad(np.zeros(shape, dtype=dtype),
+                          pad_width, constant_values=labelval)
+
+            return data
+
+        def get_block_outline(block, labelval='idx'):
+
+            axlab = block.axlab
+            elsize = [block.elsize[axlab.index(al)] for al in axlab if al in 'xyz']
+            affine = self._view_trans_affine(block.affine, elsize)
+            scale = tuple(es for es in block.elsize)
+            translation = tuple(slc.start * es for slc, es in zip(block.slices, block.elsize))
+            shape = [slc.stop - slc.start for slc in block.slices]
+
+            labelval = block.idx + 2 if labelval == 'idx' else labelval
+
+            data = create_grid(np.array(shape), labelval=labelval)
+
+            return data, affine, translation, scale
+
+        block0 = self._blocks[block_idxs[0]]
+        block_id0 = block0.id
+
+        dstack = []
+
+        if 'fullsize' in self._view_layout:
+            shape = [self.fullsize[al] for al in self._blocks[block_idxs[0]].axlab]
+            data = create_grid(np.array(shape), labelval=1, dtype='uint8', thickness=1)
+            scale = tuple(block0.elsize)
+            translate = tuple(0.0 for _ in block0.elsize)
+            self.viewer.add_labels(data, name='fullsize', scale=scale, translate=translate)
 
         for block_idx in block_idxs:
 
             block = self._blocks[block_idx]
             filepath = block.path.replace('/{ods}', '')
 
+            if 'margins' in self._view_layout:
+                block0 = self._blocks0[block_idx]
+                data, affine, translate, scale = get_block_outline(block0, labelval=2)
+                self.viewer.add_labels(data, name=f'{block.id}', scale=scale, translate=translate)
+
+            if 'blocks' in self._view_layout:
+                data, affine, translate, scale = get_block_outline(block, labelval=3)
+                self.viewer.add_labels(data, name=f'{block.id}_margin', scale=scale, translate=translate)
+
             for ids in images + labels:
 
                 im = Image('{}/{}'.format(filepath, ids), permission='r')
                 im.load(load_data=False)
                 im.close()
-                affine = self._view_trans_affine(block.affine, im.elsize[:3])
+                affine = self._view_trans_affine(block.affine, block.elsize[:3])
 
                 name = f'{block.id}_{ids}'
                 data = self._get_h5_dset(filepath, ids, slices)
 
-                if ids in images:
-                    self.viewer.add_image(data, name=name, affine=affine)
-                    clim = self.viewer.layers[f'{block_id0}_{ids}'].contrast_limits
-                    self.viewer.layers[f'{block.id}_{ids}'].contrast_limits = clim
-                if ids in labels:
-                    self.viewer.add_labels(data, name=name, affine=affine)
+                if self._view_stacked:  # TODO: stack through translation matrix?
+                    dstack.append(data)
+                else:
+                    if ids in images:
+                        self.viewer.add_image(data, name=name, affine=affine)
+                        clim = self.viewer.layers[f'{block_id0}_{ids}'].contrast_limits
+                        self.viewer.layers[f'{block.id}_{ids}'].contrast_limits = clim
+                    if ids in labels:
+                        self.viewer.add_labels(data, name=name, affine=affine)
 
-        self.viewer.dims.axis_labels = [al for al in im.axlab]
+        axlab = im.axlab
+        if self._view_stacked:
+            if ids in images:
+                self.viewer.add_image(np.stack(dstack), name=name)
+            if ids in labels:
+                self.viewer.add_labels(np.stack(dstack), name=name)
+            axlab = 'b' + axlab
+
+        self.viewer.dims.axis_labels = [al for al in axlab]
 
     def _view_trans_affine(self, affine, elsize):
         Tt = np.copy(affine)

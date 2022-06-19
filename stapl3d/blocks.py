@@ -17,9 +17,8 @@ import yaml
 import numpy as np
 
 from skimage.transform import resize
-from skimage.segmentation import relabel_sequential
 
-from stapl3d import parse_args, Stapl3r, Image, LabelImage, format_, split_filename
+from stapl3d import parse_args, Stapl3r, Image, LabelImage
 
 import glob
 import h5py
@@ -49,9 +48,13 @@ def main(argv):
 
 
 class Block(object):
-    """Block."""
+    """Block.
 
-    def __init__(self, id='', idx=0, path='', slices={}, axlab='', elsize=[], blocker_info={}):
+    TODO: save blockgrid and slice into blockgrid (to easily identify boundary blocks)
+    TODO: include chunks?, original path, Image?
+    """
+
+    def __init__(self, id='', idx=0, path='', slices={}, axlab='', elsize=[], blocker_info={}, affine=[]):
 
         self.id = id
         self.idx = idx
@@ -64,10 +67,14 @@ class Block(object):
 
         self.blocker_info = blocker_info
 
-        self.affine = np.eye(4)
-        slices_sel = [slc for slc, al in zip(slices, axlab) if al in 'xyz']
-        for i, slc in enumerate(slices_sel):
-            self.affine[i, 3] = slc.start
+        # TODO: integrate with affine matrix on Image class
+        if affine:
+            self.affine = affine
+        else:  # default: only block translation in voxel space
+            self.affine = np.eye(4)
+            slices_sel = [slc for slc, al in zip(slices, axlab) if al in 'xyz']
+            for i, slc in enumerate(slices_sel):
+                self.affine[i, 3] = slc.start
 
     def __str__(self):
         return yaml.dump(vars(self), default_flow_style=False)
@@ -112,14 +119,17 @@ class Block3r(Stapl3r):
         }
 
         default_attr = {
+            'fullsize': {},
             'blocksize': {},
             'blockmargin': {},
-            'fullsize': {},
             'truncate_to_dataset': True,
             'truncate_to_margin': False,
             'shift_final_block_inward': False,
-            'elsize': {},
+            'pad_mode': 'constant',
+            'pad_kwargs': {},
             'blocks': [],
+            'squeeze': '',
+            '_elsize': {},
             '_blocks': [],
             '_blocks0': [],
         }
@@ -140,15 +150,23 @@ class Block3r(Stapl3r):
         self._labels = []
 
     def _init_paths(self):
+        """Set input and output filepaths.
 
-        os.makedirs('blocks', exist_ok=True)
-        bpat = self._build_path(moduledir='blocks', prefixes=[self.prefix, 'blocks'], suffixes=[{'b': 'p'}])
-        # bpat = self._build_path(suffixes=[{'b': 'p'}])
+        REQUIRED:
+        blockinfo:inputs:data           input image OR {f}.<ext>
+        blockinfo:outputs:blockfiles    blockpattern ...{b}... OR ...{f}...
+        """
+
+        if '{f' in self.image_in:
+            prefixes, suffix = [''], 'f'
+        else:
+            prefixes, suffix = [self.prefix, 'blocks'], 'b'
+        bpat = self._build_path(moduledir='blocks', prefixes=prefixes, suffixes=[{suffix: 'p'}])
 
         self._paths = {
             'blockinfo': {
                 'inputs': {
-                    'data': self.image_in,  # TODO: via inputpath/biasfield output
+                    'data': self.image_in,
                     },
                 'outputs': {
                     'blockfiles': f"{bpat}.h5",
@@ -162,90 +180,85 @@ class Block3r(Stapl3r):
             self.outputpaths[step] = self._merge_paths(self._paths[step], step, 'outputs', step_id)
 
     def print_blockinfo(self, **kwargs):
+        """Print the slices into the full dataset for all blocks."""
 
         arglist = self._prep_step('blockinfo', kwargs)
         for i, block in enumerate(self._blocks):
             if i in self.blocks:
                 print(f'Block {i:05d} with id {block.id} refers to region {block.slices}')
 
-    def _prep_paths_blockfiles(self, paths, block, key='blockfiles', reps={}):
-
-        filepath = self._blocks[block.idx].path.replace('.h5/{ods}', '')
-        filestem = os.path.basename(filepath)
-
-        reps['b'] = block.idx
-        reps['f'] = filestem
-
-        return self._prep_paths(paths, reps=reps)
-
     def _prep_blocks(self):
+        """Set blocker characteristics and blocks.
 
-        step = 'blockinfo'  #self.step
-        inpaths = self.inputpaths[step]['data']
+        _blocks0 contains a blocker version without the margins
+        """
 
-        if '{b' in inpaths or '{f' in inpaths:
-            self.filepaths = self.get_filepaths(inpaths)
-            self.set_fullsize(self.filepaths[0])
-        elif os.path.isdir(self.image_in):
-            self.filepaths = sorted(glob.glob(os.path.join(self.image_in, '*.czi')))  # TODO: flexible extension
-            self.set_fullsize(self.filepaths[0])
-        else:
+        step = 'blockinfo'
+        datafiles = self.inputpaths[step]['data']
+        blockfiles = self.outputpaths[step]['blockfiles']
+
+        if '{b' in datafiles or '{f' in datafiles:  # files as blocks
+            self.filepaths = self.get_filepaths(datafiles)
+            self.set_fullsize(self.filepaths[0])  # FIXME: only correct for firstfile
+        else:  # blocks from grid
             self.filepaths = []
-            self.set_fullsize(inpaths)
+            self.set_fullsize(datafiles)
 
         self.set_blocksize()
         self.set_blockmargin()
-
-        if '{f' in inpaths:
-            self.outputpaths[step]['blockfiles'] = os.path.join('blocks', '{f}.h5')
-
-        blockfiles = self.outputpaths[step]['blockfiles']
 
         self._blocks = self.generate_blocks(blockfiles)
         self._blocks0 = self.generate_blocks(blockfiles, blocks0=True)
 
     def set_fullsize(self, image_in, fullsize={}):
+        """Set the shape of the full dataset."""
 
         try:
             im = Image(image_in, permission='r')
             im.load(load_data=False)
             im.close()
             imsize = dict(zip(im.axlab, im.dims))
-            self.elsize = dict(zip(im.axlab, im.elsize))
+            self._elsize = dict(zip(im.axlab, im.elsize))
         except:
             imsize = {}
 
         self.fullsize = {**imsize, **self.fullsize, **fullsize}
 
     def set_blocksize(self, blocksize={}):
+        """Set the size of the block."""
 
         self.blocksize = {**self.fullsize, **self.blocksize, **blocksize}
 
     def set_blockmargin(self, blockmargin={}):
+        """Set the margins of the block."""
 
         bm_im = {d: 0 for d in self.blocksize.keys()}
         self.blockmargin = {**bm_im, **self.blockmargin, **blockmargin}
 
     def generate_blocks(self, block_template, blocks0=False):
-
-        if self.filepaths:
-            blocks = self.get_blocks_from_files(block_template, blocks0)
-        else:
-            blocks = self.get_blocks_from_grid(block_template, blocks0)
-
-        return blocks
-
-    def get_blocks_from_grid(self, block_template, blocks0=False):
+        """Create Block objects."""
 
         axlab = [al for al in self.fullsize.keys()]
-        elsize = [self.elsize[al] for al in axlab] if self.elsize else [1] * len(axlab)
+        elsize = [self._elsize[al] for al in axlab] if self._elsize else [1] * len(axlab)
+
+        margin = dict(zip(axlab, [0] * len(axlab))) if blocks0 else self.blockmargin
+
+        if self.filepaths:
+            starts, stops = self.get_bounds_for_files(margin)
+        else:
+            starts, stops = self.get_bounds_for_grid(margin)
+
+        return self._generate_blocks(starts, stops, block_template, axlab, elsize)
+
+    def get_bounds_for_grid(self, margin):
+        """Generate slices for a grid of blocks."""
+
+        axlab = ''.join(margin.keys())
 
         imslices = {al: slice(0, self.fullsize[al]) for al in axlab}
         shape = {al: len(range(*slc.indices(slc.stop))) for al, slc in imslices.items()}
         blocksize = self.blocksize or shape
         blocksize = {al: bs if bs else shape[al] for al, bs in blocksize.items()}
-
-        margin = dict(zip(axlab, [0] * len(axlab))) if blocks0 else self.blockmargin
 
         starts, stops, = {}, {}
         for al in axlab:
@@ -254,9 +267,6 @@ class Block3r(Stapl3r):
                 imslices[al].stop,
                 blocksize[al],
                 margin[al],
-                self.truncate_to_dataset,
-                self.truncate_to_margin,
-                self.shift_final_block_inward,
                 )
 
         ndim = len(axlab)
@@ -267,108 +277,101 @@ class Block3r(Stapl3r):
         starts = np.transpose(np.reshape(startsgrid, [ndim, -1]))
         stops = np.transpose(np.reshape(stopsgrid, [ndim, -1]))
 
-        blocks = []
-        for b_idx, (start, stop) in enumerate(zip(starts, stops)):
-            block = Block(
-                id=self._suffix_formats['b'].format(b=b_idx),
-                idx=b_idx,
-                path=block_template.format(b=b_idx) + '/{ods}',
-                slices=[slice(sta, sto) for sta, sto in zip(start, stop)],
-                axlab=axlab,
-                elsize=elsize,
-                blocker_info={k:v for k, v in vars().items() if k in self._parameter_table.keys()},
-                )
-            blocks.append(block)
+        return starts, stops
 
-        return blocks
+    def get_bounds_for_files(self, margin):
+        """Generate slices for a list of files."""
 
-    def get_blocks_from_files(self, block_template, blocks0=False):
-
-        axlab = [al for al in self.fullsize.keys()]
-        elsize = [self.elsize[al] for al in axlab] if self.elsize else [1] * len(axlab)
-
-        from stapl3d.preprocessing import shading
         stops = []
         for filepath in self.filepaths:
-            if '.czi' in filepath:
-                from stapl3d.preprocessing import shading
-                iminfo = shading.get_image_info(filepath)
-                stops.append(iminfo['dims_zyxc'])
-            elif '.csv' in filepath:  # test for featur3r: TODO: generalize
+            if '.csv' in filepath:  # test for featur3r: TODO: generalize
                 stops.append([0, 0, 0])
             else:
                 im = Image(filepath)
                 im.load()
-                props = im.get_props()
-                stops.append(props['shape'])
+                stops.append(im.dims)
                 im.close()
 
-        # starts = [dict(zip(axlab, [0] * len(axlab))) for imsize in imsizes]
-        # stops = [dict(zip(axlab, imsize)) for imsize in imsizes]
         starts = [[0] * len(stop) for stop in stops]
 
-        def get_path(filepaths, block_template, b_idx):
+        return starts, stops
 
-            if '{b' in block_template:
-                bfile = block_template.format(b=b_idx)
-            elif '{f' in block_template:
-                fp = filepaths[b_idx]
-                if '.h5' in fp:
-                    fstem = os.path.basename(fp.split('.h5')[0])
-                else:
-                    fstem = os.path.basename(os.path.splitext(fp)[0])
-                bfile = block_template.format(f=fstem)
-            return bfile + '/{ods}'
+    def _generate_blocks(self, starts, stops, block_template, axlab, elsize):
+        """"""
+
+        blocker_info = {k:v for k, v in vars(self).items()
+                        if k in self._parameter_table.keys()}
 
         blocks = []
         for b_idx, (start, stop) in enumerate(zip(starts, stops)):
             block = Block(
                 id=self._suffix_formats['b'].format(b=b_idx),
                 idx=b_idx,
-                path=get_path(self.filepaths, block_template, b_idx),
+                path=self._get_blockpath(block_template, b_idx),
                 slices=[slice(sta, sto) for sta, sto in zip(start, stop)],
                 axlab=axlab,
                 elsize=elsize,
-                blocker_info={k:v for k, v in vars().items() if k in self._parameter_table.keys()},
+                blocker_info=blocker_info,
                 )
             blocks.append(block)
 
         return blocks
 
-    def _get_blockbounds(self, ds_start, ds_stop, blocksize, margin,
-                         truncate_to_dataset=True, truncate_to_margin=False,
-                         shift_final_block_inward=False):
-        """Get the block range for a dimension."""
+    def _get_blockpath(self, block_template, b_idx):
+        """Build path to blockfile."""
+
+        if '{b' in block_template:
+            bfile = block_template.format(b=b_idx)
+        elif '{f' in block_template:
+            fp = self.filepaths[b_idx]
+            if '.h5' in fp:
+                fstem = os.path.basename(fp.split('.h5')[0])
+            else:
+                fstem = os.path.basename(os.path.splitext(fp)[0])
+            bfile = block_template.format(f=fstem)
+
+        return bfile + '/{ods}'
+
+    def _get_blockbounds(self, ds_start, ds_stop, blocksize, margin):
+        """Get the block range (with margin applied) for a dimension."""
 
         # blocks
-        starts = range(ds_start, ds_stop, blocksize)
+        starts = np.array((range(ds_start, ds_stop, blocksize)))
         stops = np.array(starts) + blocksize
+
+        if self.shift_final_block_inward:
+            stops[-1] = ds_stop
+            starts[-1] = ds_stop - blocksize
 
         # blocks with margin
         starts = np.array(starts) - margin
         stops = np.array(stops) + margin
 
-        # boundary truncations
-        if truncate_to_dataset:
-            starts = np.clip(starts, ds_start, np.inf).astype(int)
+        # boundary block truncations
+        if self.truncate_to_dataset:
+            bounds = [ds_start, ds_stop]
+        elif self.truncate_to_margin:
+            bounds = [ds_start - margin, ds_stop + margin]
 
-        if truncate_to_dataset:
-            stop = ds_stop
-        elif truncate_to_margin:
-            stop = ds_stop + margin
-        else:
-            stop = stops[-1]
-
-        stops = np.clip(stops, -np.inf, stop).astype(int)
-
-        if shift_final_block_inward:
-            stops[-1] = stop
-            starts[-1] = stop - (blocksize + 2 * margin)
+        if self.truncate_to_dataset or self.truncate_to_margin:
+            starts = np.clip(starts, bounds[0], np.inf).astype(int)
+            stops = np.clip(stops, -np.inf, bounds[1]).astype(int)
 
         return starts, stops
 
     def _margins(self, fc, fC, blocksize, margin, fullsize):
-        """Return coordinates (fullstack and block) corrected for margin."""
+        """Return coordinates (fullstack and block) corrected for margin.
+
+        fc and fC are start and stop of the slice in the dataset voxel space
+        """
+
+        final_block = fC >= fullsize
+        if self.shift_final_block_inward and final_block:
+            bc = margin
+            bC = blocksize - margin  # always full blocksize
+            fc = fullsize
+            fC = fullsize - blocksize
+            return (fc, fC), (bc, bC)
 
         # lower coordinates
         if fc == -margin:  # lower-end boundary block with pad_before = margin
@@ -395,6 +398,9 @@ class Block3r(Stapl3r):
     def get_filepaths(self, filepat):
         """Set the filepaths by globbing the directory."""
 
+        if not os.path.isabs(filepat):
+            filepat = os.path.join(self.datadir, filepat)
+
         def glob_h5(directory, s):
 
             if '.h5' in s:
@@ -409,8 +415,8 @@ class Block3r(Stapl3r):
 
             return filepaths
 
-        if '.h5' in self.image_in:
-            p = self.image_in.split('.h5')
+        if '.h5' in filepat:
+            p = filepat.split('.h5')
             dir, base = os.path.split(p[0])
             fp = '{}.h5{}'.format(base, p[1])
             return glob_h5(os.path.abspath(dir), self._pat2mat(fp))
@@ -422,20 +428,227 @@ class Block3r(Stapl3r):
         else:
             return sorted(glob.glob(os.path.abspath(self._pat2mat(filepat))))
 
-    def _get_filepaths(self, blocks=[]):
+    def _prep_paths_blockfiles(self, paths, block, key='blockfiles', reps={}):
+        """Format path to blockfile."""
 
-        if not blocks:
-            blocks = list(range(len(self.blocks)))
+        blockbase = self._blocks[block.idx].path.replace('.h5/{ods}', '')
+        filepath = os.path.join(self.datadir, blockbase)
+        filestem = os.path.basename(filepath)
 
-        filepaths = []
-        for block in blocks:
-            block = self._blocks[block[0]]
-            outputs = self._prep_paths(self.outputs, reps={'b': block.idx})
-            filepaths.append(outputs['blockfiles'])
+        reps['b'] = block.idx
+        reps['f'] = filestem
 
-        return filepaths
+        return self._prep_paths(paths, reps=reps)
+
+    def get_padding(self, block, dims):
+        """Return pad_width from slices overshoot and truncated slices."""
+
+        padding, slices = [], []
+
+        for bslc, al, m in zip(block.slices, block.axlab, dims):
+
+            if bslc.start < 0:
+                pad_before = -bslc.start
+                start = 0
+            else:
+                pad_before = 0
+                start = bslc.start
+
+            if bslc.stop > m:
+                pad_after = bslc.stop - m
+                stop = m
+            else:
+                pad_after = 0
+                stop = bslc.stop
+
+            slices.append(slice(start, stop))
+            padding.append((pad_before, pad_after))
+
+        return tuple(padding), slices
+
+    def _find_squeezed_dims(self, im=None, squeezed=''):
+        """Determine dimensions that are squeezed in the blocks."""
+
+        if not self.squeeze:
+            pass
+
+        elif isinstance(self.squeeze, str):
+            squeezed = self.squeeze
+
+        elif isinstance(self.squeeze, bool):
+            for al in im.axlab:
+                if self.blocksize[al] == 1 and self.blockmargin[al] == 0:
+                    squeezed += al
+
+        return squeezed, tuple(im.axlab.index(al) for al in squeezed)
+
+    def read_block(self, im, block):
+        """Read block data as Image object with the same axes layout."""
+
+        pad_width, slices = self.get_padding(block, im.dims)
+
+        im.slices = slices
+        data = im.slice_dataset(squeeze=False)
+
+        if pad_width is not None:
+            data = np.pad(data, pad_width, mode=self.pad_mode, **self.pad_kwargs)
+
+        ref_props = im.get_props2()
+
+        return self._create_block_image(data, ref_props)
+
+    def _create_block_image(self, data, props, path=''):
+        """Create Image object from data and reference Image (internal use)."""
+
+        props['path'] = path
+        props['shape'] = data.shape
+        props['dims'] = data.shape
+        props['dtype'] = data.dtype
+        props['slices'] = None
+
+        im = Image(**props)
+        im.create()
+        im.ds[:] = data
+
+        return im
+
+    def write_block(self, im, block, ods='data', squeeze='', outlayout='', remove_margins=False, merged_output=False):
+        """Write a block to (merged) datafile."""
+
+        # TODO: squeeze if self.squeeze=True and dim=1?
+        squeeze = set(list(squeeze))
+        if outlayout:
+            squeeze &= set(list(im.axlab)) - set(list(outlayout))
+        squeeze = ''.join(squeeze)
+        if squeeze:
+            im.squeeze(squeeze)
+
+        if outlayout:  # TODO: sanity checking
+            im.transpose(outlayout)
+
+        # default to full range for all dims
+        slcs_block = {al: slice(0, sh) for al, sh in zip(im.axlab, im.dims)}
+        slcs_full = {al: slice(0, sh) for al, sh in zip(im.axlab, im.dims)}
+
+        if remove_margins or merged_output:  # set to margins for all dims in block.axlab
+            slcs_block, slcs_full = self.get_slices(block, slcs_block, slcs_full)
+
+        slcs_block = tuple(slcs_block[al] for al in im.axlab)
+        slcs_full = tuple(slcs_full[al] for al in im.axlab)
+
+        im.slices = slcs_block
+        data = im.slice_dataset(squeeze=False)
+
+        if merged_output:
+            # TODO!
+            mo = Image('test_out.h5/data', permission='r+')
+            mo.load() # comm=None
+            mo.slices = tuple(slcs_full[al] for al in mo.axlab)
+            mo.write(data.astype(mo.dtype))
+            mo.close()
+
+        else:
+
+            props = self._find_outputprops_blocks(im, block, ods, slcs_block)
+            self.create_datafile(props, squeeze, data=data.astype(props['dtype']))
+
+    def get_slices(self, block, slcs_in, slcs_out):
+
+        merge_axes = [al for al, fs in self.fullsize.items() if self.blocksize[al] >= fs]
+        for al in block.axlab:
+            l = block.slices[block.axlab.index(al)].start
+            u = block.slices[block.axlab.index(al)].stop
+            (ol, ou), (il, iu) = self._margins(
+                l, u,
+                self.blocksize[al],
+                self.blockmargin[al],
+                self.fullsize[al],
+            )
+            slcs_in[al] = slice(il, iu)  # into the block
+            slcs_out[al] = slice(ol, ou)  # into the full dataset
+
+        return slcs_in, slcs_out
+
+    def _create_output_merged(self):
+        """..."""
+
+        self.block = self._blocks[0]
+
+        inputs = self._prep_paths_blockfiles(self.inputpaths['predict'], self.block, key='data')
+        outputs = self._prep_paths_blockfiles(self.outputs, self.block)
+
+        self.input_image = Image(inputs['data'], permission='r')
+        self.input_image.load()
+        props = self._find_outputprops(self.input_image, self.block)
+        props['path'] = 'test_out.h5/data'
+        props['dims'] = props['shape'] = [self.fullsize[al] for al in props['axlab']]
+        squeezed, _ = self._find_squeezed_dims(self.input_image)
+        self.input_image.close()
+
+        self.create_datafile(props)
+
+        self.input_image, self.output_image, self.block = None, None, None
+
+    def _find_outputprops(self, im, block):
+
+        props = im.get_props2()
+        props['permission'] = 'r+'
+        props['path'] = os.path.join(self.datadir, block.path.format(ods='data'))  # outputs['data']  # FIXME
+        props['dtype'] = self.datatype or props['dtype']
+        props['chunks'] = self.chunksize or [max(64, self.blockmargin[al])
+                                             if al in 'xy' else s
+                                             for al, s in zip(im.axlab, im.dims)]
+        props['shape'] = list(im.slices2shape(list(block.slices)))
+        props['dims'] = list(im.slices2shape(list(block.slices)))
+        props['slices'] = None
+
+        return props
+
+    def _find_outputprops_blocks(self, im, block, ods='data', slices=None):
+
+        # reset slices to full block
+        if slices is None:
+            im.slices = None
+            im.set_slices()
+        else:
+            im.slices = slices
+
+        props = im.get_props2()
+
+        props['permission'] = 'r+'
+
+        props['path'] = os.path.join(self.datadir, block.path.format(ods=ods))
+
+        props['dtype'] = self.datatype or props['dtype']
+
+        default_chunks = self._default_chunks(dict(zip(im.axlab, im.dims)))
+        props['chunks'] = self.chunksize or default_chunks
+
+        props['shape'] = props['dims'] = list(im.slices2shape(im.slices))
+
+        props['slices'] = None
+
+        return props
+
+    def create_datafile(self, props, squeeze='', data=None):
+
+        mo = Image(**props)
+        mo.squeeze(squeeze)
+        mo.create()
+        if data is not None:
+            mo.write(data.astype(mo.dtype))
+        mo.close()
+
+    def _default_chunks(self, dims, min_chunksize_zyx=32, full_dimension=True):
+
+        chunksize = [max(min_chunksize_zyx, self.blockmargin[al])
+                     if al in 'zyx' else s if full_dimension else 1
+                     for al, s in dims.items()]
+
+        return chunksize
 
     def view(self, input=[], images=[], labels=[], settings={}):
+        """View blocks with napari."""
 
         if images is not None:
             images = images or self._images
@@ -487,11 +700,14 @@ class Splitt3r(Block3r):
         default_attr = {
             'volumes': {},
             'output_ND': False,
+            'datatype': '',  # TODO
+            'chunksize': [],  # TODO
+
+            'ods': 'data',
             'squeeze': '',
-            'datatype': '',
-            'chunksize': [],
-            'pad_mode': 'constant',
-            'pad_kwargs': {},
+            'outlayout': '',
+            'remove_margins': False,
+            'merged_output': False,
         }
         for k, v in default_attr.items():
             setattr(self, k, v)
@@ -511,48 +727,20 @@ class Splitt3r(Block3r):
 
     def _init_paths_splitter(self):
 
-        # FIXME: moduledir (=step_id?) can vary
-        prev_path = {
-            'moduledir': 'biasfield', 'module_id': 'biasfield',
-            'step_id': 'biasfield', 'step': 'postprocess',
-            'ioitem': 'outputs', 'output': 'aggregate',
-            }
-        datapath = self._get_inpath(prev_path)
-        if datapath == 'default':
-            datapath = self._build_path(
-                moduledir=prev_path['moduledir'],
-                prefixes=[self.prefix, prev_path['module_id']],
-                ext='h5',
-                )
-
-        prev_path = {
-            'moduledir': 'biasfield', 'module_id': 'biasfield',
-            'step_id': 'biasfield', 'step': 'postprocess',
-            'ioitem': 'outputs', 'output': 'aggregate_ds',
-            }
-        biaspath = self._get_inpath(prev_path)
-        if biaspath == 'default':  # FIXME: has to default to not correcting?
-            biaspath = self._build_path(
-                moduledir=prev_path['moduledir'],
-                prefixes=[self.prefix, prev_path['module_id']],
-                suffixes=['ds'],
-                ext='h5',
-                )
-
         vols = list(self.volumes.keys())
         vols += ['data'] if self.output_ND else []
 
-        os.makedirs('blocks', exist_ok=True)
         bpat = self._build_path(moduledir='blocks',
                                 prefixes=[self.prefix, 'blocks'],
                                 suffixes=[{'b': 'p'}])
 
         blockfiles = self.outputpaths['blockinfo']['blockfiles']
+
         self._paths.update({
             'split': {
                 'inputs': {
                     'data': self.inputpaths['blockinfo']['data'],
-                    'bias': '',  #f'{biaspath}/bias',
+                    'bias': '',
                     },
                 'outputs': {
                     **{'blockfiles': blockfiles},
@@ -561,13 +749,16 @@ class Splitt3r(Block3r):
                 },
             })
 
+        blockdir = os.path.join(self.datadir, 'blocks')
+        os.makedirs(blockdir, exist_ok=True)
+
         for step in self._fun_selector.keys():
             step_id = 'blocks' if step=='blockinfo' else self.step_id
             self.inputpaths[step]  = self._merge_paths(self._paths[step], step, 'inputs', step_id)
             self.outputpaths[step] = self._merge_paths(self._paths[step], step, 'outputs', step_id)
 
     def split(self, **kwargs):
-        """Average membrane and nuclear channels and write as blocks."""
+        """Average channels and write as blocks."""
 
         arglist = self._prep_step('split', kwargs)
         with multiprocessing.Pool(processes=self._n_workers) as pool:
@@ -581,77 +772,72 @@ class Splitt3r(Block3r):
         inputs = self._prep_paths_blockfiles(self.inputs, block, key='data')
         outputs = self._prep_paths_blockfiles(self.outputs, block)
 
-        # INPUT
-        infile = inputs['data']
-        """
-        if self.filepaths:
-            infile = self.filepaths[block.idx]
-        else:
-            infile = inputs['data'].format(b=block.idx)
-        """
+        self.input_image = Image(inputs['data'], permission='r')
+        self.input_image.load()
 
-        print('Writing block with id {} to {}'.format(block.id, block.path))
+        # FIXME: it reads the whole block, which may not be required
+        im = self.read_block(self.input_image, block)
 
-        im = Image(infile, permission='r')
-        im.load()
+        mos = self.process_block(im)
 
-        pad_width, slices = get_padding(block, im.dims)
-        im.slices = slices
+        for volname, (mo, outargs) in mos.items():
+            self.write_block(mo, block, volname, **outargs)
 
-        bf, bias_dsfacs = None, []
-        if inputs['bias']:
-            bf = Image(inputs['bias'], permission='r')
-            bf.load()
-            bias_dsfacs = [round(bf.elsize[bf.axlab.index(dim)] /
-                                 im.elsize[im.axlab.index(dim)])
-                           for dim in bf.axlab]
+        self.input_image.close()
 
-        # OUTPUTS Image, 3D and ND
-        props = im.get_props2()
-        props['path'] = block.path.format(ods='data')  # outputs['data']
-        props['permission'] = 'r+'
-        props['dtype'] = self.datatype or props['dtype']
-        props['chunks'] = self.chunksize or [max(64, self.blockmargin[al])
-                                             if al in 'xy' else s
-                                             for al, s in zip(im.axlab, im.dims)]
-        props['shape'] = list(im.slices2shape(list(block.slices)))
-        props['dims'] = list(im.slices2shape(list(block.slices)))
-        props['slices'] = None
+    def process_block(self, im):
+        """Process datablock."""
 
-        squeezed, squeezed_idxs = self._find_squeezed_dims(im)
+        mos = {}
 
-        if not self.volumes:  # no need for channel averaging
+        if self.output_ND:
+            outargs = {
+                'squeeze': '',
+                'outlayout': '',
+                'remove_margins': self.remove_margins,
+                'merged_output': self.merged_output,
+                }
+            mos['data'] = (im, outargs)
 
-            mo_ND = Image(**props)
-            mo_ND.squeeze(squeezed)
-            mo_ND.create()
-
-            data = im.slice_dataset(squeeze=False).astype('float')
-            data = biasfield_correction(data, im.slices, bf, bias_dsfacs)
-            data = np.pad(data, pad_width, mode=self.pad_mode, **self.pad_kwargs)
-            data = np.squeeze(data, axis=squeezed_idxs)
-
-            mo_ND.write(data.astype(mo_ND.dtype))
-            mo_ND.close()
-
-            return
-
+        if not self.volumes:
+            return mos
 
         if 'c' not in im.axlab:
             print('No channel axis label; cannot perform channel averaging')
             return
 
+        outargs = {
+            'squeeze': 'ct',
+            'outlayout': '',
+            'remove_margins': self.remove_margins,
+            'merged_output': self.merged_output,
+            }
 
+        c_axis = im.axlab.index('c')
+        ref_props = im.get_props()
+        ref_props['shape'][c_axis] = 1
 
+        voldicts = self._get_voldicts(im, ref_props)
 
+        # aggrgegate weighted sums in output['data']
+        ch_idxs = set([l for k, v in voldicts.items() for l in v['idxs']])
+        for ch_idx in ch_idxs:
+            im.slices[c_axis] = slice(ch_idx, ch_idx + 1, None)
+            data = im.slice_dataset(squeeze=False).astype('float')
+            for name, output in voldicts.items():
+                if ch_idx in output['idxs']:
+                    data *= output['weights'][output['idxs'].index(ch_idx)]
+                    output['data'] += data
 
-        if self.output_ND:
-            mo_ND = Image(**props)
-            mo_ND.squeeze(squeezed)
-            mo_ND.create()
+        for name, output in voldicts.items():
+            output['data'] /= len(output['idxs'])
+            result = output['data'].astype(ref_props['dtype'])
+            mo = self._create_block_image(result, ref_props)
+            mos[output['ods']] = (mo, outargs)
 
-        mo_3D = Image(**props)
-        mo_3D.squeeze('c')
+        return mos
+
+    def _get_voldicts(self, im, props):
 
         idxs = [i for i in range(im.dims[im.axlab.index('c')])]
         vols = {k: v for k, v in self.volumes.items()}
@@ -660,59 +846,12 @@ class Splitt3r(Block3r):
                 'ods': k,
                 'idxs': idxs,
                 'weights': [1] * len(idxs),
-                'dtype': mo_3D.dtype,
-                'data': np.zeros(mo_3D.shape, dtype='float'),
+                'dtype': self.datatype or props['dtype'],
+                'data': np.zeros(props['shape'], dtype='float'),
                 }
             vols[k] = {**default, **ov}
 
-        # Collect all channel indices to process.
-        ch_idxs = set([])
-        if self.output_ND:
-            ch_idxs |= set(list(range(im.slices[im.axlab.index('c')].start, im.slices[im.axlab.index('c')].stop)))
-        ch_idxs |= set([l for k, v in vols.items() for l in v['idxs']])
-
-        for ch_idx in ch_idxs:
-
-            im.slices[im.axlab.index('c')] = slice(ch_idx, ch_idx + 1, None)
-
-            data = im.slice_dataset(squeeze=False).astype('float')
-            data = biasfield_correction(data, im.slices, bf, bias_dsfacs)
-            data = np.pad(data, pad_width, mode=self.pad_mode, **self.pad_kwargs)
-            data = np.squeeze(data, axis=squeezed_idxs)
-
-            if self.output_ND:
-                if 'c' not in squeezed:
-                    mo_ND.slices[mo_ND.axlab.index('c')] = slice(ch_idx, ch_idx + 1, None)
-                mo_ND.write(data.astype(mo_ND.dtype))
-
-            for name, output in vols.items():
-                if ch_idx in output['idxs']:
-                    idx = output['idxs'].index(ch_idx)
-                    data *= output['weights'][idx]
-                    output['data'] += np.squeeze(data)
-
-        mo_ND.close()
-
-        for name, output in vols.items():
-            output['data'] /= len(output['idxs'])
-            write_image(mo_3D.get_props2(),
-                        block.path.format(ods=output['ods']),
-                        output['data'].astype(mo_3D.dtype))
-
-    def _find_squeezed_dims(self, im=None, squeezed=''):
-
-        if not self.squeeze:
-            pass
-
-        elif isinstance(self.squeeze, str):
-            squeezed = self.squeeze
-
-        elif isinstance(self.squeeze, bool):
-            for al in im.axlab:
-                if self.blocksize[al] == 1 and self.blockmargin[al] == 0:
-                    squeezed += al
-
-        return squeezed, tuple(im.axlab.index(al) for al in squeezed)
+        return vols
 
     def view(self, input=[], images=[], labels=[], settings={}):
 
@@ -835,7 +974,7 @@ class Merg3r(Block3r):
     def _mergeblocks(self, volume_idx):
         """Merge blocks of data into a single hdf5 file."""
 
-        # inputs = self._prep_paths(self.inputs)
+        inputs = self._prep_paths(self.inputs)
         outputs = self._prep_paths(self.outputs)
 
         volume = self._volumes[volume_idx]
@@ -844,44 +983,74 @@ class Merg3r(Block3r):
         ukey = f'{volname}_ulabels'
         ulabelpath = outputs[ukey] if ukey in outputs.keys() else ''
 
+        # Select a subset blocks
+        self.blocks = self.blocks or list(range(len(self._blocks)))
+
+
+
+
+        # CASES:
+        # - blocklayout to identical layout
+        # - new axes
+        # - squeezed axes in block-data
+        # - squeezed axes in output data
+
+
+
         # Properties of the input blocks
-        im = Image(self._blocks[self.blocks[0]].path.format(ods=volname), permission='r')
+
+
+
+        block0 = self._blocks[self.blocks[0]]
+        im = Image(block0.path.format(ods=volname), permission='r')
         im.load()
         props = im.get_props2()
         im.close()
 
         props['path'] = outputs[volname]  #f'{outstem}.h5/{volname}'
         props['permission'] = 'r+'
-        props['axlab'] = self.inlayout or props['axlab']
-        props['elsize'] = self.elsize or props['elsize']
         props['dtype'] = self.datatype or props['dtype']
         props['chunks'] = props['chunks'] or None
+        # FIXME: squeezed blocks with dim=3 (eg split over T) have 4d elsize but 3d axlab
+        # props['axlab'] = self.inlayout or props['axlab']
+        # props['elsize'] = self._elsize or props['elsize']
 
-        merge_axes = ''
-        for al in im.axlab:
-            # 1. check if the volume was split over dimension K
-            block0 = self._blocks[0]
-            ax_idx = block0.axlab.index(al)
-            axis_blocked = block0.slices[ax_idx].stop != self.fullsize[al]
-            # 2. check if merging is desired (default: True if axis_blocked)
-            if axis_blocked:
-                merge_axes += al
+        props['axlab'] = ''.join(block0.axlab)
+        props['elsize'] = block0.elsize
 
-        dims = [self.fullsize[al] if al in merge_axes else props['dims'][im.axlab.index(al)]
-                for al in props['axlab']]
 
-        props['dims'] = dims
-        props['shape'] = dims
+        merge_axes = [al for al, fs in self.fullsize.items() if self.blocksize[al] >= fs]
+
+        dims = self.fullsize
+
+        # FIXME: im can be squeezed
+        # dims = [self.fullsize[al] if al in merge_axes else props['dims'][im.axlab.index(al)]
+        #         for al in props['axlab']]
+
+
+        # dims = [self.fullsize[al] if al in merge_axes else props['dims'][block0.axlab.index(al)]
+        #         for al in props['axlab']]
+
+        dims = [self.fullsize[al] for al in props['axlab']]
+
+        props['dims'] = props['shape'] = dims
         props['slices'] = None
+        props['chunks'] = None
+
+
 
         for ax in self.squeeze:
             props = im.squeeze_props(props, dim=props['axlab'].index(ax))
 
+
+        im = Image(inputs['data'], permission='r')
+        im.load()
+        _, squeezed_idxs = self._find_squeezed_dims(im)
+        im.close()
+
+
         mo = LabelImage(**props)
         mo.create()
-
-        # Select a subset blocks
-        self.blocks = self.blocks or list(range(len(self._blocks)))
 
         # Merge the blocks sequentially (TODO: reintroduce MPI with h5-para).
         ulabels = set([])
@@ -892,7 +1061,8 @@ class Merg3r(Block3r):
             im = Image(blockpath, permission='r')
             im.load(load_data=False)
             self.set_slices(im, mo, block, merge_axes)
-            data = im.slice_dataset()
+            data = im.slice_dataset(squeeze=False)
+            data = np.expand_dims(data, axis=squeezed_idxs)
             mo.write(data)
             im.close()
 
@@ -910,6 +1080,7 @@ class Merg3r(Block3r):
         """Set the block's slices on the input block and output volume.
 
         for the axes which need to be merged
+        # TODO: handle shift_final_block_inward
         """
 
         merge_axes = merge_axes or im.axlab
@@ -924,6 +1095,19 @@ class Merg3r(Block3r):
             )
             im.slices[im.axlab.index(al)] = slice(il, iu)
             mo.slices[mo.axlab.index(al)] = slice(ol, ou)
+
+    # def _get_merge_axes(self, im, block, merge_axes=''):
+    #     """Set the block's slices on the input block and output volume."""
+    #
+    #     for al in im.axlab:
+    #         # 1. check if the volume was split over dimension K
+    #         ax_idx = block.axlab.index(al)
+    #         axis_blocked = block.slices[ax_idx].stop != self.fullsize[al]
+    #         # 2. check if merging is desired (default: True if axis_blocked)
+    #         if axis_blocked:
+    #             merge_axes += al
+    #
+    #     return merge_axes
 
     def postprocess(self):
 
@@ -988,140 +1172,16 @@ class Merg3r(Block3r):
             labels = labels or self._labels
 
         if isinstance(input, str):
-            input = input or self._blocks[0].path.replace('/{ods}', '')
+            input = input
         elif isinstance(input, (int, float)):
-            input = self._blocks[input].path.replace('/{ods}', '')
-        elif isinstance(input, list):
-            input = input or list(range(len(self._blocks)))
+            volname = list(self._volumes[input].keys())[0]
+            input = self.outputpaths['merge'][volname]
+        # elif isinstance(input, list):
+        #     input = input or list(range(len(self._blocks)))
+        # TODO: postprocess
+        # TODO: multiple volumes overlaid
 
         super().view(input, images, labels, settings)
-
-
-def blockdict(block_template, suffix_format, start, stop, b_idx, axlab, elsize, blocker_info):
-
-    bdict = {
-        'id': suffix_format.format(b=b_idx),
-        'idx': b_idx,
-        'path': block_template.format(b=b_idx) + '/{ods}',
-        'slices': [slice(sta, sto) for sta, sto in zip(start, stop)],
-        'axlab': axlab,
-        'elsize': elsize,
-        'blocker_info': blocker_info,
-        }
-
-    return bdict
-
-
-def get_padding(block, dims):
-    """Return pad_width from slices overshoot and truncated slices."""
-
-    padding, slices = [], []
-
-    for bslc, al, m in zip(block.slices, block.axlab, dims):
-
-        if bslc.start < 0:
-            pad_before = -bslc.start
-            start = 0
-        else:
-            pad_before = 0
-            start = bslc.start
-
-        if bslc.stop > m:
-            pad_after = bslc.stop - m
-            stop = m
-        else:
-            pad_after = 0
-            stop = bslc.stop
-
-        slices.append(slice(start, stop))
-        padding.append((pad_before, pad_after))
-
-    return tuple(padding), slices
-
-
-def biasfield_correction(data, slices, bf, bias_dsfacs):
-
-    if bf is None:
-        return data
-
-    print('Performing bias field correction.')
-    bias = get_bias_field_block(bf, slices, data.shape, bias_dsfacs)
-    bias = np.reshape(bias, data.shape)
-    data /= bias
-    data = np.nan_to_num(data, copy=False)
-
-    return data
-
-
-def get_bias_field_block(bf, slices, outdims, dsfacs):
-    """Retrieve and upsample the biasfield for a datablock."""
-
-    bf.slices = [slice(int(slc.start / ds), int(slc.stop / ds), 1)
-                 for slc, ds in zip(slices, dsfacs)]
-    bf_block = bf.slice_dataset().astype('float32')
-    bias = resize(bf_block, outdims, preserve_range=True)
-
-    return bias
-
-
-def write_image(props, outputpath, data):
-    #props = im.get_props2()
-    props['path'] = outputpath
-    props['permission'] = 'r+'
-    props['dtype'] = data.dtype
-    mo = Image(**props)
-    mo.create()
-    mo.write(data)
-    return mo
-
-
-def link_blocks(filepath_in, filepath_out, dset_in, dset_out,
-                delete=True, links=True, is_unet=False):
-
-    def delete_dataset(filepath, dset):
-        try:
-            im = Image(f'{filepath}/{dset}', permission='r+')
-            im.load()
-            del im.file[dset_out]
-        except OSError:
-            pass
-        except KeyError:
-            pass
-        im.close()
-
-    if delete:
-        mode = 'w'
-    else:
-        mode = 'r+'
-
-    if links:
-        import h5py
-        f = h5py.File(filepath_out, 'a')
-        if filepath_in == filepath_out:
-            f[dset_out] = f[dset_in]
-        else:
-            f[dset_out] = h5py.ExternalLink(filepath_in, dset_in)
-
-    else:
-
-        im = Image(f'{filepath_in}/{dset_in}', permission='r')
-        im.load(load_data=False)
-
-        props = im.get_props()
-        if is_unet:
-            props['axlab'] = 'zyx'
-            props['shape'] = props['shape'][1:]
-            props['slices'] = props['slices'][1:]
-            props['chunks'] = props['chunks'][1:]
-
-        data = im.slice_dataset(squeeze=True)
-
-        im.close()
-
-        mo = Image(f'{filepath_out}/{dset_out}', permission=mode, **props)
-        mo.create()
-        mo.write(data)
-        mo.close()
 
 
 if __name__ == "__main__":
