@@ -85,7 +85,7 @@ STAPL-3D is most easily installed (< 5 min) with `conda <https://docs.conda.io/e
 
 .. code-block:: console
 
-  git clone https://github.com/RiosGroup/STAPL3D.git
+  git clone -b dev1.0.0 https://github.com/RiosGroup/STAPL3D.git
   cd STAPL3D
 
   conda env create -f environment.yml

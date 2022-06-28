@@ -13,8 +13,8 @@ dependencies:
   - pypdf2>=1.26.0
   - cython>=0.29.20
   - pip>=20.0.2
-  - pip:
-     - git+git://github.com/RiosGroup/scikit-image.git#egg=scikit-image
-     - czifile>=2019.7.2
-     - readlif>=0.2.1
-     - nibabel>=3.1.0
+  - scikit-image
+  - napari
+  - czifile>=2019.7.2
+  - readlif>=0.2.1
+  - nibabel>=3.1.0
