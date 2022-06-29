@@ -1360,7 +1360,7 @@ class Image(object):
                 ch0 = tp['Channel {}'.format(ch0_idx)]
                 ds0 = ch0['Data']
                 hg0 = ch0['Histogram']
-                #hg00 = ch0['Histogram1024']
+                hg00 = ch0['Histogram1024']
 
                 chn = tp.create_group(chn_name)
                 dsn = chn.create_dataset('Data',
@@ -1368,9 +1368,10 @@ class Image(object):
                                          dtype=datatype,
                                          chunks=ds0.chunks,
                                          compression=ds0.compression,
+                                         compression_opts=ds0.compression_opts,
                                          )
                 hgn = chn.create_dataset_like('Histogram', hg0)
-                #hgn = chn.create_dataset_like('Histogram1024', hg00)
+                hgn = chn.create_dataset_like('Histogram1024', hg00)
 
                 for dim in 'XYZ':
                     isd = 'ImageSize{}'.format(dim)
@@ -1551,16 +1552,16 @@ class Image(object):
                 for k, v in attributes.items():
                     write_attribute(chn, k, v[0], v[1])
 
-                #hgn1024 = chn['Histogram1024']
-                #hist1024 = np.histogram(data_rl, bins=hgn1024.shape[0])
-                #hgn1024[:] = hist1024[0]
+                hgn1024 = chn['Histogram1024']
+                hist1024 = np.histogram(data_rl, bins=hgn1024.shape[0])
+                hgn1024[:] = hist1024[0]
                 # write histogram attributes
-                #attributes = {
-                #    'HistogramMin1024': (np.amin(hist1024[1]), '{:.3f}'),
-                #    'HistogramMax1024': (np.amax(hist1024[1]), '{:.3f}'),
-                #}
-                #for k, v in attributes.items():
-                #    write_attribute(chn, k, v[0], v[1])
+                attributes = {
+                    'HistogramMin1024': (np.amin(hist1024[1]), '{:.3f}'),
+                    'HistogramMax1024': (np.amax(hist1024[1]), '{:.3f}'),
+                }
+                for k, v in attributes.items():
+                    write_attribute(chn, k, v[0], v[1])
 
     def nii_write(self, data, slices):
         """Write data to a nifti dataset."""
