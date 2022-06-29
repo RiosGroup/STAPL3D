@@ -3391,7 +3391,8 @@ class Stapl3r(object):
         paths = {ids: self._l2p(p) for ids, p in paths.items()}
 
         for ids, p in paths.items():
-            paths[ids] = p.format_map(reps)
+            if reps:
+                paths[ids] = p.format_map(reps)
 
         if abs:
             paths = {ids: self._abs(p) for ids, p in paths.items()}
