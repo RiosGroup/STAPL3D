@@ -4035,6 +4035,7 @@ class Stapl3r(object):
         mpaths.sort()
 
         try:
+            os.makedirs(os.path.dirname(outputs[filetype]), exist_ok=True)
             fun(mpaths, outputs[filetype], **kwargs)
             for mpath in mpaths:
                 os.remove(mpath)
