@@ -323,6 +323,9 @@ class Mask3r(Stapl3r):
             p = self.load_dumped_pars()
             kwargs['parameters'] = p
 
+        kwargs['parameters']['thresholds'] = self.thresholds
+        kwargs['parameters']['thresholds_slicewise'] = self.thresholds_slicewise
+
         if 'outputs' in kwargs.keys():
             filepath = self._abs(kwargs['inputs']['mask'])
         else:
