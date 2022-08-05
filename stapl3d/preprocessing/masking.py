@@ -191,7 +191,7 @@ class Mask3r(Stapl3r):
                 'outputs': {
                     'file': f'{stem}.h5',
                     'dist2edge': f'{stem}.h5/dist2edge',
-                    'report': f'{stem}.pdf',
+                    'report': os.path.join(self._logdir, f'{stem}.pdf'),
                     },
                 },
             }
