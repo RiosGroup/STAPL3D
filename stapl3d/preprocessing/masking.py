@@ -150,7 +150,7 @@ class Mask3r(Stapl3r):
                 ext='bdv',
                 )
 
-        stem = self._build_path()
+        stem = self._build_basename()
         self._paths = {
             'extract_mean': {
                 'inputs': {
