@@ -3710,6 +3710,8 @@ class Stapl3r(object):
     def set_view(self, settings={}):
         """Viewer settings functions."""
 
+        self.viewer.reset_view()
+
         # Set the window title bar.
         if 'title' in settings.keys():
             self.viewer.title = settings['title']
