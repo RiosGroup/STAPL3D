@@ -80,20 +80,29 @@ class Image(object):
                  chunks=None, compression='gzip', series=0,
                  protective=False, permission='r+'):
 
+        # TODO: squeeze and permute?
+
+        def dict_to_list(axlab, prop):
+            if isinstance(prop, dict):
+                return [prop[al] for al in axlab]
+            else:
+                return prop
+
         self.path = path
-        self.elsize = elsize  # TODO: translations / affine
+        self.elsize = dict_to_list(axlab, elsize)  # TODO: translations / affine
         self.axlab = axlab
         self.dtype = dtype
         self.reslev = reslev
         if shape is None:
             shape = dims
-        self.dims = shape
-        self.shape = shape
+        self.dims = dict_to_list(axlab, shape)
+        self.shape = dict_to_list(axlab, shape)
+
         if slices is not None:
-            self.slices = slices
+            self.slices = dict_to_list(axlab, slices)
         else:
             self.slices = self.get_slice_objects(dataslices)
-        self.chunks = chunks
+        self.chunks = dict_to_list(axlab, chunks)
         self.compression = compression
         self.series = series
         self.protective = protective
@@ -1263,8 +1272,10 @@ class Image(object):
         """Write the dimension labels to a dataset."""
 
         if self.axlab is not None:
-            for i, label in enumerate(self.axlab):
-                self.ds.dims[i].label = label
+            # FIXME: throws segfault if it already exists as as string
+            # for i, label in enumerate(self.axlab):
+            #     self.ds.dims[i].label = label
+            self.ds.attrs['DIMENSION_LABELS'] = self.axlab
 
     def h5_write_attributes(self):
         """Write attributes to a dataset."""
