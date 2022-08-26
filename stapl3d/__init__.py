@@ -3624,74 +3624,81 @@ class Stapl3r(object):
 
             return data
 
-        def get_block_outline(block, labelval='idx'):
-
-            axlab = block.axlab
-            elsize = [block.elsize[axlab.index(al)] for al in axlab if al in 'xyz']
-            affine = self._view_trans_affine(block.affine, elsize)
-            scale = tuple(es for es in block.elsize)
-            translation = tuple(slc.start * es for slc, es in zip(block.slices, block.elsize))
-            shape = [slc.stop - slc.start for slc in block.slices]
-
-            labelval = block.idx + 2 if labelval == 'idx' else labelval
-
-            data = create_grid(np.array(shape), labelval=labelval)
-
-            return data, affine, translation, scale
-
         block0 = self._blocks[block_idxs[0]]
-        block_id0 = block0.id
 
-        dstack = []
-
-        if 'fullsize' in self._view_layout:
-            shape = [self.fullsize[al] for al in self._blocks[block_idxs[0]].axlab]
-            data = create_grid(np.array(shape), labelval=1, dtype='uint8', thickness=1)
-            scale = tuple(block0.elsize)
-            translate = tuple(0.0 for _ in block0.elsize)
-            self.viewer.add_labels(data, name='fullsize', scale=scale, translate=translate)
+        stack_offset = np.array([0, 0, 0])
 
         for block_idx in block_idxs:
 
             block = self._blocks[block_idx]
-            filepath = block.path.replace('/{ods}', '')
 
-            if 'margins' in self._view_layout:
-                block0 = self._blocks0[block_idx]
-                data, affine, translate, scale = get_block_outline(block0, labelval=2)
-                self.viewer.add_labels(data, name=f'{block.id}', scale=scale, translate=translate)
+            for ids in images + labels + self.view_block_layout:
 
-            if 'blocks' in self._view_layout:
-                data, affine, translate, scale = get_block_outline(block, labelval=3)
-                self.viewer.add_labels(data, name=f'{block.id}_margin', scale=scale, translate=translate)
+                if not ids in self.view_block_layout:
+                    block.create_dataset(ids)
+                    block_ds = block.datasets[ids]
+                    block_ds.read(from_block=True)
+                elif not images + labels:  # only layout => construct all dimensions, possibly cannot do affine
+                    pass  # TODO
 
-            for ids in images + labels:
+                elsize = [block_ds.elsize[al] for al in block_ds.axlab]
 
-                im = Image('{}/{}'.format(filepath, ids), permission='r')
-                im.load(load_data=False)
-                im.close()
-                affine = self._view_trans_affine(block.affine, block.elsize[:3])
+                if ids == 'margins':
+                    name = f'{block.id}_margin'
+                    affine = block.affine
+                    slices = [block_ds.slices[al] for al in block_ds.axlab]
+                    shape = [slc.stop - slc.start for slc in slices]
+                    data = create_grid(np.array(shape), labelval=3)
 
-                name = f'{block.id}_{ids}'
-                data = self._get_h5_dset(filepath, ids, slices)
+                elif ids == 'blocks':
+                    name = f'{block.id}_region'
+                    affine = block.affine_region
+                    slices = [block_ds.slices_region[al] for al in block_ds.axlab]
+                    shape = [slc.stop - slc.start for slc in slices]
+                    data = create_grid(np.array(shape), labelval=2)
 
-                if self._view_stacked:  # TODO: stack through translation matrix?
-                    dstack.append(data)
+                elif ids == 'fullsize':
+                    if block_idx != block_idxs[-1]:  # only on the last block
+                        continue
+                    name = f'dataset_region'
+                    from stapl3d.preprocessing.registration import get_affine  #TODO
+                    affine = get_affine([0, 0, 0], elsize, [0, 0, 0])
+                    data = create_grid(
+                        np.array([self.fullsize[al] for al in block_ds.axlab]),
+                        labelval=1, dtype='uint8', thickness=1,
+                        )
+
                 else:
-                    if ids in images:
-                        self.viewer.add_image(data, name=name, affine=affine)
-                        clim = self.viewer.layers[f'{block_id0}_{ids}'].contrast_limits
-                        self.viewer.layers[f'{block.id}_{ids}'].contrast_limits = clim
-                    if ids in labels:
-                        self.viewer.add_labels(data, name=name, affine=affine)
+                    name = f'{block.id}_{ids}'
+                    affine = block.affine
+                    data = block_ds.image.ds
 
-        axlab = im.axlab
+                affine = np.copy(affine)
+                for i in range(3):
+                    affine[i, 3] = affine[i, 3] + stack_offset[i]
+
+                if ids in images:
+                    self.viewer.add_image(data, name=name, scale=elsize, affine=affine)
+                    # set equal clim
+                    clim = self.viewer.layers[f'{block0.id}_{ids}'].contrast_limits
+                    self.viewer.layers[f'{block.id}_{ids}'].contrast_limits = clim
+                else:
+                    self.viewer.add_labels(data, name=name, scale=elsize, affine=affine)
+
+            if self._view_stacked:
+                z_idx = block_ds.axlab.index('z')
+                stack_offset += elsize[z_idx] * block_ds.image.ds.shape[z_idx]
+
+        axlab = block.axlab
+
+        """
         if self._view_stacked:
             if ids in images:
                 self.viewer.add_image(np.stack(dstack), name=name)
             if ids in labels:
                 self.viewer.add_labels(np.stack(dstack), name=name)
             axlab = 'b' + axlab
+        """
 
         self.viewer.dims.axis_labels = [al for al in axlab]
 
