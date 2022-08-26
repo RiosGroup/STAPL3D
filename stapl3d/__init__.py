@@ -14,6 +14,8 @@ import re
 import sys
 import h5py
 import glob
+import yaml
+import errno
 import pickle
 import random
 import argparse
@@ -24,49 +26,32 @@ from xml import etree as et
 
 import numpy as np
 
+import napari
+
+from mpi4py import MPI
+
 import matplotlib
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 
-import yaml
-# from ruamel import yaml
+import nibabel as nib
 
-sys.stdout = open(os.devnull, 'w')
-
-try:
-    import nibabel as nib
-except ImportError:
-    print("nibabel could not be loaded")
-
-try:
-    from skimage.io import imread, imsave
-    from skimage.transform import downscale_local_mean
-    from skimage.measure import block_reduce
-except ImportError:  # , AttributeError
-    print("scikit-image io could not be loaded")
+from skimage.io import imread, imsave
+from skimage.transform import downscale_local_mean
+from skimage.measure import block_reduce
 
 try:
     import javabridge as jv
     import bioformats as bf
 except ImportError:
-    print("bioformats could not be loaded")
-
-import errno
-
-try:
-    from mpi4py import MPI
-except ImportError:
-    print("mpi4py could not be loaded")
+    pass
+VM_STARTED = False
+VM_KILLED = False
 
 try:
     import DM3lib as dm3
 except ImportError:
-    print("dm3lib could not be loaded")
-
-sys.stdout = sys.__stdout__
-
-VM_STARTED = False
-VM_KILLED = False
+    pass
 
 
 class Image(object):
