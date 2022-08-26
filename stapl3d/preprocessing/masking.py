@@ -95,7 +95,7 @@ class Mask3r(Stapl3r):
                 },
             'postprocess': {
                 'fpar': self._FPAR_NAMES + ('resolution_level',),
-                'ppar': ('distance_to_edge', 'thresholds_slicewise'),
+                'ppar': ('distance_to_mask', 'thresholds_slicewise'),
                 'spar': ('_n_workers',),
                 },
             }
@@ -117,7 +117,7 @@ class Mask3r(Stapl3r):
             'median_factor': 3,
             'abs_threshold': 0,
             'fill_holes': True,
-            'distance_to_edge': False,
+            'distance_to_mask': False,
             'thresholds': [],
             'thresholds_slicewise': [],
         }
@@ -190,7 +190,7 @@ class Mask3r(Stapl3r):
                     },
                 'outputs': {
                     'file': f'{stem}.h5',
-                    'dist2edge': f'{stem}.h5/dist2edge',
+                    'dist_to_mask': f'{stem}.h5/dist_to_mask',
                     'report': os.path.join(self._logdir, f'{stem}.pdf'),
                     },
                 },
@@ -275,8 +275,8 @@ class Mask3r(Stapl3r):
         if not self.thresholds_slicewise:
             self.set_thresholds(self.thresholds, inputs)
 
-        if self.distance_to_edge:
-            im_edt = calculate_distance_to_edge(inputs['mask'], outputs['dist2edge'])
+        if self.distance_to_mask:
+            im_edt = calculate_distance_to_mask(inputs['mask'], outputs['dist_to_mask'])
             im_edt.close()
 
         self.report(outputpath=outputs['report'], inputs=inputs, outputs=outputs)
@@ -364,7 +364,7 @@ class Mask3r(Stapl3r):
             'contours': ('Thresholds', 'lcm', 0),
             'z': ('Z thresholds', 'rc', 0),
             'mask': ('Mask', 'lcm', 0),
-            'dist2edge': ('Distance to mask', 'rcm', 2),
+            'dist_to_mask': ('Distance to mask', 'rcm', 2),
             }
         self._add_titles(axdict, titles)
 
@@ -395,8 +395,8 @@ class Mask3r(Stapl3r):
 
         cslcs = info_dict['centreslices']
         clim_mean = self._get_clim(cslcs['mean'])
-        if 'dist2edge' in cslcs.keys():
-            clim_d2e = self._get_clim(cslcs['dist2edge'])
+        if 'dist_to_mask' in cslcs.keys():
+            clim_d2e = self._get_clim(cslcs['dist_to_mask'])
 
         for k, v in cslcs.items():
             cslcs[k]['x'] = cslcs[k]['x'].transpose()
@@ -409,8 +409,8 @@ class Mask3r(Stapl3r):
             'contours':  ('right', 'gray',  clim_mean),
             'mask':      ('right', palette, clim_mean),
             }
-        if 'dist2edge' in cslcs.keys():
-            vol_dict['dist2edge'] = ('left',  'rainbow', clim_d2e)
+        if 'dist_to_mask' in cslcs.keys():
+            vol_dict['dist_to_mask'] = ('left',  'rainbow', clim_d2e)
 
         for k, (loc, cmap, clim) in vol_dict.items():
 
@@ -594,7 +594,7 @@ def postproc_masks(image_in, thrs=[], fill_holes=True, outputpath=''):
     return mo
 
 
-def calculate_distance_to_edge(image_in, outputpath=''):
+def calculate_distance_to_mask(image_in, outputpath=''):
     """"Calculate the euclidian distance transform of the mask."""
     # FIXME: assumes zyx
 
