@@ -3736,14 +3736,31 @@ class Stapl3r(object):
         # Show/hide axes.
         if 'axes_visible' in settings.keys():
             self.viewer.axes.visible = settings['axes_visible']
+
         # Set equal contrast limits.
         if 'clim' in settings.keys():
-            for lay in self.viewer.layers:
-                lay.contrast_limits = settings['clim']
+            if isinstance(settings['clim'], dict):
+                for key, clim in settings['clim'].items():
+                    for lay in self.viewer.layers:
+                        if key in lay.name:
+                            lay.contrast_limits = clim
+            else:
+                for lay in self.viewer.layers:
+                    try:
+                        lay.contrast_limits = settings['clim']
+                    except AttributeError:
+                        pass
+
         # Set the layer opacity.
         if 'opacity' in settings.keys():
-            for lay in self.viewer.layers:
-                lay.opacity = settings['opacity']
+            if isinstance(settings['opacity'], dict):
+                for key, opacity in settings['opacity'].items():
+                    for lay in self.viewer.layers:
+                        if key in lay.name:
+                            lay.opacity = opacity
+            else:
+                for lay in self.viewer.layers:
+                    lay.opacity = settings['opacity']
 
     def _init_log(self):
 
