@@ -52,7 +52,41 @@ def main(argv):
 
 
 class Mask3r(Stapl3r):
-    """Generate a mask that covers the tissue."""
+    _doc_main = """Generate a mask that covers the tissue."""
+    _doc_attr = """
+
+    Mark3r Attributes
+    ----------
+    resolution_level : int, default 'smallest not downsampled in Z'
+        Resolution level of the image pyramid to use.
+    channels : list, default [0, 1, ..., N]
+        List of channels indices to process.
+    keep_dtype: bool, default True
+        Retain the input datatype.
+    sigma : float, default 48.0
+        Smoothing kernel size in um.
+    abs_threshold: : float, default 0
+        Absolute threshold.
+    median_factor : int, default 3
+        Factor to calculate threshold from slicewise medians
+        (use 0 to disable).
+    fill_holes : bool, default True
+        Fill holes in the mask (slicewise-fill).
+    distance_to_mask : bool, default False
+        Calculate the distance to the mask.
+    thresholds : list, default []
+
+    thresholds_slicewise : list, default []
+        Thresholds for each slice.
+
+    """
+    _doc_exam = """
+
+    Mask3r Examples
+    --------
+    # TODO
+    """
+    __doc__ = f"{_doc_main}{Stapl3r.__doc__}{_doc_attr}{_doc_exam}"
 
     def __init__(self, image_in='', parameter_file='', **kwargs):
 
