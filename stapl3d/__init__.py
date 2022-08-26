@@ -499,12 +499,15 @@ class Image(object):
         from tifffile import create_output
         from stapl3d.preprocessing import shading
         iminfo = shading.get_image_info(self.path)
+
         data = create_output(None, iminfo['zstack_shape'], iminfo['dtype'])
-        data = np.squeeze(shading.read_zstack(self.path, 0, data))
-        if len(data.shape) == 2:
-            data = np.expand_dims(data, 0)
-        if len(data.shape) == 4:
-            data = np.transpose(data, axes=[1, 2, 3, 0])  # czyx to zyxc
+
+        if load_data:
+            data = np.squeeze(shading.read_zstack(self.path, 0, data))
+            if len(data.shape) == 2:
+                data = np.expand_dims(data, 0)
+            if len(data.shape) == 4:
+                data = np.transpose(data, axes=[1, 2, 3, 0])  # czyx to zyxc
 
         self.ds = data
         self.dims = data.shape
