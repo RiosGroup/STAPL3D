@@ -3940,6 +3940,10 @@ class Stapl3r(object):
 
         cellText = []
         for par, name in self._parameter_table.items():
+
+            if par not in info_dict['parameters']:
+                continue
+
             v = info_dict['parameters'][par]
             if not isinstance(v, list):
                 v = [v]
