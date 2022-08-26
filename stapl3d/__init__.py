@@ -2881,9 +2881,9 @@ def parse_args(step_id, fun_selector, *argv):
 #
 
 class Stapl3r(object):
-    """Base class for STAPL3D framework.
+    """
 
-    Parameters
+    Stapl3r Parameters
     ----------
     image_in : string
         Path to dataset.
@@ -2903,13 +2903,6 @@ class Stapl3r(object):
         Maximal number of cores to use for processing.
     verbosity : int
         Verbosity level.
-
-    Attributes
-    ----------
-
-
-    Examples
-    --------
 
     """
 
