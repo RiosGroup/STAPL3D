@@ -260,7 +260,7 @@ class Segment3r(Block3r):
 
         pdfs = glob(inputs['report'])
         pdfs.sort()
-        self._merge_reports(pdfs, outputs['report'])
+        self._merge(pdfs, outputs['report'], self._merge_reports)
 
     def _get_info_dict(self, **kwargs):
 

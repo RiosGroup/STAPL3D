@@ -349,7 +349,7 @@ class Homogeniz3r(Stapl3r):
 
         pdfs = glob(inputs['report'])
         pdfs.sort()
-        self._merge_reports(pdfs, outputs['report'])
+        self._merge(pdfs, outputs['report'], self._merge_reports)
 
     def stack_bias(self, inputfiles, outputfile, idss=['data', 'bias', 'corr']):
         """Merge the downsampled biasfield images to 4D datasets."""

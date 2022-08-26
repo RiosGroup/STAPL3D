@@ -40,6 +40,8 @@ from skimage.io import imread, imsave
 from skimage.transform import downscale_local_mean
 from skimage.measure import block_reduce
 
+from PyPDF2 import PdfFileMerger
+
 try:
     import javabridge as jv
     import bioformats as bf
@@ -4048,39 +4050,23 @@ class Stapl3r(object):
     def _merge_reports(self, pdfs, outputpath):
         """Merge pages of a report."""
 
-        if not pdfs:
-            return
+        merger = PdfFileMerger()
+        for pdf in pdfs:
+            merger.append(pdf)
+        merger.write(outputpath)
+        merger.close()
 
-        try:
-            from PyPDF2 import PdfFileMerger
-            merger = PdfFileMerger()
-            for pdf in pdfs:
-                merger.append(pdf)
-            merger.write(outputpath)
-            merger.close()
-        except:
-            print('NOTICE: could not merge report pdfs')
-        else:
-            for pdf in pdfs:
-                os.remove(pdf)
-
-    def _merge(self, filetype, fun, **kwargs):
+    def _merge(self, inputfiles, outputfile, fun, **kwargs):
         """Merge files."""
 
-        mpaths = []
-        outputs = self._prep_paths(self.outputs)
-        for filepath in self.filepaths:
-            _, inputs, _ = self._get_filepaths_inout(filepath)
-            #filestem = os.path.splitext(os.path.basename(filepath))[0]
-            #inputs = self._prep_paths(self.inputs, reps={'f': filestem})
-            mpaths.append(inputs[filetype])
-
-        mpaths.sort()
-
         try:
-            os.makedirs(os.path.dirname(outputs[filetype]), exist_ok=True)
-            fun(mpaths, outputs[filetype], **kwargs)
-            for mpath in mpaths:
-                os.remove(mpath)
+            os.makedirs(os.path.dirname(outputfile), exist_ok=True)
+            fun(inputfiles, outputfile, **kwargs)
         except FileNotFoundError:
-            print(f"WARNING: {filetype}s could not be merged")
+            print(f"WARNING: files could not be merged")
+        else:
+            try:
+                for inputfile in inputfiles:
+                    os.remove(inputfile)
+            except FileNotFoundError:
+                print(f"WARNING: files could not be removed")

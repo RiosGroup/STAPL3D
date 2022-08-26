@@ -337,7 +337,7 @@ class Deshad3r(Stapl3r):
 
         pdfs = glob(inputs['report'])
         pdfs.sort()
-        self._merge_reports(pdfs, outputs['report'])
+        self._merge(pdfs, outputs['report'], self._merge_reports)
 
     def apply(self, **kwargs):
         """Apply zstack shading correction for all channels.
