@@ -345,7 +345,7 @@ class Mask3r(Stapl3r):
         gs01 = gs0[1].subgridspec(3, 2, wspace=0.9)
         # FIXME: this wspace=0.9 is because the axis sharing isnt working properly
 
-        idss = ['mean', 'smooth', 'contours', 'z', 'mask', 'dist2edge']
+        idss = ['mean', 'smooth', 'contours', 'z', 'mask', 'dist_to_mask']
         axdict.update({k: gen_orthoplot_with_colorbar(f, gs01[i], idx=i)
                        for i, k in enumerate(idss)})
 
