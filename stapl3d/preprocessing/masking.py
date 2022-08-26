@@ -89,7 +89,7 @@ class Mask3r(Stapl3r):
                 },
             'extract_mask': {
                 'fpar': self._FPAR_NAMES + ('resolution_level',),
-                'ppar': ('use_median_thresholds', 'median_factor',
+                'ppar': ('median_factor',
                          'abs_threshold', 'thresholds', 'thresholds_slicewise'),
                 'spar': ('_n_workers',),
                 },
@@ -103,7 +103,6 @@ class Mask3r(Stapl3r):
         self._parameter_table = {
             'resolution_level': 'Image pyramid resolution level',
             'sigma': 'Smoothing sigma',
-            'use_median_thresholds': 'Use median threshold method',
             'median_factor': 'Median multiplication factor',
             'abs_threshold': 'Absolute threshold / minimum threshold',
             }
@@ -113,7 +112,6 @@ class Mask3r(Stapl3r):
             'channels': [],
             'keep_dtype': True,
             'sigma': 48.0,
-            'use_median_thresholds': True,
             'median_factor': 3,
             'abs_threshold': 0,
             'fill_holes': True,
@@ -302,7 +300,7 @@ class Mask3r(Stapl3r):
 
         self.thresholds = [float(t) for t in thrs]
 
-        if self.use_median_thresholds:
+        if self.median_factor:
             thrs = [max(self.abs_threshold, m / self.median_factor) for m in meds]
         else:
             thrs = [self.abs_threshold for _ in range(0, n_planes)]
