@@ -3556,6 +3556,7 @@ class Stapl3r(object):
                 os.makedirs(directory, exist_ok=True)
 
     def _get_h5_dset(self, filepath, ids, slices={}):
+
         im = Image('{}/{}'.format(filepath, ids), permission='r')
         im.load(load_data=False)
         if slices:
@@ -3566,11 +3567,10 @@ class Stapl3r(object):
                 im.slices[idx] = slc
         data = im.slice_dataset(squeeze=False)
         im.close()
+
         return data
 
     def view(self, input='', images=[], labels=[], settings={}):
-
-        import napari
 
         if images is None:
             images = []
