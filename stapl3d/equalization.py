@@ -32,10 +32,12 @@ from skimage.morphology import remove_small_objects
 
 from stapl3d import parse_args, Stapl3r, Image, transpose_props, get_imageprops, get_paths
 from stapl3d.preprocessing import shading
-from stapl3d.reporting import merge_reports, get_centreslices
+from stapl3d.reporting import get_centreslices
 
 logger = logging.getLogger(__name__)
 
+import warnings
+warnings.filterwarnings("ignore", category=FutureWarning)
 
 def main(argv):
     """Calculate metrics for mLSR-3D equalization assay."""
@@ -53,6 +55,7 @@ def main(argv):
     )
 
     for step in args.steps:
+        print(f'Running {equaliz3r._module_id}:{step}')
         equaliz3r._fun_selector[step]()
 
 
@@ -617,6 +620,12 @@ class Equaliz3r(Stapl3r):
     def _postprocess(self, basename='equalization_assay'):
         """Merge outputs of individual equalization images."""
 
+        def get_filelist(filetype):
+            filelist = [self._get_filepaths_inout(filepath)[1][filetype]
+                        for filepath in self.filepaths]
+            filelist.sort()
+            return filelist
+
         outputs = self._prep_paths(self.outputs)
 
         steps = {
@@ -632,16 +641,21 @@ class Equaliz3r(Stapl3r):
                 ],
         }
         for step, trees in steps.items():
-            self._merge(f'yml_{step}', merge_parameters, trees=trees)
+            self._merge(
+                get_filelist(f'yml_{step}'),
+                outputs[f'yml_{step}'],
+                merge_parameters,
+                trees=trees,
+                )
         pars = self.load_dumped_pars()
         self._sigmas = pars['_sigmas']
         self._otsus = pars['_otsus']
         self.thresholds = pars['thresholds']
         self._metrics = pars['_metrics']
 
-        self._merge('csv', merge_csvs)
+        self._merge(get_filelist('csv'), outputs['csv'], merge_csvs)
 
-        self._merge('report', merge_reports)
+        self._merge(get_filelist('report'), outputs['report'], self._merge_reports)
 
         self.df = pd.read_csv(outputs['csv'], index_col='sample_id')
 
