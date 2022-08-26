@@ -542,72 +542,72 @@ class Block3r(Stapl3r):
     """
     _doc_attr = """
 
-        Block3r Attributes
-        ----------
-        blocks : list, default [0, 1, ..., N]
-            List of block indices to process.
+    Block3r Attributes
+    ----------
+    blocks : list, default [0, 1, ..., N]
+        List of block indices to process.
 
-        fullsize : dict, default {al: <axis-shape> for al in <axislabels>}
-            Axislabel-Size key-value pairs for the full dataset size.
-        blocksize : dict, default {al: <axis-shape> for al in <axislabels>}
-            Axislabel-Size key-value pairs for the block.
-        blockmargin : dict, default {al: 0 for al in <axislabels>}
-            Axislabel-Margin key-value pairs for the block margin / padding.
+    fullsize : dict, default {al: <axis-shape> for al in <axislabels>}
+        Axislabel-Size key-value pairs for the full dataset size.
+    blocksize : dict, default {al: <axis-shape> for al in <axislabels>}
+        Axislabel-Size key-value pairs for the block.
+    blockmargin : dict, default {al: 0 for al in <axislabels>}
+        Axislabel-Margin key-value pairs for the block margin / padding.
 
-        pad_kwargs : dict, default {}
-            Keyword arguments passed to np.pad.
+    pad_kwargs : dict, default {}
+        Keyword arguments passed to np.pad.
 
-        boundary_truncation : str, default 'dataset'
-            Truncate the boundary blocks.
-            (i.e. remove the block padding on boundary blocks).
-            '': no truncation
-            'dataset': truncate to the dataset area
-            'margin': truncate to the dataset area + blockmargin
-        shift_final_block_inward : bool, default False
-            Create blocks of equal size by shifting the final block inward.
+    boundary_truncation : str, default 'dataset'
+        Truncate the boundary blocks.
+        (i.e. remove the block padding on boundary blocks).
+        '': no truncation
+        'dataset': truncate to the dataset area
+        'margin': truncate to the dataset area + blockmargin
+    shift_final_block_inward : bool, default False
+        Create blocks of equal size by shifting the final block inward.
 
     """
     _doc_exam = """
 
-        Examples
-        --------
-        # 1. Creating a block3r that divides HFK16w.ims into a grid of blocks.
-        from stapl3d import blocks
-        block3r = blocks.Block3r('HFK16w.ims')
-        # Print the block information for each block.
-        block3r.print_blockinfo()
+    Examples
+    --------
+    # 1. Creating a block3r that divides HFK16w.ims into a grid of blocks.
+    from stapl3d import blocks
+    block3r = blocks.Block3r('HFK16w.ims')
+    # Print the block information for each block.
+    block3r.print_blockinfo()
 
-        # 2. Creating a block3r with all the czi-images in the current directory.
-        from stapl3d import blocks
-        block3r = blocks.Block3r('{f}.czi')
-        block3r.write_blockinfo()
+    # 2. Creating a block3r with all the czi-images in the current directory.
+    from stapl3d import blocks
+    block3r = blocks.Block3r('{f}.czi')
+    block3r.write_blockinfo()
 
-        # 3. Creating a simple 3D block3r from scratch.
+    # 3. Creating a simple 3D block3r from scratch.
 
-        from stapl3d import blocks
-        block3r = blocks.Block3r()
+    from stapl3d import blocks
+    block3r = blocks.Block3r()
 
-        fullsize = {'z': 100, 'y': 750, 'x': 750}
-        blocksize = {'y': 500, 'x': 500}
-        blockmargin = {'y': 50, 'x': 50}
-        block3r.set_fullsize(fullsize)
-        block3r.set_blocksize(blocksize)
-        block3r.set_blockmargin(blockmargin)
+    fullsize = {'z': 100, 'y': 750, 'x': 750}
+    blocksize = {'y': 500, 'x': 500}
+    blockmargin = {'y': 50, 'x': 50}
+    block3r.set_fullsize(fullsize)
+    block3r.set_blocksize(blocksize)
+    block3r.set_blockmargin(blockmargin)
 
-        block3r.boundary_truncation = 'margin'
+    block3r.boundary_truncation = 'margin'
 
-        block3r.generate_blocks()
+    block3r.generate_blocks()
 
-        # Print the blocker and block information for each block.
-        print(block3r)
-        block3r.print_blockinfo()
+    # Print the blocker and block information for each block.
+    print(block3r)
+    block3r.print_blockinfo()
 
-        # View the block layout in napari
-        block3r.view_block_layout = ['fullsize', 'margins', 'blocks']
-        block3r.view()
+    # View the block layout in napari
+    block3r.view_block_layout = ['fullsize', 'margins', 'blocks']
+    block3r.view()
 
     """
-    __doc__ = f"{_doc_main}{Stapl3r._doc_param.__doc__}{_doc_attr}{_doc_exam}"
+    __doc__ = f"{_doc_main}{Stapl3r.__doc__}{_doc_attr}{_doc_exam}"
 
     def __init__(self, image_in='', parameter_file='', **kwargs):
 
