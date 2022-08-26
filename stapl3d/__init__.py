@@ -3991,9 +3991,10 @@ class Stapl3r(object):
         return extent
 
     def _get_clim(self, cslc, q=[0.05, 0.95], roundfuns=[np.round, np.round]):
-        c_min = np.amin([np.quantile(cslc[d], q[0]) for d in 'xyz'])
+        cslc = {d: np.ma.masked_array(cslc[d]) if not np.ma.isMaskedArray(cslc[d]) else cslc[d] for d in 'xyz'}
+        c_min = np.amin([np.nanquantile(cslc[d].filled(np.nan), q[0]) for d in 'xyz'])
         c_min = max(0, c_min)  # FIXME: make negatives possible
-        c_max = np.amax([np.quantile(cslc[d], q[1]) for d in 'xyz'])
+        c_max = np.amax([np.nanquantile(cslc[d].filled(np.nan), q[1]) for d in 'xyz'])
         c_min = self._power_rounder(c_min, roundfuns[0])
         c_max = self._power_rounder(c_max, roundfuns[1])
         # TODO: c_min should never be c_max
