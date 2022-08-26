@@ -2922,7 +2922,7 @@ class Stapl3r(object):
         prefix='',
         datadir='',  # use this if specified paths are not absolute and Stapl3r not executed from datadir
         max_workers=0,
-        verbosity=1,
+        verbosity=0,
         ):
 
         self.verbosity = verbosity
