@@ -3382,6 +3382,23 @@ class Stapl3r(object):
     def _l2p(self, p):
         return os.path.join(*p) if isinstance(p, list) else p
 
+    def _glob_h5(self, filepat):
+        """Glob for files and return list of paths.
+
+        # NB: h5-files include the internal path
+        """
+
+        ids = ''
+        if '.h5' in filepat:
+            h5stem, ids = filepat.split('.h5')
+            filepat = f'{h5stem}.h5'
+
+        #os.path.join(directory, filepat)
+        filepaths = sorted(glob.glob(filepat))
+        filepaths = [f'{filepath}{ids}' for filepath in filepaths]
+
+        return filepaths
+
     def _prep_paths(self, paths, reps={}, abs=True):
         """Format-in reps by keywords into (absolute) in- and outputpaths."""
 
