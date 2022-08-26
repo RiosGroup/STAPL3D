@@ -168,19 +168,7 @@ class Mask3r(Stapl3r):
 
     def _init_paths(self):
 
-        # FIXME: moduledir (=step_id?) can vary
-        prev_path = {
-            'moduledir': 'stitching', 'module_id': 'stitching',
-            'step_id': 'stitching', 'step': 'postprocess',
-            'ioitem': 'outputs', 'output': 'aggregate',
-            }
-        datapath = self._get_inpath(prev_path)
-        if datapath == 'default':
-            datapath = self._build_path(
-                moduledir=prev_path['moduledir'],
-                prefixes=[self.prefix, prev_path['module_id']],
-                ext='bdv',
-                )
+        datapath = self.image_in
 
         stem = self._build_basename()
         self._paths = {
