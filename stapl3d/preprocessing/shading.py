@@ -56,55 +56,39 @@ def main(argv):
 
 
 class Deshad3r(Stapl3r):
-    """Correct z-stack shading.
+    _doc_main = """Correct z-stack shading."""
+    _doc_attr = """
 
-    Parameters
+    Deshad3r Attributes
     ----------
-    image_in : string
-        Path to dataset.
-    parameter_file : string
-        Path to yaml parameter file.
-    module_id : string
-        Name of the STAPL3D module.
-    step_id: string
-        Identifier of the yaml parameterfile entry.
-    directory : string
-        Name of output subdirectory.
-    prefix : string
-        Output prefix.
-    max_workers : int
-        Maximal number of cores to use for processing.
-
-    Attributes
-    ----------
-    channels : list []
-        List of channels indices to process, default 'all'.
-    planes : list []
-        List of plane indices to process, default 'all'.
-    noise_threshold : 1000
-        Threshold to discard background, default 1000.
-    metric : string 'median'
-        Metric for creating profiles, default 'median', else 'mean'.
-    quantile_threshold : float 0.8
-        Quantile at which planes are discarded, default 0.8.
-    polynomial_order : int 3
-        Order of the polynomial to fit the profile, default 3.
-    stacks : list []
+    channels : list, default [0, 1, ..., N]
+        List of channels indices to process.
+    planes : list, default [0, 1, ..., N]
+        List of plane indices to process.
+    noise_threshold : float, default 1000
+        Threshold to discard background.
+    metric : string, default 'median'
+        Metric for creating profiles.
+    quantile_threshold : float, default 0.8
+        Quantile at which planes are discarded.
+    polynomial_order : int, default 3
+        Order of the polynomial to fit the profile.
+    stacks : list, default [0, 1, ..., N]
         List of stack indices to correct.
-    clipping_mask': bool False
-        Create an additional mask of pixels that clip outside the datarange,
-        default False.
-    correct : bool True
-        Apply the shading correction to the z-stacks, default True.
-    write_to_tif : bool True
-        Write the corrected z-stacks to tifs, default True.
+    clipping_mask: bool, default False
+        Create an additional mask of pixels that clip outside the datarange.
+    correct : bool, default True
+        Apply the shading correction to the z-stacks.
+    write_to_tif : bool, default True
+        Write the corrected z-stacks to tifs.
+    """
+    _doc_exam = """
 
-    Examples
+    Deshad3r Examples
     --------
     # TODO
-
-
     """
+    __doc__ = f"{_doc_main}{Stapl3r.__doc__}{_doc_attr}{_doc_exam}"
 
     def __init__(self, image_in='', parameter_file='', **kwargs):
 
