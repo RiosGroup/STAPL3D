@@ -52,30 +52,31 @@ Software requirements
 This software runs on Linux, MacOS and Windows. It has been tested on:
 
  - Linux: CentOS7
- - MacOS: Catalina 10.15.5, Mojave 10.14.1
+ - MacOS: Big Sur 11.6.1
  - Windows: 10 Pro
 
 dependencies:
 Python (auto-installed through with conda or pip)
 
- - python=3
- - scikit-image>=0.16.2
- - h5py>=2.10.0
- - matplotlib>=3.1.3
- - numpy>=1.18.1
- - pyyaml>=5.3.1
- - scipy>=1.4.1
- - pandas>=1.0.4
- - pypdf2>=1.26.0
+ - python>=3.8
+ - scikit-image
+ - h5py
+ - matplotlib
+ - numpy
+ - pyyaml
+ - scipy
+ - pandas
+ - pypdf2
 
- - czifile>=2019.7.2
- - nibabel>=3.1.0
- - simpleitk>=2.0.0rc1.post285
+ - czifile
+ - nibabel
+ - simpleitk
 
 Other software packages:
 
  - `ACME <https://wiki.med.harvard.edu/SysBio/Megason/ACME>`_
  - `Ilastik <https://www.ilastik.org/documentation/basics/installation.html>`_ (optional)
+ - `Fiji <https://imagej.net/downloads>`_ (optional)
 
 
 Installation
@@ -85,16 +86,12 @@ STAPL-3D is most easily installed (< 5 min) with `conda <https://docs.conda.io/e
 
 .. code-block:: console
 
-  git clone -b dev1.0.0 https://github.com/RiosGroup/STAPL3D.git
+  git clone https://github.com/RiosGroup/STAPL3D.git
   cd STAPL3D
 
   conda env create -f environment.yml
   conda activate stapl3d
-
   pip install .
-..  python setup.py install
-..  pip install https://github.com/RiosGroup/scikit-image.git
-  pip install --pre SimpleITK --find-links https://github.com/SimpleITK/SimpleITK/releases/tag/latest
 
 To use membrane enhancement in the pipeline, `ACME <https://wiki.med.harvard.edu/SysBio/Megason/ACME>`_ needs to be installed. To use the machine-learning channel clean-up procedures, `Ilastik <https://www.ilastik.org/documentation/basics/installation.html>`_ needs to be installed. **To run the demos, these two external packages are not required** as we provide these steps.
 
@@ -113,7 +110,6 @@ If you installed STAPL-3D using conda, you can start a notebook in the stapl3d e
 .. code-block:: console
 
   conda activate stapl3d
-  conda install jupyter
   python -m ipykernel install --user --name=stapl3d
   jupyter notebook
 
