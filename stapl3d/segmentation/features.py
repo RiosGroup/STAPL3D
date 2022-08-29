@@ -139,6 +139,8 @@ class Featur3r(Block3r):
             os.makedirs('blocks', exist_ok=True)
             bpat = self._build_path(moduledir='blocks', prefixes=[self.prefix, 'blocks'], suffixes=[{'b': 'p'}], ext='h5')
 
+        bpat = self._l2p(['blocks', '{f}.h5'])
+
         blockstem = bpat.replace('.h5', '')
         datastem = self._build_path(moduledir='.', prefixes=[self.prefix])
 
@@ -181,22 +183,25 @@ class Featur3r(Block3r):
         """Calculate features of segments of a datablock."""
 
         block = self._blocks[block]
-        origin = [slc.start for slc in block.slices[:3]]
+        origin = [block.slices[al].start for al in block.axlab if al in 'xyz']
 
-        inputs = self._prep_paths(self.inputs, reps={'b': block.idx})
-        outputs = self._prep_paths(self.outputs, reps={'b': block.idx})
+        inputs = self._prep_paths_blockfiles(self.inputs, block)
+        outputs = self._prep_paths_blockfiles(self.outputs, block)
+        #inputs = self._prep_paths(self.inputs, reps={'b': block.idx})
+        #outputs = self._prep_paths(self.outputs, reps={'b': block.idx})
 
         # Load segmentations and intensity data.
         label_ims, all_regions, elsize, axlab = self._load_label_images(block)
         data_ims, all_data = self._load_intens_images(block, [inputs['data']])
 
         # Filter out segments that touch the block borders.
-        border_labelset = set([])
-        for comp in self.compartments:
-            border_labelset |= filter_borders(label_ims[comp])
-        if outputs['borderlabels']:
-            with open(outputs['borderlabels'], 'wb') as f:
-                pickle.dump(border_labelset, f)
+        if self.filter_borderlabels:
+            border_labelset = set([])
+            for comp in self.compartments:
+                border_labelset |= filter_borders(label_ims[comp])
+            if outputs['borderlabels']:
+                with open(outputs['borderlabels'], 'wb') as f:
+                    pickle.dump(border_labelset, f)
 
         # Pick some rows to test correction
         # if self._anisotropy_correction:
@@ -262,7 +267,8 @@ class Featur3r(Block3r):
 
                 df = df.set_index('label')
 
-            df = df.drop(border_labelset & set(df.index))
+            if self.filter_borderlabels:
+                df = df.drop(border_labelset & set(df.index))
 
             df.to_csv(outputs[f'{pf}_csv'])
 
@@ -392,7 +398,7 @@ class Featur3r(Block3r):
         # Load label images  # NOTE: assuming blockfile input for now
         label_ims = {}
         for pf, ids in self.compartments.items():
-            filepath = block.path.format(ods=ids)
+            filepath = f'{block.path}/{ids}'
             im = LabelImage(filepath, permission='r')
             im.load(load_data=False)
             label_ims[pf] = im
@@ -426,7 +432,7 @@ class Featur3r(Block3r):
         all_data = {}
         for dpf, datadict in data_ims.items():
             data = datadict['im']
-            data.slices = block.slices
+            data.slices = [block.slices[al] for al in data.axlab]
             for ch, name in zip(datadict['ch'], datadict['names']):
                 data.slices[data.axlab.index('c')] = slice(ch, ch + 1, 1)
                 ch_data = data.slice_dataset()
@@ -609,8 +615,10 @@ class Featur3r(Block3r):
         for block_idx in self.blocks:
 
             block = self._blocks[block_idx]
-            inputs = self._prep_paths(self.inputs, reps={'b': block.idx})
-            outputs = self._prep_paths(self.outputs, reps={'b': block.idx})
+            inputs = self._prep_paths_blockfiles(self.inputs, block)
+            outputs = self._prep_paths_blockfiles(self.outputs, block)
+            #inputs = self._prep_paths(self.inputs, reps={'b': block.idx})
+            #outputs = self._prep_paths(self.outputs, reps={'b': block.idx})
 
             # Read the csv's
             dfs = {}
@@ -682,7 +690,7 @@ class Featur3r(Block3r):
         def polarity_um_switch():
             try:
                 ids = list(self.compartments.values())[0]
-                filepath = self._blocks[0].path.format(ods=ids)
+                filepath = f'{self._blocks[0].path}/{ids}'
                 im = LabelImage(filepath, permission='r')
                 im.load(load_data=False)
                 im.close()
