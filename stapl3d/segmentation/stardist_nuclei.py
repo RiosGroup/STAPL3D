@@ -611,13 +611,11 @@ def load_model(modeldir, modelname):
     return model
 
 
-def load_data(filepath, ids, z_range=[]):
+def load_data(filepath, ids):
     """Load data from file."""
 
     im = Image(f'{filepath}/{ids}', permission='r')
     im.load()
-    z_slc = slice(z_range[0], z_range[1]) if z_range else slice(None)
-    im.slices[im.axlab.index('z')] = z_slc
     data = im.slice_dataset()
     im.close()
 
