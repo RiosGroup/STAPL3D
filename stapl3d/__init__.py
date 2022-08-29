@@ -1897,7 +1897,8 @@ class Image(object):
         for dim in dims:
             if dim not in self.axlab:
                 continue
-            self.ds = np.squeeze(self.ds, self.axlab.index(dim))
+            if self.ds:
+                self.ds = np.squeeze(self.ds, self.axlab.index(dim))
             for attr in squeezable:
                 attr_val = getattr(self, attr)
                 if attr_val is not None:
