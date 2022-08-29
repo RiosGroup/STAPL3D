@@ -666,6 +666,9 @@ def get_markersets(adata):
                    'extent', 'fractional_anisotropy', 'polarity'],
                   ['pax8', 'six2', 'ncam1', 'cadh1', 'cadh6', 'factin'],
                   ['major_axis_length', 'minor_axis_length', 'extent', 'fractional_anisotropy', 'polarity'],
+                  ['pax8', 'six2', 'ncam1', 'cadh1', 'cadh6', 'factin',
+                   'evals_major_axis_length', 'evals_minor_axis_length',
+                   'dist_to_edge', 'extent', 'evals_fractional_anisotropy', 'evals_polarity'],
                   ]
 
     return markersets
@@ -724,6 +727,14 @@ def run_basic(inputpath, outputstem, nm='none', ms=0, nn=15, nc=2, cluster_resol
         sc.tl.leiden(adata, resolution=res, key_added=key)
         cats = [str(i+1) for i, j in enumerate(adata.obs[key].cat.categories)]
         adata.obs[key].cat.categories = cats
+
+    """
+    ckeys = ['louvain-{:.02f}'.format(res) for res in cluster_resolutions]
+    for res, key in zip(cluster_resolutions, ckeys):
+        sc.tl.louvain(adata, resolution=res, key_added=key)
+        cats = [str(i+1) for i, j in enumerate(adata.obs[key].cat.categories)]
+        adata.obs[key].cat.categories = cats
+    """
 
     # basic pseudotime
     pkeys = ['dpt_pseudotime']
@@ -854,12 +865,15 @@ def classifier_prediction(
 
         adata.obs[key] = pd.Series(svc_test, dtype="category")
         adata.obs[key][:] = svc_test
+        # outstem = filestem.replace('train', 'test')
+        #outstem = inputpath.replace('.h5ad', '')
+        #export_trajectory(adata.obs[key], adata.obs['label'], key, outstem + pf)
         export_trajectory(adata.obs[key], adata.obs['label'], key, '{}_{}{}'.format(teststem, pf, par_pf))
 
     for key in pkeys:
 
-        #filepath = '{}_{}_{}_{}.pickle'.format(trainstem, pf, key, 'svr')
-        filepath = '{}_{}_{}.pickle'.format(trainstem, key, 'svr')
+        filepath = '{}_{}_{}_{}.pickle'.format(trainstem, pf, key, 'svr')
+        #filepath = '{}_{}_{}.pickle'.format(trainstem, key, 'svr')
         with open(filepath, 'rb') as f:
             svrfit = pickle.load(f)
 
@@ -991,6 +1005,7 @@ def transform_test(teststem, trainstem, nm, ms,
 
     return adata
 """
+
 
 def merge_adata(filestem, pf=''):
 
