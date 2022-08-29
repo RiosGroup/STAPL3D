@@ -2,19 +2,29 @@ name: stapl3d
 channels:
   - conda-forge
   - defaults
+  - simpleitk
 dependencies:
   - python=3
-  - h5py>=2.10.0
-  - matplotlib>=3.3.2
-  - numpy>=1.18.1
-  - pyyaml>=5.3.1
-  - scipy>=1.4.1
-  - pandas>=1.0.4
-  - pypdf2>=1.26.0
-  - cython>=0.29.20
-  - pip>=20.0.2
+  - pip
+  - cython
+  - jupyter
+  - matplotlib
+  - seaborn
+  - numpy<=1.21  # For numba in scanpy
+  - scipy
+  - pandas
+  - pypdf2
+  - pyyaml
+  - h5py
+  - mpi4py
   - scikit-image
+  - scikit-learn
   - napari
-  - czifile>=2019.7.2
-  - readlif>=0.2.1
-  - nibabel>=3.1.0
+  - tifffile
+  - czifile
+  - readlif
+  - nibabel
+  - simpleitk
+  - stardist
+  - scanpy
+  - leidenalg
