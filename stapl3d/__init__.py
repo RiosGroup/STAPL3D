@@ -2985,7 +2985,6 @@ class Stapl3r(object):
 
         steps = steps or self._fun_selector.keys()
         for step in steps:
-            print(f'Running {self._module_id}:{step}')
             self._fun_selector[step]()
 
     def _set_suffix_formats(self):
@@ -3017,6 +3016,8 @@ class Stapl3r(object):
 
         Returns the argument list for parallelization.
         """
+
+        print(f'Running {self._module_id}:{step}')
 
         if self._parallelization[step]:
             self.viewer = None
