@@ -12,10 +12,6 @@ import pickle
 import shutil
 import multiprocessing
 
-# import yaml
-
-# from glob import glob
-
 import matplotlib
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
@@ -24,17 +20,11 @@ import numpy as np
 import pandas as pd
 from random import shuffle
 
-# from tifffile import create_output
-# from xml.etree import cElementTree as etree
-
-# from skimage import img_as_float
-# from skimage.io import imread, imsave
-
-# import czifile
+import h5py
+import pathlib
 
 from stapl3d import parse_args, Stapl3r, Image, LabelImage, wmeMPI, transpose_props
-
-#from stapl3d.segmentation.segment import gen_outpath
+from stapl3d.blocks import Block3r
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +32,7 @@ logger = logging.getLogger(__name__)
 def main(argv):
     """Write segment backprojection."""
 
-    steps = ['backproject']
+    steps = ['backproject', 'postprocess']
     args = parse_args('backproject', steps, *argv)
 
     backproject3r = Backproject3r(
@@ -58,35 +48,46 @@ def main(argv):
         backproject3r._fun_selector[step]()
 
 
-class Backproject3r(Stapl3r):
+class Backproject3r(Block3r):
     """Write segment backprojection."""
 
     def __init__(self, image_in='', parameter_file='', **kwargs):
 
+        if 'module_id' not in kwargs.keys():
+            kwargs['module_id'] = 'backproject'
+
         super(Backproject3r, self).__init__(
             image_in, parameter_file,
-            module_id='backproject',
             **kwargs,
             )
 
-        self._fun_selector = {
+        self._fun_selector.update({
             'backproject': self.backproject,
-            }
+            'postprocess': self.postprocess,
+            })
 
-        self._parallelization = {
-            'backproject': ['features'],
-            }
+        self._parallelization.update({
+#            'backproject': ['features'],
+            'backproject': ['blocks'],
+            'postprocess': [],
+            })
 
-        self._parameter_sets = {
+        self._parameter_sets.update({
             'backproject': {
                 'fpar': self._FPAR_NAMES,
                 'ppar': (''),
-                'spar': ('_n_workers', 'features'),
+#                'spar': ('_n_workers', 'features'),
+                'spar': ('_n_workers', 'blocks'),
                 },
-            }
+            'postprocess': {
+                'fpar': self._FPAR_NAMES,
+                'ppar': (),
+                'spar': ('_n_workers',),
+                },
+            })
 
-        self._parameter_table = {
-            }
+        self._parameter_table.update({
+            })
 
         default_attr = {
             'features': {},
@@ -98,7 +99,7 @@ class Backproject3r(Stapl3r):
             'replace_nan': True,
             'dtype': 'uint16',
             'channel': -1,
-            'blocksize': [64, 1280, 1280],
+            'blocksize_tmp': [],
             'ims_ref': '',
         }
         for k, v in default_attr.items():
@@ -107,15 +108,17 @@ class Backproject3r(Stapl3r):
         for step in self._fun_selector.keys():
             self.set_parameters(step)
 
-        self._init_paths()
+        self._init_paths_backproject()
 
         self._init_log()
+
+        self._prep_blocks()
 
         self._images = []
         self._labels = []
 
 
-    def _init_paths(self):
+    def _init_paths_backproject(self):
 
         lbl_path = self._build_basename(
             prefixes=[self.prefix],
@@ -136,7 +139,7 @@ class Backproject3r(Stapl3r):
         apat = self._build_basename(suffixes=['{a}'], ext='h5/{a}')
         #apat = self._build_basename(suffixes=['{a}'], ext='ims')
 
-        self._paths = {
+        self._paths.update({
             'backproject': {
                 'inputs': {
                     'label_image': lbl_path,
@@ -147,7 +150,16 @@ class Backproject3r(Stapl3r):
                     'backproject': f'{apat}',
                     },
                 },
-        }
+            'postprocess': {
+                'inputs': {
+                    'filepat': self._build_basename(suffixes=['{a}'], ext='h5'),
+                    },
+                'outputs': {
+                    'aggregate': self._build_basename(ext='h5'),
+#                    'aggregate': self._build_path(prefixes=['backproject'], ext='h5'),
+                    },
+                },
+        })
 
         for step in self._fun_selector.keys():
             self.inputpaths[step]  = self._merge_paths(self._paths[step], step, 'inputs')
@@ -157,27 +169,44 @@ class Backproject3r(Stapl3r):
         """Write segment backprojection."""
 
         arglist = self._prep_step('backproject', kwargs)
-        with multiprocessing.Pool(processes=self._n_workers) as pool:
-            pool.starmap(self._backproject_feature, arglist)
+        for feat in self.features.keys():
+            print(feat)
+            arglist_aug = [(feat, block_idx[0]) for block_idx in arglist]
+            with multiprocessing.Pool(processes=self._n_workers) as pool:
+                pool.starmap(self._backproject_feature, arglist_aug)
 
-    def _backproject_feature(self, key):
+        """
+        arglist = self._prep_step('backproject', kwargs)
+        b = self.blocks or list(range(len(self._blocks)))
+        for block_idx in b:
+            arglist_aug = [(feat[0], block_idx) for feat in arglist]
+            with multiprocessing.Pool(processes=self._n_workers) as pool:
+                pool.starmap(self._backproject_feature, arglist_aug)
+        """
+
+    def _backproject_feature(self, key, block_idx):
         """Backproject feature values to segments."""
 
-        inputs = self._prep_paths(self.inputs)
+        block = self._blocks[block_idx]
+
+        inputs = self._prep_paths_blockfiles(self.inputs, block)
+        outputs = self._prep_paths_blockfiles(self.outputs, block, reps={'a': key})
+
         image_in = inputs['label_image']
-        feat_path = inputs['feature_csv']
+        feat_path = inputs['feature_path']
         ims_ref = inputs['ims_ref']
-        outputs = self._prep_paths(self.outputs, reps={'a': key})
         outpath = outputs['backproject']
 
         labels = LabelImage(image_in, permission='r')
         labels.load(load_data=False)
         props = labels.get_props()
-        self.prep_maxlabel(labels)
+
+        maxlabel = self.prep_maxlabel(labels, maxlabel=self.maxlabel)
         labels.close()
 
         mpi = wmeMPI(usempi=False)
-        mpi.set_blocks(labels, self.blocksize or labels.dims)
+        bs = self.blocksize_tmp or labels.dims
+        mpi.set_blocks(labels, bs)
         mpi.scatter_series()
 
         if feat_path.endswith('.csv'):
@@ -186,10 +215,23 @@ class Backproject3r(Stapl3r):
         elif feat_path.endswith('.h5ad'):
             import scanpy as sc
             adata = sc.read(feat_path)
-            df = adata.obs[self.labelkey].astype(int)
-            df = pd.concat([df, adata[:, key].to_df()], axis=1)
 
-        fw = np.zeros(self.maxlabel + 1, dtype='float')
+            adata.X = adata.raw.X
+
+            cols = [self.labelkey, 'block']
+            df = adata.obs[cols].astype(int)
+
+            if key in adata.obs.columns:
+                df2 = adata.obs[key]
+            else:
+                df2 = adata[:, key].to_df()
+
+            df = pd.concat([df, df2], axis=1)
+            df = df[df['block'] == block_idx]
+
+        print(feat_path, maxlabel, block_idx)
+
+        fw = np.zeros(maxlabel + 1, dtype='float')
         for index, row in df.iterrows():
             fw[int(row[self.labelkey])] = row[key]
 
@@ -223,18 +265,20 @@ class Backproject3r(Stapl3r):
 
         elif '.h5' in outpath:
             props['dtype'] = featdict['dtype']
+            props['permission'] = 'r+'
             mo = Image(outpath, **props)
             mo.create()
+            mo.close()
 
         fw = list(fw)
         for i in mpi.series:
 
-            print('processing {}: block {:03d} with coords: {}'.format(key, i, mpi.blocks[i]['id']))
+            #print('{}: processing {}: block {:03d} with coords: {}'.format(block.path, key, i, mpi.blocks[i]['id']))
             block = mpi.blocks[i]
-            labels = LabelImage(image_in, permission='r')
+            labels = LabelImage(image_in, permission='r+')
             labels.load(load_data=False)
             labels.slices = block['slices']
-            data = labels.slice_dataset()
+            data = labels.slice_dataset().astype('int')
             out = labels.forward_map(fw, ds=data)
             labels.close()
 
@@ -265,25 +309,63 @@ class Backproject3r(Stapl3r):
 
         mo.close()
 
-    def prep_maxlabel(self, labels):
+    def prep_maxlabel(self, labels, maxlabel=0):
 
-        if not self.maxlabel:
+        if not maxlabel:
             if 'maxlabel' in labels.ds.attrs.keys():
-                self.maxlabel = labels.ds.attrs['maxlabel']
+                maxlabel = labels.ds.attrs['maxlabel']
 
         try:
-            self.maxlabel = int(self.maxlabel)
+            maxlabel = int(maxlabel)
         except ValueError:
-            if self.maxlabel.endswith('.npy'):
-                ulabels = np.load(self.maxlabel, allow_pickle=True)
-                self.maxlabel = max(np.amax(ulabels))
+            if maxlabel.endswith('.npy'):
+                ulabels = np.load(maxlabel, allow_pickle=True)
+                maxlabel = max(np.amax(ulabels))
             else:
-                maxlabels = np.loadtxt(self.maxlabel, dtype=np.uint32)
-                self.maxlabel = max(maxlabels)
+                maxlabels = np.loadtxt(maxlabel, dtype=np.uint32)
+                maxlabel = max(maxlabels)
 
-        if not self.maxlabel:
+        if not maxlabel:
             labels.set_maxlabel()
-            self.maxlabel = int(labels.maxlabel)
+            maxlabel = int(labels.maxlabel)
+
+        return maxlabel
+
+    def postprocess(self):
+
+        #TODO: unduplicate from imarisfiles.py and blocks.py: Merger
+        def create_copy(f, tgt_loc, ext_file, ext_loc):
+            """Copy the imaris DatasetInfo group."""
+            try:
+                del f[tgt_loc]
+            except KeyError:
+                pass
+            g = h5py.File(ext_file, 'r')
+            f.copy(g[ext_loc], tgt_loc)
+            g.close()
+
+        def create_ext_link(f, tgt_loc, ext_file, ext_loc):
+            """Create an individual link."""
+            try:
+                del f[tgt_loc]
+            except KeyError:
+                pass
+            f[tgt_loc] = h5py.ExternalLink(ext_file, ext_loc)
+
+        self._prep_step('postprocess', {})
+
+        inputs = self._prep_paths(self.inputs)
+        outputs = self._prep_paths(self.outputs)
+
+        tgt_file = outputs['aggregate']
+        tgt_dir  = os.path.dirname(tgt_file)
+        f = h5py.File(tgt_file, 'w')
+
+        for ids in self.features.keys():
+            inputs = self._prep_paths(self.inputs, reps={'a': ids})
+            linked_path = os.path.relpath(inputs['filepat'], tgt_dir)
+            ext_file = pathlib.Path(linked_path).as_posix()
+            create_ext_link(f, ids, ext_file, ids)
 
 
 def scale_fwmap(fw, maxval=65535, replace_nan=False, normalize=False, scale_dtype=False, dtype='uint16'):
