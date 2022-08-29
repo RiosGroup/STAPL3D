@@ -3134,9 +3134,9 @@ class Stapl3r(object):
         #     block_obs = [block for block in self._blocks if block.idx in block_idxs]
         #     pars = [getset(pp, block_obs) for pp in parallelized_pars]
 
-        elif parallelized_pars == ['volumes']:
+        elif parallelized_pars == ['vols']:
             paths = get_paths(self._blocks[0].path)  # self.blocks[0]
-            volumes = self._volumes
+            volumes = self.volumes
             def extract(name, node):
                 if isinstance(node, h5py.Dataset):
                     volumes.append({name: {}})
