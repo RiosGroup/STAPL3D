@@ -124,10 +124,10 @@ submit $( generate_script features_postproc ) $jid
 
 ###==========================================================================###
 ### stardist
-submit $( generate_script stardist_train ) $jid
+submit $( generate_script stardist train ) $jid
 # stardist_normalization_range  # NB on bigbig-mem
 # TODO get histogram from blocks
-submit $( generate_script stardist_nblocks ) $jid
+submit $( generate_script stardist nblocks ) $jid
 # FIXME: wait for it
 # TODO: make blocklayout equal between stardist and stapl3d
 nblocks=$(<$datadir/blocks_stardist/nblocks.txt)
