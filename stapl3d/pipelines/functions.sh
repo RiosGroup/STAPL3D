@@ -85,7 +85,7 @@ function load_parameters {
     [[ -z $parfile ]] && parfile="${datadir}/${dataset}.yml"
     eval $( parse_yaml "${parfile}" "" )
 
-    [[ "${verbose}" == '-v' ]] && {
+    [[ "${verbose}" = '-v' ]] && {
         echo ""
         echo " ### parameters imported from parameter file:"
         echo ""
@@ -100,9 +100,9 @@ function load_parameters {
     set_dims "${image_in}" "${datadir}/${dataset}_dims.yml" -v
 
     set_blocks "${axlab[@]}"
-    [[ "${verbose}" == '-v' ]] && {
+    [[ "${verbose}" = '-v' ]] && {
         echo ""
-        echo " ### Block parallelization:"
+        echo " ### block parallelization:"
         echo ""
         printf "\t%-12s%-8s\n" "axlab: " "${axlab[*]}"
         printf "\t%-12s%-8s\n" "sizes: " "${blocksize[*]}"
@@ -163,16 +163,18 @@ function set_dims {
     local im_M im_tZ im_tY im_tX im_Z im_Y im_X im_C im_T
     local im_elsize_z im_elsize_y im_elsize_x
 
-    [[ "${verbose}" == '-v' ]] && {
+    [[ "${verbose}" = '-v' ]] && {
         echo ""
         echo " ### dataset dimensions:"
         echo "" ; }
 
     # TODO: only execute if necessary
+
     axlab=($(echo `get_axlab "${image_in}"` | fold -w1))
-    eval `get_shape "${image_in}"`
-    eval `get_elsizes "${image_in}"`
-    eval `get_tiled_dims "${image_in}"`
+    [[ ! -f "${dimsfile}" ]] && {
+        eval `get_shape "${image_in}"`
+        eval `get_elsizes "${image_in}"`
+        eval `get_tiled_dims "${image_in}"` ; }
 
     for varname in "${vars[@]}"; do
         eval var="\$dataset__${varname}"
@@ -188,7 +190,7 @@ function set_dims {
             src="${image_in}"
         fi
         eval $varname="${var}"
-        [[ "${verbose}" == '-v' ]] && {
+        [[ "${verbose}" = '-v' ]] && {
             printf "\t%-8s = %-20s loaded from %s \n" "$varname" "$var" "$src" ; }
     done
 
@@ -277,7 +279,7 @@ function set_ZYXCT_ims {
     X=`get_dim_ims X "${imarisfile}"`
     C=`get_dim_ims C "${imarisfile}"`
     T=`get_dim_ims T "${imarisfile}"`
-    if [ "$verbose" == "-v" ]; then
+    if [ "$verbose" = "-v" ]; then
         echo $Z $Y $X $C $T
     fi
 
@@ -292,9 +294,9 @@ function get_dim_ims {
     shift 1
     local imarisfile="${*}"
 
-    if [[ "$dim" == 'T' ]]; then
+    if [[ "$dim" = 'T' ]]; then
         echo `h5ls "${imarisfile}/DataSet/ResolutionLevel 0" | wc -l`
-    elif [[ "$dim" == 'C' ]]; then
+    elif [[ "$dim" = 'C' ]]; then
         echo `h5ls "${imarisfile}/DataSet/ResolutionLevel 0/TimePoint 0" | wc -l`
     else
         echo `find_dim_from_h5 "${dim}" "${imarisfile}"`
@@ -312,7 +314,7 @@ function find_dim_from_h5 {
     local imarisfile="${*}"
 
     local line=`h5ls -v ${imarisfile}/DataSetInfo | grep -A 2 "Attribute: ${dim}"  | tail -n 1 | grep "Data" | sed 's/ //g'`
-    if [[ "$line" == "Data:" ]]; then
+    if [[ "$line" = "Data:" ]]; then
         line=`h5ls -v ${imarisfile}/DataSetInfo | grep -A 3 "Attribute: ${dim}" | tail -n 1  | sed 's/(0)//'`
     else
         line=`h5ls -v ${imarisfile}/DataSetInfo | grep -A 2 "Attribute: ${dim}" | tail -n 1 | tr -d 'Data:'`
@@ -373,7 +375,8 @@ function set_blocksizes {
         blocksize+=( $bs )
         eval bm="\$blocks__blockinfo__blockmargin__${al}"
         blockmargin+=( $bm )
-        eval upper="\$${al^}"
+        #eval upper="\$${al^}"  # not on MAC old bash version
+        eval upper="\$`echo $al | tr '[:lower:]' '[:upper:]'`"
         bg=`python -c "from math import ceil; print(int(ceil(${upper}./$bs.)))"`
         blockgrid+=( $bg )
     done
@@ -424,14 +427,10 @@ function set_blockstems {
         block_id="B$i"
         dstem="${dataset}_${block_id}"
         blockstems+=( "$dstem" )
-        if [ "$verbose" == "-v" ]; then
-            echo "$dstem"
-        fi
+        [[ "$verbose" = "-v" ]] && echo "$dstem"
 
         block_ids+=( "$block_id" )
-        if [ "$verbose" == "-v" ]; then
-            echo "$block_id"
-        fi
+        [[ "$verbose" = "-v" ]] && echo "$block_id"
     done
 
     datastems=( "${blockstems[@]}" )
@@ -602,7 +601,7 @@ function set_images_in {
     for fname in `ls ${filestem}_?????-?????_?????-?????_?????-?????.h5`; do
         images_in+=( ${fname}/$ids )
     done
-    if [ "${verbose}" == '-v' ]
+    if [ "${verbose}" = '-v' ]
     then
         for image_in in "${images_in[@]}"; do
             echo ${image_in}
@@ -627,7 +626,7 @@ function set_images_in_stardist {
     for fname in `ls ${filestem}_block?????.h5`; do
         images_in+=( ${fname}/$ids )
     done
-    if [ "${verbose}" == '-v' ]
+    if [ "${verbose}" = '-v' ]
     then
         for image_in in "${images_in[@]}"; do
             echo ${image_in}
@@ -726,7 +725,7 @@ function set_seamnumbers {
     local nseams_x="${5}"
     local nseams_y="${6}"
 
-    if [ "${axis}" == "0" ]
+    if [ "${axis}" = "0" ]
     then  # zipquads
         local idx=$((TASK_ID - 1))
         set_zipquads "${start_x}" "${start_y}" 2 2 "${nseams_x}" "${nseams_y}"
@@ -734,10 +733,10 @@ function set_seamnumbers {
 	    local seam_x=$((seamnumber / nseams_y))
     	local seam_y=$((seamnumber % nseams_y))
         seamnumbers="-1 ${seam_y} ${seam_x}"
-    elif [ "${axis}" == "1" ]
+    elif [ "${axis}" = "1" ]
     then  # y-ziplines
         seamnumbers="-1 $((TASK_ID - 1)) -1"
-    elif [ "${axis}" == "2" ]
+    elif [ "${axis}" = "2" ]
     then  # x-ziplines
         seamnumbers="-1 -1 $((TASK_ID - 1))"
     else
@@ -773,11 +772,11 @@ function mergeblocks_outputpath {
     local format=$1
     local ids=$2
 
-    if [ "${format}" == "ims" ]
+    if [ "${format}" = "ims" ]
     then
         out_path="${datadir}/${dataset}_${ids////-}.ims"
         cp ${datadir}/${dataset}${dataset__ims_ref_postfix}.ims ${out_path}
-    elif [ "${format}" == "h5" ]
+    elif [ "${format}" = "h5" ]
     then
         out_path="${datadir}/${dataset}_${ids////-}.h5/${ids}"
     else
@@ -807,6 +806,10 @@ function get_blockstem_index {
 ###==========================================================================###
 ### functions for job submission
 ###==========================================================================###
+for i in $n_procs; do
+    ./procs[${i}] &
+    pids[${i}]=$!
+done
 
 function submit {
     # --
@@ -817,12 +820,26 @@ function submit {
     local dep_jid="${2}"
 
     case "${compute_env}" in
+        'LOCAL')
+            # dependency and array specifiers
+            [[ -z $dep_jid ]] && dep='' || dep="$dep_jid"
+
+            if [ "$dep_jid" = 'h' ]
+            then  # dry run: print command
+                echo "not submitting $scriptfile"
+                echo "source $scriptfile"
+            else  # run job and save pid in 'jid' variable
+                source $scriptfile
+                jid=$!
+                echo "submitted $scriptfile as ${jid} with ${dep}"
+            fi
+            ;;
         'SGE')
             # dependency and array specifiers
             [[ -z $dep_jid ]] && dep='' || dep="-hold_jid $dep_jid"
             [[ -z $array ]] && arrayspec='' || arrayspec="-t $range"
 
-            if [ "$dep_jid" == 'h' ]
+            if [ "$dep_jid" = 'h' ]
             then  # dry run: print command
                 echo "not submitting $scriptfile"
                 echo "qsub -cwd $arrayspec $dep $scriptfile"
@@ -836,7 +853,7 @@ function submit {
             # dependency specifier
             [[ -z $dep_jid ]] && dep='' || dep="--dependency=afterok:$dep_jid"
 
-            if [ "$dep_jid" == 'h' ]
+            if [ "$dep_jid" = 'h' ]
             then  # dry run: print command
                 echo "not submitting $scriptfile"
                 echo "sbatch --parsable $dep $scriptfile"
@@ -872,7 +889,7 @@ function sbatch_directives {
     # Slurm directives.
     echo "#SBATCH --job-name=$jobname"
     echo "#SBATCH --partition=$partition"
-    [[ "$partition" == 'gpu' ]] &&
+    [[ "$partition" = 'gpu' ]] &&
         echo "#SBATCH --gpus-per-node=$gpus_per_node"
     echo "#SBATCH --mem=$mem"
     echo "#SBATCH --time=$wtime"
@@ -929,9 +946,9 @@ function conda_cmds {
     [[ -z "${conda_env}" ]] && conda_env=${submit_defaults__submit__conda_env}
     if [ ! -z $conda_env ]
     then
-        [[ "${action}" == "activate" ]] && echo source "${CONDA_SH}"
-        [[ "${action}" == "activate" ]] && echo conda "${action}" "${conda_env}"
-        [[ "${action}" == "deactivate" ]] && echo conda "${action}"
+        [[ "${action}" = "activate" ]] && echo source "${CONDA_SH}"
+        [[ "${action}" = "activate" ]] && echo conda "${action}" "${conda_env}"
+        [[ "${action}" = "deactivate" ]] && echo conda "${action}"
         echo ''
     fi
 
@@ -951,56 +968,12 @@ function base_cmds {
     echo ''
 
     # # Special case for dual-mode parallelization (shading correction).
-    # if [ "$array" == 'channel_plane' ]
+    # if [ "$array" = 'channel_plane' ]
     # then
     #     echo ch_idx="\$((idx/Z))"
     #     echo pl_idx="\$((idx%Z))"
     # fi
 
-}
-
-
-function parallelization_cmds {
-    # --
-    ## Generate directives for processing with specific parallelization modes.
-    # --
-
-    local array_mode=$1
-
-    case "$array_mode" in
-        'idss')
-            idss_parallelization
-            ;;
-        'stardistblock')
-            stardistblock_parallelization
-            ;;
-        *)
-            echo ''
-            ;;
-    esac
-
-}
-function idss_parallelization {
-    # --
-    ## Generate directives for parallel volumes.
-    # --
-
-    # echo "set_idss ${stage}__ids..__ids= ="
-    echo ''
-
-}
-# PROBABLY SUPERFLUOUS NOW
-function stardistblock_parallelization {
-    # --
-    ## Generate directives for parallel blocks (stardist blocking method).
-    # --
-
-    echo ''
-    # echo blockd_id=\`printf %05d \$idx\`
-    # echo blockdir_stardist="${blockdir}_stardist"
-    # echo dataset_preproc="\${dataset}"
-    # echo blockstem_stardist="\${blockdir_stardist}/\${dataset_preproc}_\${block_id}"
-    # echo ''
 }
 
 
@@ -1177,15 +1150,15 @@ function generate_script {
 
     local stage=$1
     local step=$2
-    [[ "${3}" == "LOCAL" ]] && { local compute_env=$3 ; shift 3 ; } || shift 2
+    [[ "${3}" = "LOCAL" ]] && { local compute_env=$3 ; shift 3 ; } || shift 2
 
     # Generate jobname and script filepath.
     jobname="go_${dataset__alias}_${stage}_${step}"
     subfile="${datadir}/${jobname}.sh"
 
     # Set the submission parameters.
-    [[ "${stage}" == ziplines* ]] && stage='ziplines'  # Reduce zipping stage.
-    [[ "${stage}" == zipquads* ]] && stage='zipquads'  # Reduce zipping stage.
+    [[ "${stage}" = ziplines* ]] && stage='ziplines'  # Reduce zipping stage.
+    [[ "${stage}" = zipquads* ]] && stage='zipquads'  # Reduce zipping stage.
     # Initialize from arguments or set from variables / defaults.
     local submit_pars=( "$@" )
     [[ ${#submit_pars[@]} -eq 0 ]] && set_submit_pars ${stage} ${step}
@@ -1196,19 +1169,17 @@ function generate_script {
     case "${compute_env}" in
         'SGE')
             pbs_directives "${submit_pars[@]}" >> "${subfile}"
-            base_cmds >> "${subfile}"  # dataset initialization
-            parallelization_cmds "${submit_pars[0]}" >> "${subfile}"  # TODO: test
+            base_cmds >> "${subfile}"
             ;;
         'SLURM')
             sbatch_directives "${submit_pars[@]}" >> "${subfile}"
-            base_cmds >> "${subfile}"  # dataset initialization
-            parallelization_cmds "${submit_pars[0]}" >> "${subfile}"  # TODO: test
+            base_cmds >> "${subfile}"
             ;;
-    esac  # job scheduler
+    esac
 
     conda_cmds "activate" >> "${subfile}"  # activate conda environment
 
-    eval get_cmd_${stage}_${step} >> "${subfile}"  # processing function
+    eval get_cmd_general_${compute_env} >> "${subfile}"  # processing function
 
     conda_cmds "deactivate" >> "${subfile}"  # deactivate conda environment
 
@@ -1230,6 +1201,35 @@ function generate_script {
 
 ###==========================================================================###
 
+
+
+function get_py_general_LOCAL {
+    get_py_header
+    eval get_py_${stage}
+    echo "${stage}.${step}()"
+}
+function get_py_general_SLURM {
+    get_py_header
+    eval get_py_${stage}
+    echo "${stage}.${step}(blocks=[idx])"
+}
+function get_py_general_SGE {
+    get_py_header
+    eval get_py_${stage}
+    echo "${stage}.${step}(blocks=[idx])"
+}
+function get_cmd_general_LOCAL { get_cmd ; }
+function get_cmd_general_SLURM { get_cmd "\${idx}" ; }
+function get_cmd_general_SGE { get_cmd "\${idx}" ; }
+
+
+function get_py_splitter {
+    echo "from stapl3d import blocks"
+    echo "${stage} = blocks.Splitt3r(image_in, parameter_file)"
+}
+
+
+
 ## TODO: sensible submit defaults for each step => autoselect of parallelization in blocks/channels/stacks/planes etc
 # in add_submit_par: if ${stage}__${step}__submit__${varname} not specified ==> default
 # now goes to global default, we want a dictionary of specifics for steps here
@@ -1244,6 +1244,10 @@ function get_cmd {
 function write_pyfile {
     pyfile="${datadir}/${jobname}.py"
     eval get_py_${stage}_${step} > "${pyfile}"
+}
+function write_pyfile {
+    pyfile="${datadir}/${jobname}.py"
+    eval get_py_general_${compute_env} > "${pyfile}"
 }
 
 
@@ -1483,16 +1487,16 @@ function get_cmd_ims_aggregate2 {
 ### <<< TODO
 
 
-function get_py_splitter {
-    echo "from stapl3d import blocks"
-    echo "splitt3r = blocks.Splitt3r(image_in, parameter_file)"
-}
-function get_py_splitter_split {
-    get_py_header
-    get_py_splitter
-    echo "splitt3r.${step}(blocks=[idx])"
-}
-function get_cmd_splitter_split { get_cmd "\${idx}" ; }
+# function get_py_splitter {
+#     echo "from stapl3d import blocks"
+#     echo "splitt3r = blocks.Splitt3r(image_in, parameter_file)"
+# }
+# function get_py_splitter_split {
+#     get_py_header
+#     get_py_splitter
+#     echo "splitt3r.${step}(blocks=[idx])"
+# }
+# function get_cmd_splitter_split { get_cmd "\${idx}" ; }
 
 
 function get_py_membrane_enhancement {
@@ -1711,12 +1715,12 @@ function get_cmd_subsegmentation_estimate { get_cmd "\${idx}" ; }
 
 function get_py_merger {
     echo "from stapl3d import blocks"
-    echo "merg3r = blocks.Merg3r(image_in, parameter_file)"
+    echo "${stage} = blocks.Merg3r(image_in, parameter_file)"
 }
 function get_py_merger_merge {
     get_py_header
     get_py_merger
-    echo "merg3r.${step}(volumes=[idx])"
+    echo "${stage}.${step}(volumes=[idx])"
 }
 function get_cmd_merger_merge { get_cmd "\${idx}" ; }
 
