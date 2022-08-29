@@ -475,6 +475,8 @@ class Featur3r(Block3r):
             extra_properties += [median_intensity]
         if 'variance_intensity' in features:
             extra_properties += [variance_intensity]
+        if 'quantile95_intensity' in features:
+            extra_properties += [quantile95_intensity]
 
         cols_int = self._get_column_names(features)
 
@@ -880,6 +882,10 @@ def median_intensity(image, intensity_image):
 
 def variance_intensity(image, intensity_image):
     return np.var(intensity_image[image])
+
+
+def quantile95_intensity(image, intensity_image):
+    return np.quantile(intensity_image[image], 0.95)
 
 
 def fractional_anisotropy(eigvals):
