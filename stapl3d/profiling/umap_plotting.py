@@ -107,17 +107,16 @@ def plot_umap(
 
     # some special remapping cases  # TODO: move
     mappings = {
-        'leiden-1.50-remap1': (['CM', 'RV/SBB', 'ePT', 'PT', 'DT', 'GL', 'UB', 'CD', 'IP', 'ICc', 'ICm'], css),
-        'leiden-1.50-remap2': (['CM', 'RV/SBB', 'ePT', 'PT', 'DT', 'GL', 'UB', 'CD', 'IP', 'ICc', 'ICm'], css),
+        'leiden-1.50-remap1': (['CM', 'RV/SBB', 'ePT', 'PT', 'DT', 'GL', 'UB', 'CD', 'IP', 'ICc', 'ICm'], ccs),
+        'leiden-1.50-remap2': (['CM', 'RV/SBB', 'ePT', 'PT', 'DT', 'GL', 'UB', 'CD', 'IP', 'ICc', 'ICm'], ccs),
         'leiden-1.50-remap-NG': (['nonNG', 'CM', 'RV/SBB', 'ePT', 'PT', 'DT', 'GL'], ['#ffffff'] + ccs),
-        'leiden-0.40': (['C1', 'C2', 'C3', 'C4', 'C5', 'C6'], css),
-        'batch': (['C1', 'C2'], css),
-        }
+        'leiden-0.40_foo': (['C1', 'C2', 'C3', 'C4', 'C5', 'C6'], ccs),
+        'batch': (['C1', 'C2'], ccs),        }
 
     dfn = df.copy()
     if ckey in mappings.keys():
         cats = mappings[ckey][0]
-        css = mappings[ckey][1]
+        ccs = mappings[ckey][1]
         cdict = {str(i+1): lab for i, lab in enumerate(cats)}
         dfn[ckey].cat.rename_categories(cats, inplace=True)
         labels = {ckey: cats}
@@ -155,9 +154,9 @@ def plot_umap(
     outstem = '{}'.format(outputstem)
     for form in fig_formats:
         if form == 'html':
-            fig.update_layout(title=title, scene_camera=camera, scene=scene, showlegend=True)
-            size_FG = 2
-            size_BG = 4
+            fig.update_layout(title=title, scene_camera=camera, scene=scene, showlegend=True, width=1024, height=1024)
+            size_FG = 8
+            size_BG = 20
         elif form == 'pdf':
             if picked_set == 'BG':
                 fig.update_layout(title=title, scene_camera=camera, scene=scene, showlegend=True, width=1920, height=1920)
@@ -192,9 +191,9 @@ def plot_umap(
                 else:
                     fig.data[i].marker = {'color': ccs[i], 'symbol': 'circle', 'opacity': 1.0, 'size': size_FG}
         else:
-            if N:
-                for i in range(len(cats)):
-                    fig.data[i].marker = {'color': ccs[i], 'symbol': 'circle', 'opacity': 1.0, 'size': size_FG}
+            fig.update_layout(title=title, scene_camera=camera, scene=scene, showlegend=True, width=1024, height=1024)
+            size_FG = 8
+            size_BG = 20
 
         if form == 'pngs':
             n_frames = 360
