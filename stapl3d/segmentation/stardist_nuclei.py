@@ -22,7 +22,7 @@ from stardist import fill_label_holes, calculate_extents, Rays_GoldenSpiral
 from stardist.models import Config3D, StarDist3D
 from stardist.big import _grid_divisible, BlockND, OBJECT_KEYS
 
-from stapl3d import parse_args, Stapl3r, Image
+from stapl3d import parse_args, Stapl3r, Image, LabelImage
 from stapl3d.blocks import Block3r
 from stapl3d.segmentation import zipping
 
@@ -117,7 +117,6 @@ class StarDist3r(Block3r):
             'block_size': [None, None, None],
             'min_overlap': [32, 128, 128],
             'context': [0, 64, 64],
-            'ids_label': 'labels',
             'print_nblocks': False,
             'blocks': [],
             '_blocks': [],
@@ -267,36 +266,47 @@ class StarDist3r(Block3r):
         """Predict nuclei with StarDist model for a block."""
 
         filepath, block = self._blocks[block_idx]
-        im = Image(filepath, permission='r')
-        im.load(load_data=False)
 
         inputs = self._prep_paths(self.inputs)
 
         model = load_model(inputs['modeldir'], self.modelname)
 
-        data = self._prep_data_predict(im, block)
+        data = self._prep_data_predict(filepath, block)
 
         labels, polys = self._run_prediction(model, block, data)
 
-        blockstem = self._prep_output_predict(im, block_idx)
-        write_labels(f'{blockstem}.h5/{self.ids_lbl}', im, labels)
+        blockstem = self._prep_output_predict(filepath, block_idx)
+        write_labels(f'{blockstem}.h5/{self.ids_lbl}', filepath, labels)
+
         with open(f'{blockstem}.pickle', 'wb') as f:
-            pickle.dump([model._axes_out.replace('C', ''), polys, block], f)
+            axes = model._axes_out.replace('C', '')
+            pickle.dump([axes, polys, block], f)
+
+    def _prep_output_predict(self, filepath, block_idx):
+        """Determine outputstem for the block."""
+
+        im = Image(filepath, permission='r')
+        im.load(load_data=False)
+
+        filestem = im.split_path()['fname']
+
+        reps = self._find_reps(self.outputs['blockfiles'], filestem, block_idx)
+        outputs = self._prep_paths(self.outputs, reps=reps)
+
+        blockstem = outputs['blockfiles'].split('.h5')[0]
+
+        blockdir = os.path.dirname(outputs['blockfiles'])
+        os.makedirs(blockdir, exist_ok=True)
 
         im.close()
 
-    def _prep_output_predict(self, im, block_idx):
-
-        filestem = im.split_path()['fname']
-        reps = self._find_reps(self.outputs['blockfiles'], filestem, block_idx)
-        outputs = self._prep_paths(self.outputs, reps=reps)
-        blockdir = os.path.dirname(outputs['blockfiles'])
-        os.makedirs(blockdir, exist_ok=True)
-        blockstem = outputs['blockfiles'].split('.h5')[0]
-
         return blockstem
 
-    def _prep_data_predict(self, im, block, rl=2):
+    def _prep_data_predict(self, filepath, block, rl=2):
+        """Read 3D datablock from file for prediction."""
+
+        im = Image(filepath, permission='r')
+        im.load(load_data=False)
 
         if im.path.endswith('.ims'):
 
@@ -308,7 +318,7 @@ class StarDist3r(Block3r):
             axes = 'ZYX'
 
         elif '.h5' in im.path:
-            ids = comps['int']
+            ids = im.split_path()['int']
             h5ds = im.file[ids]
             axes = self.axes
 
@@ -320,6 +330,8 @@ class StarDist3r(Block3r):
 
         data = block.read(h5ds, axes=axes)
         data = self._normalize_stardist_data(data)
+
+        im.close()
 
         return data
 
@@ -612,18 +624,21 @@ def load_data(filepath, ids, z_range=[]):
     return data
 
 
-def write_labels(filepath, im, labels):
+def write_labels(filepath, filepath_ref, labels):
     """Write labels to file."""
 
+    # Get 3D labelimage properties from inputfile.
+    im = Image(filepath_ref, permission='r')
+    im.load(load_data=False)
     props = im.get_props()
-
     for al in 'ct':
         if al in props['axlab']:
             props = im.squeeze_props(props, dim=props['axlab'].index(al))
-
     props['shape'] = labels.shape
+    im.close()
 
-    mo = Image(filepath, **props)
+    # Write labelimage to hdf5.
+    mo = LabelImage(filepath, **props)
     mo.create()
     mo.write(labels)
     mo.ds.attrs.create('maxlabel', np.amax(labels), dtype='uint32')
