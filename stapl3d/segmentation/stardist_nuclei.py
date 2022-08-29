@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-"""Segment nuclei by stardist DL.
+"""Segment nuclei by StarDist Deep Learning.
 
 """
 
@@ -236,10 +236,10 @@ class StarDist3r(Block3r):
             )
 
     def print_nblocks(self, **kwargs):
-        """Predict nuclei with StarDist model."""
+        """Print the number of blocks to file (for parallel hpc prediction)."""
 
         arglist = self._prep_step('print_nblocks', kwargs)
-        self._print_nblocks(0)
+        self._print_nblocks()
 
     def _print_nblocks(self):
         """Print the number of blocks to file (for parallel hpc prediction)."""
@@ -341,6 +341,7 @@ class StarDist3r(Block3r):
         self._mergeblocks()
 
     def _mergeblocks(self):
+        """Merge stardistblocks to single volume."""
 
         inputs = self._prep_paths(self.inputs)
         outputs = self._prep_paths(self.outputs)
@@ -398,12 +399,12 @@ class StarDist3r(Block3r):
             pickle.dump(polys_all, f)
 
     def _prep_blocks(self):
-        pass
+        pass  # TODO: integrate stardistblocks with stapl3d blocks
 
     def _prep_blocks_stardist(self):
         """Generate StarDist blocks for parallel processing."""
 
-        inputs = self._prep_paths(self.inputpaths['predict'])
+        inputs = self._prep_paths(self.inputpaths['predict'])  # NOTE: for use with nblocks
 
         try:
             model = load_model(inputs['modeldir'], self.modelname)
@@ -436,7 +437,7 @@ class StarDist3r(Block3r):
         self._blocks = self._filter_blocks_stardist(self._blocks, self.block_filter)
 
     def _filter_blocks_stardist(self, blocks, filter={}):
-        """Generate StarDist blocks for parallel processing."""
+        """Subset the block collection by indices per axis."""
 
         blocks_filtered = []
         for fn, block in blocks:
@@ -452,6 +453,7 @@ class StarDist3r(Block3r):
         return blocks_filtered
 
     def _normalize_stardist_data(self, x):
+        """Normalize data by absolute range or percentiles."""
 
         if self.normalizer_intensities:
             mi = np.array([[[self.normalizer_intensities[0]]]])
