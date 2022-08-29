@@ -632,13 +632,15 @@ class Featur3r(Block3r):
         df.reset_index(inplace=True)
 
         # drop duplicate labels  # NOTE: need to have filtered border in estimate!
-        df.drop_duplicates(subset='label', inplace=True)
+        #df.drop_duplicates(subset='label', inplace=True)
 
         # Drop rows by any thresholds specified {colname: [Tlow, Thigh]}.
         for col, r in self.thresholds.items():
             r = [eval(str(a)) for a in r]
             b = df[col].isna() | (df[col] < r[0]) | (df[col] > r[1])
             df = df.drop(df[b].index)
+
+        self.df = df
 
         df.to_csv(outputs['feature_csv'], index=False, encoding='utf-8-sig')
 
