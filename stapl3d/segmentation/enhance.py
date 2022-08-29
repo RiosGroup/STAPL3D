@@ -2,8 +2,6 @@
 
 """Enhance the membrane with ACME.
 
-    # FIXME: results to to block subfolder, logs go to enhance subfolder
-    # TODO: reports
 """
 
 import os
@@ -107,52 +105,33 @@ class Enhanc3r(Block3r):
 
         self.ACMEdir = self.ACMEdir or os.environ.get('ACME')
 
-        self._images = [self.ids_membrane, self.ods_preprocess, self.ods_planarity]
+        self._images = []
         self._labels = []
 
     def _init_paths_enhancer(self):
 
-        # FIXME: moduledir (=step_id?) can vary
-        # prev_path = {
-        #     'moduledir': 'blocks', 'module_id': 'blocks',
-        #     'step_id': 'blocks', 'step': 'split',
-        #     'ioitem': 'outputs', 'output': 'blockfiles',
-        #     }
-        prev_path = {
-            'moduledir': 'splitter', 'module_id': 'splitter',
-            'step_id': 'splitter', 'step': 'split',
-            'ioitem': 'outputs', 'output': 'blockfiles',
-            }
-        bpat = self._get_inpath(prev_path)
-        if bpat == 'default':
-            # bpat = self._build_path(
-            #     moduledir=prev_path['moduledir'],
-            #     prefixes=[self.prefix, prev_path['module_id']],
-            #     suffixes=[{'b': 'p'}],
-            #     ext='h5',
-            #     )
-            os.makedirs('blocks', exist_ok=True)
-            bpat = self._build_path(moduledir='blocks', prefixes=[self.prefix, 'blocks'], suffixes=[{'b': 'p'}])
-            # bpat = self._build_path(suffixes=[{'b': 'p'}])
+        blockfiles = self.outputpaths['blockinfo']['blockfiles']
+        blockdir = os.path.join(self.datadir, 'blocks')
+        os.makedirs(blockdir, exist_ok=True)
 
         self._paths.update({
             'estimate': {
                 'inputs': {
-                    'blockfiles': f'{bpat}',
-                    'membrane': f'{bpat}/{self.ids_membrane}',
+                    'blockfiles': blockfiles,
+                    'membrane': f'{blockfiles}/{self.ids_membrane}',
                     },
                 'outputs': {
-                    'blockfiles': f'{bpat}',
-                    'preprocess': f"{bpat}/{self.ods_preprocess}",
-                    'planarity': f"{bpat}/{self.ods_planarity}",
-                    # 'eigen': f"{bpat}.h5/memb/ACME_eigen",
-                    # 'tv': f"{bpat}.h5/memb/ACME_tv",
-                    # 'segment': f"{bpat}.h5/memb/ACME_segment",
+                    'blockfiles': blockfiles,
+                    'preprocess': f"{blockfiles}/{self.ods_preprocess}",
+                    'planarity': f"{blockfiles}/{self.ods_planarity}",
+                    # 'eigen': f"{blockfiles}/memb/ACME_eigen",
+                    # 'tv': f"{blockfiles}/memb/ACME_tv",
+                    # 'segment': f"{blockfiles}/memb/ACME_segment",
                     }
                 },
             })
 
-        for step in self._fun_selector.keys():  #['estimate']:  #self._fun_selector.keys():
+        for step in self._fun_selector.keys():
             step_id = 'blocks' if step=='blockinfo' else self.step_id
             self.inputpaths[step]  = self._merge_paths(self._paths[step], step, 'inputs', step_id)
             self.outputpaths[step] = self._merge_paths(self._paths[step], step, 'outputs', step_id)
@@ -174,7 +153,7 @@ class Enhanc3r(Block3r):
         with multiprocessing.Pool(processes=self._n_workers) as pool:
             pool.starmap(self._estimate_block, arglist)
 
-    def _estimate_block(self, block):
+    def _estimate_block(self, block_idx):
         """Perform planarity estimation for a block."""
 
         def h5path2nii(h5path):
@@ -182,9 +161,9 @@ class Enhanc3r(Block3r):
             ods = intpath.replace('/', '-')
             return f"{base}_{ods}.nii.gz"
 
-        block = self._blocks[block]
-        inputs = self._prep_paths(self.inputs, reps={'b': block.idx})
-        outputs = self._prep_paths(self.outputs, reps={'b': block.idx})
+        block = self._blocks[block_idx]
+        inputs = self._prep_paths_blockfiles(self.inputs, block)
+        outputs = self._prep_paths_blockfiles(self.outputs, block)
 
         niipaths = {'membrane': h5path2nii(inputs['membrane'])}
         ACME_vols = ['preprocess', 'planarity', 'eigen', 'tv', 'segment']
@@ -242,15 +221,29 @@ class Enhanc3r(Block3r):
 
         images = images or [self.ids_membrane, self.ods_preprocess, self.ods_planarity]
 
+        """
+
         if isinstance(input, str):
             super().view(input, images, labels, settings)
-        elif type(input) == int or float:
+        elif type(input) == int or type(input) == float:
             filepath = self._abs(self.outputpaths['estimate']['blockfiles'].format(b=input))
             super().view(filepath, images, labels, settings)
         else:
             input = input or [0, 1]
             super().view_blocks(input, images, labels, settings)
+        """
 
+        if images is not None:
+            images = images or self._images
+        if labels is not None:
+            labels = labels or self._labels
+
+        if isinstance(input, (int, float)):
+            input = self._blocks[input].path
+        else:
+            input = input or [0, 1]
+
+        super().view(input, images, labels, settings)
 
 
 if __name__ == "__main__":
