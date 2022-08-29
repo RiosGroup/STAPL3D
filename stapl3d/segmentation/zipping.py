@@ -132,46 +132,40 @@ class Zipp3r(Block3r):
 
     def _init_paths_zipper(self):
 
-        prev_path = {
-            'moduledir': 'segmentation', 'module_id': 'segmentation',
-            'step_id': 'segmentation', 'step': 'estimate',
-            'ioitem': 'outputs', 'output': 'blockfiles',
-            }
-        bpat = self._get_inpath(prev_path)
-        if bpat == 'default':
-            os.makedirs('blocks', exist_ok=True)
-            bpat = self._build_path(moduledir='blocks', prefixes=[self.prefix, 'blocks'], suffixes=[{'b': 'p'}])
+        blockfiles = self.outputpaths['blockinfo']['blockfiles']
+        blockdir = os.path.join(self.datadir, 'blocks')
+        os.makedirs(blockdir, exist_ok=True)
 
         stem = self._build_path(moduledir='blocks', prefixes=[self.prefix, 'blocks'])
 
         self._paths.update({
             'relabel': {
                 'inputs': {
-                    'blockfiles': f'{bpat}',
+                    'blockfiles': blockfiles,
                     },
                 'outputs': {
-                    'blockfiles': f'{bpat}',
+                    'blockfiles': blockfiles,
                     'maxlabelfile': f'{stem}_maxlabels_relabel.txt',
                     }
                 },
             'copyblocks': {
                 'inputs': {
-                    'blockfiles': f'{bpat}',
+                    'blockfiles': blockfiles,
                     },
                 'outputs': {
-                    'blockfiles': f'{bpat}',
+                    'blockfiles': blockfiles,
                     'maxlabelfile': f'{stem}_maxlabels_copyblocks.txt',
                     }
                 },
             'estimate': {
                 'inputs': {
-                    'blockfiles': f'{bpat}',
+                    'blockfiles': blockfiles,
                     },
                 'outputs': {
-                    'blockfiles': f'{bpat}',
+                    'blockfiles': blockfiles,
                     'maxlabelfile': f'{stem}_maxlabels_estimate.txt',
                     'stem': f'{stem}',
-                    'report': f'{bpat}.pdf',
+                    'report': blockfiles.replace('.h5', '_zipper.pdf'),  # FIXME
                     }
                 },
             })
