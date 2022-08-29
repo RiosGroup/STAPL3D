@@ -3412,6 +3412,9 @@ class Stapl3r(object):
         if abs:
             paths = {ids: self._abs(p) for ids, p in paths.items()}
 
+        #for ids, p in paths.items():
+        #    os.makedirs(os.path.dirname(p), exist_ok=True)
+
         return paths
 
     def _find_reps(self, filepat, filestem=None, block_idx=-1):
