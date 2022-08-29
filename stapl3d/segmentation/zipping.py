@@ -27,7 +27,7 @@ from scipy import ndimage as ndi
 from skimage.segmentation import relabel_sequential, watershed
 from skimage.color import label2rgb
 
-from stapl3d import parse_args, Stapl3r, Image, LabelImage, MaskImage, wmeMPI, split_filename
+from stapl3d import parse_args, Stapl3r, Image, LabelImage, MaskImage
 from stapl3d.blocks import Block3r
 from stapl3d import get_paths  # TODO: into Image/Stapl3r
 from stapl3d.reporting import (
@@ -104,7 +104,6 @@ class Zipp3r(Block3r):
             })
 
         default_attr = {
-            'seamgrid': [],
             'ids_labels': 'segm/labels',
             'ods_labels': 'segm/labels_zip',
             'ods_zipmask': 'segm/labels_zipmask',
@@ -124,8 +123,6 @@ class Zipp3r(Block3r):
         self._init_log()
 
         self._prep_blocks()
-
-        self._set_zip_layout()
 
         self._images = ['nucl/prep', 'memb/prep']
         self._labels = ['segm/labels', 'segm/labels_zipmask', 'segm/labels_zip']
@@ -175,31 +172,27 @@ class Zipp3r(Block3r):
             self.inputpaths[step]  = self._merge_paths(self._paths[step], step, 'inputs', step_id)
             self.outputpaths[step] = self._merge_paths(self._paths[step], step, 'outputs', step_id)
 
-    def _set_zip_layout(self):
-        """Determine the number of seams in the blocked dataset."""
+    def _gather_maxlabels(self, ids):
 
-        # im = Image(self.image_in)
-        # im.load(load_data=False)
-        # X = im.dims[im.axlab.index('x')]
-        # Y = im.dims[im.axlab.index('y')]
-        # im.close()
-        # print(self.image_in, X, Y, self.blocksize)
+        maxlabelfile = self._prep_paths(self.outputs)['maxlabelfile']
 
-        nx = int( np.ceil( self.fullsize['x'] / self.blocksize['x'] ) )
-        ny = int( np.ceil( self.fullsize['y'] / self.blocksize['y'] ) )
-        n_seams_yx = [ny - 1, nx - 1]
-        seams = list(range(np.prod(n_seams_yx)))
-        self.seamgrid = np.reshape(seams, n_seams_yx)
+        maxlabels = []
+        for block in self._blocks:
+            image_in = f'{block.path}/{ids}'
+            im = Image(image_in, permission='r')
+            im.load(load_data=False)
+            maxlabels.append(im.ds.attrs['maxlabel'])
+            im.close()
+
+        np.savetxt(maxlabelfile, maxlabels, fmt='%d')
+
+        return maxlabels
 
     def relabel(self, **kwargs):
-        """."""
+        """Relabel with unique labels over all blocks."""
 
-        step_id = 'relabel'
-        outputs = self._prep_paths(self.outputpaths[step_id])
-        maxlabelfile = outputs['maxlabelfile']
-        arglist = self._prep_step(step_id, kwargs)
-        filepaths = self._get_filepaths(arglist)
-        get_maxlabels_from_attribute(filepaths, self.ids_labels, maxlabelfile)
+        arglist = self._prep_step('relabel', kwargs)
+        self._gather_maxlabels(self.ids_labels)
 
         with multiprocessing.Pool(processes=self._n_workers) as pool:
             pool.starmap(self._relabel_blocks, arglist)
@@ -247,14 +240,10 @@ class Zipp3r(Block3r):
         mo.close()
 
     def copyblocks(self, **kwargs):
-        """."""
+        """Copy labels to new dataset."""
 
-        step_id = 'copyblocks'
-        outputs = self._prep_paths(self.outputpaths[step_id])
-        maxlabelfile = outputs['maxlabelfile']
-        arglist = self._prep_step(step_id, kwargs)
-        filepaths = self._get_filepaths(arglist)
-        get_maxlabels_from_attribute(filepaths, self.ods_labels, maxlabelfile)
+        arglist = self._prep_step('copyblocks', kwargs)
+        self._gather_maxlabels(self.ods_labels)
 
         with multiprocessing.Pool(processes=self._n_workers) as pool:
             pool.starmap(self._copy_blocks, arglist)
@@ -278,7 +267,6 @@ class Zipp3r(Block3r):
         im = LabelImage(image_in)
         im.load()
 
-        #  or '_peaks' in pf
         if self.ods_zipmask:
             outpath =f'{filepath}/{self.ods_zipmask}'
             data = np.zeros(im.dims, dtype='bool')
@@ -304,41 +292,43 @@ class Zipp3r(Block3r):
     def estimate(self, **kwargs):
         """Resegment the dataset block boundaries."""
 
-        step_id = 'estimate'
-        outputs = self._prep_paths(self.outputpaths[step_id])
-        maxlabelfile = outputs['maxlabelfile']
-        arglist = self._prep_step(step_id, kwargs)
-        filepaths = self._get_filepaths(arglist)
-        get_maxlabels_from_attribute(filepaths, self.ids_labels, maxlabelfile)
-
-
-        # Arguments to `resegment_block_boundaries`
-        outputstem = outputs['stem']
-        args = [filepaths, 0, [-1, -1, -1], maxlabelfile]
-        n_workers = self._n_workers  # max_workers here?!  handled in _prep_step?
-
         # ziplines
-        for axis, n_seams in zip([1, 2], self.seamgrid.shape):
-            n_proc = min(n_workers, int(np.ceil(n_seams / 2)))
+        for axis in [1, 2]:
             for offset in [0, 1]:
-                self.compute_zip_step(args, axis=axis, starts=[offset, 0], stops=[n_seams, 1], steps=[2, 2], n_proc=n_proc)
-                get_maxlabels_from_attribute(filepaths, self.ods_labels, maxlabelfile)
+                n_seams = self._seamgrid.shape[axis - 1]
+                self.compute_zip_step(
+                    axis=axis,
+                    starts=[offset, 0],
+                    stops=[n_seams, 1],
+                    steps=[2, 2],
+                    )
+                self._gather_maxlabels(self.ods_labels)
 
         # zipquads
         for start_y in [0, 1]:
             for start_x in [0, 1]:
-                self.compute_zip_step(args, axis=0, starts=[start_y, start_x], stops=self.seamgrid.shape, steps=[2, 2], n_proc=n_workers)
-                get_maxlabels_from_attribute(filepaths, self.ods_labels, maxlabelfile)
+                self.compute_zip_step(
+                    axis=0,
+                    starts=[start_y, start_x],
+                    stops=self._seamgrid.shape,
+                    steps=[2, 2],
+                    )
+                self._gather_maxlabels(self.ods_labels)
 
-    def compute_zip_step(self, args, axis, starts, stops, steps, n_proc):
+    def compute_zip_step(self, axis, starts, stops, steps=[2, 2]):
         """Compute the zip-step."""
 
-        arglist = self._get_args(args, axis, starts, stops, steps)
-        print('Submitting {:3d} jobs over {:3d} processes'.format(len(arglist), n_proc))
+        arglist = self._get_arglist_zip(axis, starts, stops, steps)
+
+        self._prep_step('estimate')
+        self._set_n_workers(len(arglist))
+        n_proc = min(self._n_workers, len(arglist))
+        print(f'Submitting {len(arglist):3d} jobs over {n_proc:3d} processes')
+
         with multiprocessing.Pool(processes=n_proc) as pool:
             pool.starmap(self._resegment_block_boundaries, arglist)
 
-    def _get_args(self, args, axis, starts, stops, steps):
+    def _get_arglist_zip(self, axis, starts, stops, steps=[2, 2]):
         """Replace the `axis` and `seamnumbers` arguments
         with values specific for sequential zip-steps.
 
@@ -352,32 +342,31 @@ class Zipp3r(Block3r):
         for seam_y in range(starts[0], stops[0], steps[0]):
             for seam_x in range(starts[1], stops[1], steps[1]):
                 seamnumbers = [-1, seam_y, seam_x]
-                args[1] = axis
                 if axis == 0:
-                    args[2] = [seamnumbers[d] if d != axis else -1 for d in [0, 1, 2]]
+                    sn = [seamnumbers[d] if d != axis else -1 for d in [0, 1, 2]]
                 else:
-                    args[2] = [seam_y if d == axis else -1 for d in [0, 1, 2]]
-                arglist.append(tuple(args))
+                    sn = [seam_y if d == axis else -1 for d in [0, 1, 2]]
+                arglist.append((axis, sn))
 
         return arglist
 
-    def _resegment_block_boundaries(self, filepaths, axis=2, seamnumbers=[-1, -1, -1], maxlabel=''):
+    def _resegment_block_boundaries(self, axis=2, seamnumbers=[-1, -1, -1]):
         """Resegment the dataset block boundaries."""
 
-        # NB: images_in are sorted in xyz-order while most processing will map to zyx
+        # NB: images_in are sorted in xyz-order, while most processing will map to zyx
         # TODO: may want to switch to xyz here; or perhaps sort according to zyx for consistency
 
         self.axis = axis
         self.seamnumbers = seamnumbers
-        self.maxlabel = maxlabel
+
+        self.maxlabel = self._prep_paths(self.outputpaths['estimate'])['maxlabelfile']  # maxlabel
         blockmargin = [self.blockmargin[d] for d in 'zyx']
         self.margin = blockmargin[2] if self.axis == 0 else blockmargin[self.axis]
 
-        filepaths.sort()
-        info = self.get_block_info(filepaths)
+        info = self.get_block_info('')
         self.set_blockmap(info)
         self.set_seamnumber()
-        self.prep_maxlabel(filepaths, self.ods_labels)
+        self.prep_maxlabel('', self.ods_labels)
 
         # loop over all pairs in a zipline
         for j, pair in enumerate(self.get_seam_pairs()):
@@ -391,27 +380,21 @@ class Zipp3r(Block3r):
                 continue
 
             self.process_pair()
-            # self.process_pair(
-            #     ids_nucl,
-            #     ids_memb_chan,
-            #     find_peaks,
-            #     peaks_thr,
-            #     peaks_size,
-            #     peaks_dil_footprint,
-            #     compactness)
 
 
     def get_block_info(self, filepaths):
         """Gather image info on each block."""
 
         info = {}
-        for i, filepath in enumerate(filepaths):
+#        for i, filepath in enumerate(filepaths):
+        for block in self._blocks:
+            i = block.idx
             info[i] = {}
-            info[i]['filepath'] = filepath
-            for j, dim in enumerate('zyx'):
-                info[i][dim] = self._blocks0[i].slices[j].start
-            for j, dim in enumerate('ZYX'):
-                info[i][dim] = self._blocks0[i].slices[j].stop
+            info[i]['filepath'] = block.path
+            for al in 'zyx':
+                block = self._blocks[i]
+                info[i][al.lower()] = block.slices_region[al].start
+                info[i][al.upper()] = block.slices_region[al].stop
             info[i]['blockcoords'] = [
                 int(info[i]['z'] / self.blocksize['z']),
                 int(info[i]['y'] / self.blocksize['y']),
@@ -480,16 +463,6 @@ class Zipp3r(Block3r):
 
         self._n_max = min(n_cap, int(np.amin(np.array(sizes)) / self.margin))
 
-    # def process_pair(
-    #     self,
-    #     ids_nucl='',
-    #     ids_memb_chan='memb/prep',
-    #     find_peaks=False,
-    #     peaks_thr=1.16,
-    #     peaks_size=[11, 19, 19],
-    #     peaks_dil_footprint=[3, 7, 7],
-    #     compactness=0.80,
-    #     ):
     def process_pair(self):
         """Resegment the boundaries between pairs/quads of blocks."""
 
