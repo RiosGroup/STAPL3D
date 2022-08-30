@@ -36,8 +36,6 @@ from stapl3d.reporting import get_centreslices
 
 logger = logging.getLogger(__name__)
 
-import warnings
-warnings.filterwarnings("ignore", category=FutureWarning)
 
 def main(argv):
     """Calculate metrics for mLSR-3D equalization assay."""
@@ -391,7 +389,7 @@ class Equaliz3r(Stapl3r):
         signal_mask = data > np.quantile(data[tissue_mask], self.segment_quantile)
         signal_mask[~tissue_mask] = False
         signal_mask &= ~clipping_mask
-        remove_small_objects(signal_mask, min_size=self.segment_min_size, in_place=True)
+        remove_small_objects(signal_mask, min_size=self.segment_min_size, out=signal_mask)
 
         segmentation[noise_mask]  = 1
         segmentation[tissue_mask] = 2
@@ -886,6 +884,7 @@ class Equaliz3r(Stapl3r):
     def _plot_primaries(self, metric='seg-foreground', ax=None):
 
         df = self.df[self.df['primaries']]
+        df = df.drop(columns=['species', 'primaries', 'secondaries'])
         dfa = df.groupby('antibody').agg([np.mean, np.std])
         dfb = dfa.xs(metric, axis=1).sort_values('mean', ascending=False)
 
