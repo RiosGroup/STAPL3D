@@ -532,17 +532,17 @@ class Featur3r(Block3r):
     def _add_spatial_features(self, df, inputs):
 
         spatial_features_funs = {
-            'dist_to_edge': self._add_dist2edge_feature,
+            'dist_to_mask': self._add_dist_to_mask_feature,
         }
         for feat in self.spatial_features:
             df = spatial_features_funs[feat](df, inputs)
 
         return df
 
-    def _add_dist2edge_feature(self, df, inputs=[]):
+    def _add_dist_to_mask_feature(self, df, inputs=[]):
 
         try:
-            d2e_path = inputs['dist_to_edge']
+            d2e_path = inputs['dist_to_mask']
         except KeyError:
             return df
         else:
@@ -561,7 +561,7 @@ class Featur3r(Block3r):
 
             ds_centroid = np.array(df[coms] / self.downsample_factors, dtype='int')
             ds_centroid = [data[p[0], p[1], p[2]] for p in ds_centroid]
-            df['dist_to_edge'] = np.array(ds_centroid)
+            df['dist_to_mask'] = np.array(ds_centroid)
 
         return df
 
