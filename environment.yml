@@ -19,6 +19,7 @@ dependencies:
   - mpi4py
   - scikit-image
   - scikit-learn
+  - pydantic!=1.10.0  # https://pullanswer.com/questions/typeerror-unhashable-type-color-during-qt-resource-compilation
   - napari
   - tifffile
   - czifile
