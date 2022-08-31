@@ -1192,7 +1192,7 @@ class Splitt3r(Block3r):
                 mo.create()
                 mo.ds[:] = data
 
-            axlab = [al for al in props['axlab'] if al not in output['squeeze']]
+            axlab = [al for al in mo.axlab if al not in output['squeeze']]
             axlab = str(''.join(axlab))
             axes = tuple(mo.axlab.index(al) for al in output['squeeze'] if al in mo.axlab)
             block.create_dataset(
@@ -1201,7 +1201,7 @@ class Splitt3r(Block3r):
                 axlab=axlab,
                 create_image=True,
                 )
-            block.datasets[ods].write(np.squeeze(data, axis=axes))
+            block.datasets[ods].write(np.squeeze(mo.ds, axis=axes))
 
     def _get_voldicts(self, props):
 
