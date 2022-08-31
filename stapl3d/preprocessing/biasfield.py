@@ -28,10 +28,15 @@ from skimage.filters import threshold_otsu
 
 import SimpleITK as sitk
 
-from stapl3d import parse_args, Stapl3r, Image, format_, wmeMPI
+from stapl3d import parse_args, Stapl3r, Image, wmeMPI
 from stapl3d import get_paths, get_imageprops  # TODO: into Image/Stapl3r
-from stapl3d import imarisfiles
-from stapl3d.preprocessing.shading import get_image_info
+from stapl3d.imarisfiles import (
+    find_downsample_factors,
+    find_resolution_level,
+    ims_linked_channels,
+    h5chs_to_virtual,
+    create_ref,
+    )
 from stapl3d.reporting import (
     gen_orthoplot_with_colorbar,
     get_centreslices,
@@ -61,7 +66,59 @@ def main(argv):
 
 
 class Homogeniz3r(Stapl3r):
-    """Perform N4 bias field correction."""
+    _doc_main = """Perform N4 bias field correction."""
+    _doc_attr = """
+
+    Homogeniz3r Attributes
+    ----------
+    method : str, default 'biasfield'
+        Correction Method.
+            'biasfield': N4 bias field correction [Tustison et al., 2010].
+            'smooth_division': simple division by very smooth image.
+            'attenuation': attenuation correction [REF]
+    channels : list, default [0, 1, ..., N]
+        List of channels indices to process.
+    resolution_level : int, default 'smallest not downsampled in Z'
+        Resolution level of the image pyramid to use.
+    target_yx : float, default 20
+        Target in-plane resolution [um] for the inhomogeneity estimation step.
+        Used to calculate downsample_factors from resolution_level to target_yx.
+    downsample_factors : dict, default {}
+        Downsample factors applied on the image (at resolution_level).
+        Supersedes target_yx.
+    n_iterations : int, default 50
+        Number of iterations for the N4 algorithm (passed to ITK filter).
+    n_fitlevels : dict, default {'z': 4, 'y': 4, 'x': 4}
+        Number of fitlevels for the N4 algorithm (passed to ITK filter).
+    n_bspline_cps : dict, default {'z': 5, 'y': 5, 'x': 5}
+        Number of B-splines for the N4 algorithm (passed to ITK filter).
+    tasks : int, default 1
+        Maximal concurrent threads for estimation (passed to ITK filter).
+    blocksize_xy : int, default 1280
+        In-plane size of the block used during the 'apply' step.
+    """
+    _doc_meth = """
+
+    Homogeniz3r Methods
+    --------
+    run
+        Run all steps in the Homogeniz3r module.
+    estimate
+        Estimate the inhomogeneity for each channel.
+    apply:
+        Correct the inhomogeneity for each channel.
+    postprocess
+        Aggregate channels into a symlinked h5 and merge the channel reports.
+    view
+        View volumes with napari.
+    """
+    _doc_exam = """
+
+    Homogeniz3r Examples
+    --------
+    # TODO
+    """
+    __doc__ = f"{_doc_main}{Stapl3r.__doc__}{_doc_meth}{_doc_attr}{_doc_exam}"
 
     def __init__(self, image_in='', parameter_file='', **kwargs):
 
@@ -89,7 +146,7 @@ class Homogeniz3r(Stapl3r):
                 'ppar': ('method',
                          'resolution_level', 'target_yx', 'downsample_factors',
                          'n_iterations', 'n_fitlevels', 'n_bspline_cps'),
-                'spar': ('_n_workers', 'channels', 'n_threads'),
+                'spar': ('_n_workers', 'channels', 'tasks'),
                 },
             'apply': {
                 'fpar': self._FPAR_NAMES,
@@ -118,12 +175,11 @@ class Homogeniz3r(Stapl3r):
             'target_yx': 20,
             'downsample_factors': {},
             '_downsample_factors_reslev': {},
-            'tasks': 1,
             'n_iterations': 50,
             'n_fitlevels': {'z': 4, 'y': 4, 'x': 4},
             'n_bspline_cps': {'z': 5, 'y': 5, 'x': 5},
             'blocksize_xy': 1280,
-            'n_threads': 1,
+            'tasks': 1,
         }
         for k, v in default_attr.items():
             setattr(self, k, v)
@@ -140,45 +196,9 @@ class Homogeniz3r(Stapl3r):
 
     def _init_paths(self):
 
-        # FIXME: moduledir (=step_id?) can vary
-        prev_path = {
-            'moduledir': 'stitching', 'module_id': 'stitching',
-            'step_id': 'stitching', 'step': 'postprocess',
-            'ioitem': 'outputs', 'output': 'aggregate',
-            }
-        datapath = self._get_inpath(prev_path)
         if self.image_in.endswith('.ims'):
-            datapath = self.image_in
-            maskpath = ''  # FIXME: assuming stitching and masking coupled
             ext = '.ims'
             ids = ''
-        elif self.image_in.endswith('.czi'):
-            datapath = self.image_in
-            maskpath = ''  # FIXME: assuming stitching and masking coupled
-            ext = '.h5'
-            ids = '/data'
-        elif datapath == 'default':
-            datapath = self._build_path(
-                moduledir=prev_path['moduledir'],
-                prefixes=[self.prefix, prev_path['module_id']],
-                ext='bdv',
-                )
-
-            # FIXME: moduledir (=step_id?) can vary
-            prev_path = {
-                'moduledir': 'mask', 'module_id': 'mask',
-                'step_id': 'mask', 'step': 'estimate',
-                'ioitem': 'outputs', 'output': 'mask',
-                }
-            maskpath = self._get_inpath(prev_path)
-            if maskpath == 'default':
-                maskpath = self._build_path(
-                    moduledir=prev_path['moduledir'],
-                    prefixes=[self.prefix, prev_path['module_id']],
-                    ext='h5/mask',
-                    )
-            ext = '.h5'
-            ids = '/data'
         else:
             ext = '.h5'
             ids = '/data'
@@ -191,8 +211,8 @@ class Homogeniz3r(Stapl3r):
         self._paths = {
             'estimate': {
                 'inputs': {
-                    'data': datapath,
-                    'mask': maskpath,
+                    'data': self.image_in,
+                    'mask': '',  # only from parameterfile for now
                     },
                 'outputs': {
                     **{'file': f'{cpat}_ds.h5'},
@@ -203,7 +223,7 @@ class Homogeniz3r(Stapl3r):
                 },
             'apply': {
                 'inputs': {
-                    'data': datapath,
+                    'data': self.image_in,
                     'bias': f'{cpat}_ds.h5/bias',
                     'ims_ref': '',
                     },
@@ -231,15 +251,16 @@ class Homogeniz3r(Stapl3r):
             self.outputpaths[step] = self._merge_paths(self._paths[step], step, 'outputs')
 
     def estimate(self, **kwargs):
-        """Perform N4 bias field correction."""
+        """Perform inhomogeneity estimation."""
 
         arglist = self._prep_step('estimate', kwargs)
 
-        self.set_downsample_factors(self.inputpaths['estimate']['data'])
+        self._set_downsampling_parameters(self.inputpaths['estimate']['data'])
 
-        # NOTE: ITK is already multithreaded => n_workers = 1
+        # NOTE: ITK is already multithreaded =>
+        # n_workers = 1; pass number of threads to ITK filter
         if self.method == 'biasfield':
-            self.n_threads = min(self.tasks, multiprocessing.cpu_count())
+            self._n_threads = min(self.tasks, multiprocessing.cpu_count())
             self._n_workers = 1
         with multiprocessing.Pool(processes=self._n_workers) as pool:
             pool.starmap(self._estimate_channel, arglist)
@@ -278,7 +299,7 @@ class Homogeniz3r(Stapl3r):
                 self.n_iterations,
                 [self.n_fitlevels[dim] for dim in ds_im.axlab],
                 [self.n_bspline_cps[dim] for dim in ds_im.axlab],
-                self.n_threads,
+                self._n_threads,
                 outputs['bias'],
                 )
         ds_cr = divide_bias_field(
@@ -299,30 +320,67 @@ class Homogeniz3r(Stapl3r):
                     parameters=pars,
                     inputs=inputs, outputs=outputs)
 
-    def set_downsample_factors(self, inputpath, resolution_level=-1):
+    def _set_downsampling_parameters(self, inputpath):
+        """Set the downsample factors of the volume.
 
-        self.set_resolution_level(inputpath)
+        downsampling of the input volume is composed of:
+        1. the downsampling in the image pyramid
+        2. additional downsampling to reach the target resolution
+        """
 
-        dsfacs = imarisfiles.find_downsample_factors(inputpath, 0, self.resolution_level)
-        self._downsample_factors_reslev = {dim: int(d) for dim, d in zip('zyxct', list(dsfacs) + [1, 1])}
+        self._set_resolution_level(inputpath)
+        self._set_downsample_factors_reslev(inputpath)
+        self._set_downsample_factors(inputpath)
+
+    def _set_resolution_level(self, inputpath):
+        """Set the resolution level parameter.
+
+        If the resolution_level is set to a negative value,
+        find the resolution level in the image pyramid that
+        has no downsampling in the z-dimension.
+        """
+
+        if self.resolution_level >= 0:
+            return
+
+        if ('.ims' in inputpath or '.bdv' in inputpath):
+            self.resolution_level = find_resolution_level(inputpath)
+
+    def _set_downsample_factors_reslev(self, inputpath):
+        """Set the downsampling factors associated with the resolution level."""
+
+        if self._downsample_factors_reslev:
+            return
+
+        if ('.ims' in inputpath or '.bdv' in inputpath):
+            axlab = 'zyxct'
+            dsfacs = find_downsample_factors(inputpath, 0, self.resolution_level)
+            dsfacs = list(dsfacs) + [1, 1]
+            self._downsample_factors_reslev = dict(zip(axlab, dsfacs))
+
+    def _set_downsample_factors(self, inputpath):
+        """Set the resolution level parameter."""
 
         if self.downsample_factors:
             return
 
+        # downsample factors to reach target resolution
         im = Image(inputpath, permission='r', reslev=self.resolution_level)
         im.load(load_data=False)
         im.close()
-        target = {'z': im.elsize[im.axlab.index('z')], 'y': self.target_yx, 'x': self.target_yx}
+
+        target = {
+            'z': im.elsize[im.axlab.index('z')],
+            'y': self.target_yx,
+            'x': self.target_yx,
+            }
+
+        axlab = 'zyxct'
         dsfacs = [target[dim] / im.elsize[im.axlab.index(dim)] for dim in 'zyx']
         dsfacs = [np.round(dsfac).astype('int') for dsfac in dsfacs]
         dsfacs[1] = dsfacs[2] = min(dsfacs[1], dsfacs[2])
-
-        self.downsample_factors = {dim: int(d) for dim, d in zip('zyxct', dsfacs + [1, 1])}
-
-    def set_resolution_level(self, inputpath):
-
-        if ('.ims' in inputpath or '.bdv' in inputpath) and self.resolution_level < 0:
-            self.resolution_level = imarisfiles.find_resolution_level(inputpath)
+        dsfacs = list(dsfacs) + [1, 1]
+        self.downsample_factors = dict(zip(axlab, dsfacs))
 
     def postprocess(self, **kwargs):
         """Merge bias field estimation files."""
@@ -332,46 +390,28 @@ class Homogeniz3r(Stapl3r):
         inputs = self._prep_paths(self.inputs)
         outputs = self._prep_paths(self.outputs)
 
-        def gather_4D(inputpat, outputfile, idss=['data']):
-            inputfiles = glob(inputpat)
-            inputfiles.sort()
-            if not inputfiles:
-                return
-            if outputfile.endswith('.ims'):
-                imarisfiles.ims_linked_channels(outputfile, inputfiles, inputs['ims_ref'])
-            elif '.h5' in outputfile:
-                for ids in idss:
-                    inputpaths = [f'{inputfile}/{ids}' for inputfile in inputfiles]
-                    imarisfiles.h5chs_to_virtual(inputpaths, f'{outputfile}/{ids}')
-
-        gather_4D(inputs['channels'], outputs['aggregate'], ['data'])
-        gather_4D(inputs['channels_ds'], outputs['aggregate_ds'], ['data', 'bias', 'corr'])
+        gather_4D(inputs['channels'], outputs['aggregate'],
+                  ['data'])
+        gather_4D(inputs['channels_ds'], outputs['aggregate_ds'],
+                  ['data', 'bias', 'corr'])
 
         pdfs = glob(inputs['report'])
         pdfs.sort()
         self._merge(pdfs, outputs['report'], self._merge_reports)
-
-    def stack_bias(self, inputfiles, outputfile, idss=['data', 'bias', 'corr']):
-        """Merge the downsampled biasfield images to 4D datasets."""
-
-        for ids in idss:
-            images_in = [f'{filepath}/{ids}' for filepath in inputfiles]
-            outputpath = f'{outputfile}/{ids}'
-            mo = stack_channels(images_in, outputpath=outputpath)
 
     def apply(self, **kwargs):
         """Apply N4 bias field correction."""
 
         arglist = self._prep_step('apply', kwargs)
 
-        self.set_downsample_factors(self.inputpaths['estimate']['data'])
+        self._set_downsampling_parameters(self.inputpaths['estimate']['data'])
 
         if self.outputpaths['apply']['channels'].endswith('.ims'):
             if not self.inputpaths['apply']['ims_ref']:
                 filepath_ims = self.inputpaths['estimate']['data']
                 filepath_ref = filepath_ims.replace('.ims', '_ref.ims')
                 # TODO: protect existing files
-                imarisfiles.create_ref(filepath_ims)
+                create_ref(filepath_ims)
                 self.inputpaths['apply']['ims_ref'] = filepath_ref
                 self.inputpaths['postprocess']['ims_ref'] = filepath_ref
 
@@ -384,7 +424,7 @@ class Homogeniz3r(Stapl3r):
         inputs = self._prep_paths(self.inputs, reps={'c': channel})
         outputs = self._prep_paths(self.outputs, reps={'c': channel})
 
-        self.set_downsample_factors(inputs['data'])
+        self._set_downsampling_parameters(inputs['data'])
 
         # Create the image objects.
         in_place = inputs['data'] == outputs['channels']
@@ -403,14 +443,14 @@ class Homogeniz3r(Stapl3r):
             ref_mean = means[self.ref_idx]
             ref_std = stds[self.ref_idx]
 
-            #im_ch = im.extract_channel(channel)
-            #attenuation_correction_apply(im_ch, npzfile['means'], npzfile['stds'], ref_idx=None, outputpath=outputs['channels'])
-            #im.close()
-            #return
+            # im_ch = im.extract_channel(channel)
+            # attenuation_correction_apply(im_ch, npzfile['means'], npzfile['stds'], ref_idx=None, outputpath=outputs['channels'])
+            # im.close()
+            # return
 
-            print(ref_mean, ref_std)
-            for m, s in zip(means, stds):
-                print(m, s)
+            # print(ref_mean, ref_std)
+            # for m, s in zip(means, stds):
+            #     print(m, s)
 
         bf = Image(inputs['bias'], permission='r')
         bf.load(load_data=False)
@@ -420,7 +460,7 @@ class Homogeniz3r(Stapl3r):
             shutil.copy2(inputs['ims_ref'], outputs['channels'])
             mo = Image(outputs['channels'])
             mo.load()
-            # TODO: write to bdv pyramid
+        # TODO: write to bdv pyramid
         else:
             props = im.get_props()
             if len(im.dims) > 4:
@@ -433,7 +473,8 @@ class Homogeniz3r(Stapl3r):
 
         # Get the downsampling between full and bias images.
         p = self._load_dumped_step(self.directory, self._module_id, 'estimate')
-        self.set_downsample_factors(p['inputs']['data'], p['resolution_level'])
+        self.resolution_level = p['resolution_level']
+        self._set_downsampling_parameters(p['inputs']['data'])
 
         downsample_factors = {}
         for dim, dsfac in self._downsample_factors_reslev.items():
@@ -557,7 +598,8 @@ class Homogeniz3r(Stapl3r):
             axdict[k] = self._gen_axes(f, gs01, sg_width=sg_width, **dd, **pd)
         for k, vd in voldict.items():
             titles[k] = (vd['title'], 'lcm', 0)
-            axdict[k] = gen_orthoplot_with_colorbar(f, gs01[vd['row'], 0], idx=0, add_profile_insets=True)
+            axdict[k] = gen_orthoplot_with_colorbar(f, gs01[vd['row'], 0], idx=0,
+                                                    add_profile_insets=True)
             # titles[k] = (vd['title'], 'lc', 4)
             # axdict[k] = gen_orthoplot_with_profiles(f, gs01[vd['row'], 0])
 
@@ -761,7 +803,8 @@ def attenuation_correction_apply(im, means, stds, ref_idx=None):
     return mo
 
 
-def calculate_bias_field(im, mask=None, n_iter=50, n_fitlev=[4, 4, 4], n_cps=[5, 5, 5],
+def calculate_bias_field(im, mask=None, n_iter=50,
+                         n_fitlev=[4, 4, 4], n_cps=[5, 5, 5],
                          n_threads=1, outputpath=''):
     """Calculate the bias field."""
 
@@ -823,6 +866,30 @@ def write_image(im, outputpath, data):
     # if 'downsample_factors' in im.ds.attrs:
     #     mo.ds.attrs['downsample_factors'] = im.ds.attrs['downsample_factors']
     return mo
+
+
+def gather_4D(inputpat, outputfile, idss=['data']):
+    """Merge 3D image stacks to virtual 4D datasets."""
+
+    inputfiles = glob(inputpat)
+    inputfiles.sort()
+    if not inputfiles:
+        return
+    if outputfile.endswith('.ims'):
+        ims_linked_channels(outputfile, inputfiles, inputs['ims_ref'])
+    elif '.h5' in outputfile:
+        for ids in idss:
+            inputpaths = [f'{inputfile}/{ids}' for inputfile in inputfiles]
+            h5chs_to_virtual(inputpaths, f'{outputfile}/{ids}')
+
+
+def stack_bias(inputfiles, outputfile, idss=['data', 'bias', 'corr']):
+    """Merge the downsampled biasfield images to 4D datasets."""
+
+    for ids in idss:
+        images_in = [f'{filepath}/{ids}' for filepath in inputfiles]
+        outputpath = f'{outputfile}/{ids}'
+            mo = stack_channels(images_in, outputpath=outputpath)
 
 
 def stack_channels(images_in, axis=-1, outputpath=''):
@@ -915,6 +982,16 @@ def extract_zyx_profiles(filepath, ch=0):
 
     return d
 
+def create_ref_ims(filepath_ims, filepath_ref, outputpath):
+
+    outputpath = self.outputpaths['apply']['channels']
+    ims_ref = self.inputpaths['apply']['ims_ref']
+    filepath_ims = self.inputpaths['estimate']['data']
+    if outputpath.endswith('.ims'):
+        if not ims_ref:
+            filepath_ref = filepath_ims.replace('.ims', '_ref.ims')
+            create_ref(filepath_ims)
+    return filepath_ref
 
 if __name__ == "__main__":
     main(sys.argv[1:])

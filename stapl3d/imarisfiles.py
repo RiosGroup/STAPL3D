@@ -680,7 +680,10 @@ def h5chs_to_virtual(inputpaths, outputpath='', ext='.h5'):
 
     # Add virtual dataset to output file
     with h5py.File(outputfile, 'a', libver='latest') as f:
-        f.create_virtual_dataset(ods, layout, fillvalue=0)
+        try:
+            f.create_virtual_dataset(ods, layout, fillvalue=0)
+        except ValueError:
+            print(f"WARNING: could not create dataset {ods} because it already exists.")
         for i, label in enumerate(props['axlab']):
             f[ods].dims[i].label = label
         f[ods].attrs['element_size_um'] = props['elsize']
