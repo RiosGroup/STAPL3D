@@ -187,8 +187,6 @@ class Featur3r(Block3r):
 
         inputs = self._prep_paths_blockfiles(self.inputs, block)
         outputs = self._prep_paths_blockfiles(self.outputs, block)
-        #inputs = self._prep_paths(self.inputs, reps={'b': block.idx})
-        #outputs = self._prep_paths(self.outputs, reps={'b': block.idx})
 
         # Load segmentations and intensity data.
         label_ims, all_regions, elsize, axlab = self._load_label_images(block)
@@ -413,12 +411,14 @@ class Featur3r(Block3r):
 
     def _load_intens_images(self, block, data_paths):
 
+        intens_from_blocks = False  # TODO
+
         # Load intensity images  # NOTE: assuming 4D full input for now
         data_ims = {}
         for i, data_path in enumerate(data_paths):
             pf = 'im{:02d}'.format(i)
 
-            if self.filepaths:
+            if intens_from_blocks:
                 data_path = self.filepaths[block.idx]
 
             data = Image(data_path, permission='r')
