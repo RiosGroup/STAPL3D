@@ -3135,14 +3135,13 @@ class Stapl3r(object):
         #     pars = [getset(pp, block_obs) for pp in parallelized_pars]
 
         elif parallelized_pars == ['vols']:
-            paths = get_paths(self._blocks[0].path)  # self.blocks[0]
             volumes = self.volumes
             def extract(name, node):
                 if isinstance(node, h5py.Dataset):
                     volumes.append({name: {}})
                 return None
             if not volumes:
-                with h5py.File(paths['file'], 'r') as f:
+                with h5py.File(self._blocks[0].path, 'r') as f:
                     f.visititems(extract)
             idxs = list(range(len(volumes)))
             pars = [getset(pp, idxs) for pp in parallelized_pars]
