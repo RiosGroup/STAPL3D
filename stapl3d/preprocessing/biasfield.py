@@ -889,7 +889,7 @@ def stack_bias(inputfiles, outputfile, idss=['data', 'bias', 'corr']):
     for ids in idss:
         images_in = [f'{filepath}/{ids}' for filepath in inputfiles]
         outputpath = f'{outputfile}/{ids}'
-            mo = stack_channels(images_in, outputpath=outputpath)
+        mo = stack_channels(images_in, outputpath=outputpath)
 
 
 def stack_channels(images_in, axis=-1, outputpath=''):
