@@ -824,7 +824,7 @@ class Block3r(Stapl3r):
                 im.close()
                 if dims is None:
                     dims = np.array([0] * len(im.dims))
-                dims = np.maximum(dims, np.array(im.dims))
+                dims = [d.item() for d in np.maximum(dims, np.array(im.dims))]
                 self._elsize = dict(zip(im.axlab, im.elsize))
             imsize = dict(zip(im.axlab, dims))
         except:
