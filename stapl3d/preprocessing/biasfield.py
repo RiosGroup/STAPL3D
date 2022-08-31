@@ -710,8 +710,8 @@ class Homogeniz3r(Stapl3r):
                 ])
 
             if dim == 'z':
-                ax.legend(['original', 'corrected'], fontsize=7,
-                          loc='lower center', frameon=False)
+                ax.legend(['original', 'SD', 'corrected', 'SD'], fontsize=7,
+                          loc='upper center', frameon=False, ncol=2)
 
     def view(self, input=[], images=[], labels=[], settings={}):
 
