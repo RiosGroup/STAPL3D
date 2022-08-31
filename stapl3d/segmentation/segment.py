@@ -1904,17 +1904,14 @@ class Subsegment3r(Block3r):
 
     def _init_paths_subsegmenter(self):
 
-        prev_path = {
-            'moduledir': 'zipping', 'module_id': 'zipping',
-            'step_id': 'zipping', 'step': 'estimate',
-            'ioitem': 'outputs', 'output': 'blockfiles',
-            }
-        bpat = self._get_inpath(prev_path)
-        if bpat == 'default':
-            os.makedirs('blocks', exist_ok=True)
-            bpat = self._build_path(moduledir='blocks', prefixes=[self.prefix, 'blocks'], suffixes=[{'b': 'p'}])
+        blockfiles = self.outputpaths['blockinfo']['blockfiles']
+        blockdir = os.path.join(self.datadir, 'blocks')
+        os.makedirs(blockdir, exist_ok=True)
 
-        bpat = self._l2p(['blocks', '{f}.h5'])
+        stem = self._build_path(moduledir=self._logdir)
+        bpat = self.outputpaths['blockinfo']['blockfiles']  #self._l2p(['blocks', '{f}.h5'])
+        bmat = self._pat2mat(bpat)  # <>_blocks_B{b:05d}.h5  => <>_blocks_B*.h5
+        # TODO: for filepaths, blocks, ...
 
         self._paths.update({
             'estimate': {
