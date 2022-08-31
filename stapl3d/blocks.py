@@ -473,7 +473,7 @@ class Block_dataset(Block):
         """Write the block data to file."""
 
         if self.image.format == '.dat':  # we have an image in memory
-            self.image.path = f'{self.path}/{self.ids}'
+            self.image.path = self.path
             self.image.set_format()
             self.image.create()
             #self.chunks = self.image.chunks
