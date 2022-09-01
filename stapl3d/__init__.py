@@ -4066,6 +4066,14 @@ class Stapl3r(object):
     def _merge(self, inputfiles, outputfile, fun, **kwargs):
         """Merge files."""
 
+        if not inputfiles:
+            print(f"WARNING: files could not be merged: no inputfiles specified")
+            return
+
+        if not outputfile:
+            print(f"WARNING: files could not be merged: no outputfile specified")
+            return
+
         try:
             os.makedirs(os.path.dirname(outputfile), exist_ok=True)
             fun(inputfiles, outputfile, **kwargs)
