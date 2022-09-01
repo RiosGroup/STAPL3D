@@ -31,13 +31,16 @@ logger = logging.getLogger(__name__)
 def main(argv):
     """Block operations."""
 
-    steps = ['blockinfo', 'split', 'merge']
-    args = parse_args('blocks', steps, *argv)
-
-    subclasses = {'blockinfo': Block3r, 'split': Splitt3r, 'merge': Merg3r}
+    stepdict = {
+        'blockinfo': {'subclass': Block3r, 'step_id': 'blocks'},
+        'split': {'subclass': Splitt3r, 'step_id': 'splitter'},
+        'merge': {'subclass': Merg3r, 'step_id': 'merger'},
+        }
+    args = parse_args('blocks', list(stepdict.keys()), *argv)
 
     for step in args.steps:
-        block3r = subclasses[step](
+        args.step_id = stepdict[step]['step_id']  # read the right yml-entries
+        block3r = stepdict[step]['subclass'](
             args.image_in,
             args.parameter_file,
             step_id=args.step_id,
