@@ -355,7 +355,8 @@ class Homogeniz3r(Stapl3r):
         if ('.ims' in inputpath or '.bdv' in inputpath):
             axlab = 'zyxct'
             dsfacs = find_downsample_factors(inputpath, 0, self.resolution_level)
-            dsfacs = list(dsfacs) + [1, 1]
+
+            dsfacs = [d.item() for d in np.array(list(dsfacs) + [1, 1])]
             self._downsample_factors_reslev = dict(zip(axlab, dsfacs))
 
     def _set_downsample_factors(self, inputpath):
@@ -379,7 +380,8 @@ class Homogeniz3r(Stapl3r):
         dsfacs = [target[dim] / im.elsize[im.axlab.index(dim)] for dim in 'zyx']
         dsfacs = [np.round(dsfac).astype('int') for dsfac in dsfacs]
         dsfacs[1] = dsfacs[2] = min(dsfacs[1], dsfacs[2])
-        dsfacs = list(dsfacs) + [1, 1]
+
+        dsfacs = [d.item() for d in np.array(list(dsfacs) + [1, 1])]
         self.downsample_factors = dict(zip(axlab, dsfacs))
 
     def postprocess(self, **kwargs):
