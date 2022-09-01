@@ -745,6 +745,8 @@ class Block3r(Stapl3r):
                 print(f'Block {i:05d} with id {block.id} contains region (padded)')
                 print(yaml.dump(slc, default_flow_style=False))
 
+    blockinfo = print_blockinfo
+
     def generate_blocks(self):
         """Generate blocks from attributes."""
 
