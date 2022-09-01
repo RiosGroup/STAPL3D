@@ -1154,7 +1154,7 @@ class Splitt3r(Block3r):
         """Process datablock."""
 
         block_ds_in = block.datasets['data']
-        block_ds_in.read(from_source=True)
+        block_ds_in.read(from_source=True))  # TODO: read only required channels!
         im = block_ds_in.image
 
         voldicts = self._get_voldicts(im.get_props2())
@@ -1203,6 +1203,10 @@ class Splitt3r(Block3r):
                 create_image=True,
                 )
             block.datasets[ods].write(np.squeeze(mo.ds, axis=axes))
+
+            del block.datasets[ods]
+
+        del block_ds_in
 
     def _get_voldicts(self, props):
 
