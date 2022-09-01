@@ -389,13 +389,18 @@ class Homogeniz3r(Stapl3r):
 
         self._prep_step('postprocess', kwargs)
 
+        if not self.inputs['ims_ref']:
+            filepath_ims = self.inputpaths['estimate']['data']
+            filepath_ref = filepath_ims.replace('.ims', '_ref.ims')
+            self.inputs['ims_ref'] = filepath_ref
+
         inputs = self._prep_paths(self.inputs)
         outputs = self._prep_paths(self.outputs)
 
         gather_4D(inputs['channels'], outputs['aggregate'],
-                  ['data'])
+                  ['data'], inputs['ims_ref'])
         gather_4D(inputs['channels_ds'], outputs['aggregate_ds'],
-                  ['data', 'bias', 'corr'])
+                  ['data', 'bias', 'corr'], inputs['ims_ref'])
 
         pdfs = glob(inputs['report'])
         pdfs.sort()
@@ -870,7 +875,7 @@ def write_image(im, outputpath, data):
     return mo
 
 
-def gather_4D(inputpat, outputfile, idss=['data']):
+def gather_4D(inputpat, outputfile, idss=['data'], ims_ref=''):
     """Merge 3D image stacks to virtual 4D datasets."""
 
     inputfiles = glob(inputpat)
@@ -878,7 +883,7 @@ def gather_4D(inputpat, outputfile, idss=['data']):
     if not inputfiles:
         return
     if outputfile.endswith('.ims'):
-        ims_linked_channels(outputfile, inputfiles, inputs['ims_ref'])
+        ims_linked_channels(outputfile, inputfiles, ims_ref)
     elif '.h5' in outputfile:
         for ids in idss:
             inputpaths = [f'{inputfile}/{ids}' for inputfile in inputfiles]
