@@ -3414,6 +3414,8 @@ class Stapl3r(object):
             paths = {ids: self._abs(p) for ids, p in paths.items()}
 
         for ids, p in paths.items():
+            if '.h5' in p:
+                p = p.split('.h5')[0]
             os.makedirs(os.path.dirname(p), exist_ok=True)
 
         return paths
