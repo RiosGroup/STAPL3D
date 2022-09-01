@@ -696,6 +696,7 @@ class Block3r(Stapl3r):
             moduledir='blocks',
             prefixes=prefixes,
             suffixes=[{suffix: 'p'}],
+            rel=False,
             )
 
         blockdir = os.path.join(self.datadir, 'blocks')
