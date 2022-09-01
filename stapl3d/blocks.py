@@ -745,7 +745,7 @@ class Block3r(Stapl3r):
                 print(f'Block {i:05d} with id {block.id} contains region (padded)')
                 print(yaml.dump(slc, default_flow_style=False))
 
-    blockinfo = print_blockinfo
+    blockinfo = write_blockinfo
 
     def generate_blocks(self):
         """Generate blocks from attributes."""
@@ -1156,7 +1156,7 @@ class Splitt3r(Block3r):
         """Process datablock."""
 
         block_ds_in = block.datasets['data']
-        block_ds_in.read(from_source=True))  # TODO: read only required channels!
+        block_ds_in.read(from_source=True)  # TODO: read only required channels!
         im = block_ds_in.image
 
         voldicts = self._get_voldicts(im.get_props2())
