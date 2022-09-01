@@ -1208,7 +1208,7 @@ class Splitt3r(Block3r):
 
             del block.datasets[ods]
 
-        del block_ds_in
+        del block.datasets['data']
 
     def _get_voldicts(self, props):
 
