@@ -478,11 +478,6 @@ class Homogeniz3r(Stapl3r):
             mo = Image(outputs['channels'], **props)
             mo.create()
 
-        # Get the downsampling between full and bias images.
-        p = self._load_dumped_step(self.directory, self._module_id, 'estimate')
-        self.resolution_level = p['resolution_level']
-        self._set_downsampling_parameters(p['inputs']['data'])
-
         downsample_factors = {}
         for dim, dsfac in self._downsample_factors_reslev.items():
             downsample_factors[dim] = dsfac * self.downsample_factors[dim]
