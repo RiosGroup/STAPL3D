@@ -487,18 +487,19 @@ class Image(object):
         from stapl3d.preprocessing import shading
         iminfo = shading.get_image_info(self.path)
 
-        data = create_output(None, iminfo['zstack_shape'], iminfo['dtype'])
-
         if load_data:
+            data = create_output(None, iminfo['zstack_shape'], iminfo['dtype'])
             data = np.squeeze(shading.read_zstack(self.path, 0, data))
             if len(data.shape) == 2:
                 data = np.expand_dims(data, 0)
             if len(data.shape) == 4:
                 data = np.transpose(data, axes=[1, 2, 3, 0])  # czyx to zyxc
+            self.ds = data
+        else:
+            self.ds = []
 
-        self.ds = data
-        self.dims = data.shape
-        self.dtype = data.dtype
+        self.dims = iminfo['dims_zyxc']
+        self.dtype = iminfo['dtype']
         self.chunks = None
 
     def lif_load(self, comm=None, load_data=True):
