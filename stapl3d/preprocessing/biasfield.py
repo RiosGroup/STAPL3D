@@ -197,16 +197,19 @@ class Homogeniz3r(Stapl3r):
     def _init_paths(self):
 
         if self.image_in.endswith('.ims'):
-            ext = '.ims'
+            ext = 'ims'
             ids = ''
         else:
-            ext = '.h5'
+            ext = 'h5'
             ids = '/data'
 
         vols = ['data', 'mask', 'bias', 'corr']
         stem = self._build_path()
         cpat = self._build_path(suffixes=[{'c': 'p'}])
         cmat = self._build_path(suffixes=[{'c': '?'}])
+
+        aggregate = self._build_basename(ext=ext)
+        report = self._build_path(moduledir=self._logdir, ext='pdf')
 
         self._paths = {
             'estimate': {
@@ -228,20 +231,20 @@ class Homogeniz3r(Stapl3r):
                     'ims_ref': '',
                     },
                 'outputs': {
-                    'channels': f'{cpat}{ext}{ids}',
+                    'channels': f'{cpat}.{ext}{ids}',
                     },
             },
             'postprocess': {
                 'inputs': {
-                    'channels': f'{cmat}{ext}',
+                    'channels': f'{cmat}.{ext}',
                     'channels_ds': f'{cmat}_ds.h5',
                     'report': f'{cmat}_ds.pdf',
                     'ims_ref': '',
                     },
                 'outputs': {
-                    'aggregate': f'{stem}{ext}',
+                    'aggregate': aggregate,
                     'aggregate_ds': f'{stem}_ds.h5',
-                    'report': f'{stem}.pdf',
+                    'report': report,
                     },
                 },
         }
