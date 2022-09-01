@@ -31,10 +31,10 @@ logger = logging.getLogger(__name__)
 def main(argv):
     """Block operations."""
 
-    steps = ['split', 'merge']  # TODO: make this useful
+    steps = ['blockinfo', 'split', 'merge']
     args = parse_args('blocks', steps, *argv)
 
-    subclasses = {'split': Splitt3r, 'merge': Merg3r}
+    subclasses = {'blockinfo': Block3r, 'split': Splitt3r, 'merge': Merg3r}
 
     for step in args.steps:
         block3r = subclasses[step](
