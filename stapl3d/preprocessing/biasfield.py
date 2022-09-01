@@ -670,7 +670,8 @@ class Homogeniz3r(Stapl3r):
         stds = info_dict['stds']
 
         data = {d: means['data'][d] + stds['data'][d] for d in 'xyz'}
-        clim_data = self._get_clim(data, q=[0,1], roundfuns=[np.floor, np.ceil])
+        clim_data = self._get_clim(data, q=[0, 1], roundfuns=[np.floor, np.ceil])
+        clim_data[0] = 0.
 
         for dim, ax_idx in zip('xyz', [2, 1, 0]):
 
