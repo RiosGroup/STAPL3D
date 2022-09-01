@@ -197,16 +197,19 @@ class Homogeniz3r(Stapl3r):
     def _init_paths(self):
 
         if self.image_in.endswith('.ims'):
-            ext = '.ims'
+            ext = 'ims'
             ids = ''
         else:
-            ext = '.h5'
+            ext = 'h5'
             ids = '/data'
 
         vols = ['data', 'mask', 'bias', 'corr']
         stem = self._build_path()
         cpat = self._build_path(suffixes=[{'c': 'p'}])
         cmat = self._build_path(suffixes=[{'c': '?'}])
+
+        aggregate = self._build_basename(ext=ext)
+        report = self._build_path(moduledir=self._logdir, ext='pdf')
 
         self._paths = {
             'estimate': {
@@ -228,20 +231,20 @@ class Homogeniz3r(Stapl3r):
                     'ims_ref': '',
                     },
                 'outputs': {
-                    'channels': f'{cpat}{ext}{ids}',
+                    'channels': f'{cpat}.{ext}{ids}',
                     },
             },
             'postprocess': {
                 'inputs': {
-                    'channels': f'{cmat}{ext}',
+                    'channels': f'{cmat}.{ext}',
                     'channels_ds': f'{cmat}_ds.h5',
                     'report': f'{cmat}_ds.pdf',
                     'ims_ref': '',
                     },
                 'outputs': {
-                    'aggregate': f'{stem}{ext}',
+                    'aggregate': aggregate,
                     'aggregate_ds': f'{stem}_ds.h5',
-                    'report': f'{stem}.pdf',
+                    'report': report,
                     },
                 },
         }
@@ -355,7 +358,8 @@ class Homogeniz3r(Stapl3r):
         if ('.ims' in inputpath or '.bdv' in inputpath):
             axlab = 'zyxct'
             dsfacs = find_downsample_factors(inputpath, 0, self.resolution_level)
-            dsfacs = list(dsfacs) + [1, 1]
+
+            dsfacs = [d.item() for d in np.array(list(dsfacs) + [1, 1])]
             self._downsample_factors_reslev = dict(zip(axlab, dsfacs))
 
     def _set_downsample_factors(self, inputpath):
@@ -379,7 +383,8 @@ class Homogeniz3r(Stapl3r):
         dsfacs = [target[dim] / im.elsize[im.axlab.index(dim)] for dim in 'zyx']
         dsfacs = [np.round(dsfac).astype('int') for dsfac in dsfacs]
         dsfacs[1] = dsfacs[2] = min(dsfacs[1], dsfacs[2])
-        dsfacs = list(dsfacs) + [1, 1]
+
+        dsfacs = [d.item() for d in np.array(list(dsfacs) + [1, 1])]
         self.downsample_factors = dict(zip(axlab, dsfacs))
 
     def postprocess(self, **kwargs):
@@ -387,13 +392,18 @@ class Homogeniz3r(Stapl3r):
 
         self._prep_step('postprocess', kwargs)
 
+        if not self.inputs['ims_ref']:
+            filepath_ims = self.inputpaths['estimate']['data']
+            filepath_ref = filepath_ims.replace('.ims', '_ref.ims')
+            self.inputs['ims_ref'] = filepath_ref
+
         inputs = self._prep_paths(self.inputs)
         outputs = self._prep_paths(self.outputs)
 
         gather_4D(inputs['channels'], outputs['aggregate'],
-                  ['data'])
+                  ['data'], inputs['ims_ref'])
         gather_4D(inputs['channels_ds'], outputs['aggregate_ds'],
-                  ['data', 'bias', 'corr'])
+                  ['data', 'bias', 'corr'], inputs['ims_ref'])
 
         pdfs = glob(inputs['report'])
         pdfs.sort()
@@ -470,11 +480,6 @@ class Homogeniz3r(Stapl3r):
             props['dtype'] = 'float'
             mo = Image(outputs['channels'], **props)
             mo.create()
-
-        # Get the downsampling between full and bias images.
-        p = self._load_dumped_step(self.directory, self._module_id, 'estimate')
-        self.resolution_level = p['resolution_level']
-        self._set_downsampling_parameters(p['inputs']['data'])
 
         downsample_factors = {}
         for dim, dsfac in self._downsample_factors_reslev.items():
@@ -668,7 +673,8 @@ class Homogeniz3r(Stapl3r):
         stds = info_dict['stds']
 
         data = {d: means['data'][d] + stds['data'][d] for d in 'xyz'}
-        clim_data = self._get_clim(data, q=[0,1], roundfuns=[np.floor, np.ceil])
+        clim_data = self._get_clim(data, q=[0, 1], roundfuns=[np.floor, np.ceil])
+        clim_data[0] = 0.
 
         for dim, ax_idx in zip('xyz', [2, 1, 0]):
 
@@ -868,7 +874,7 @@ def write_image(im, outputpath, data):
     return mo
 
 
-def gather_4D(inputpat, outputfile, idss=['data']):
+def gather_4D(inputpat, outputfile, idss=['data'], ims_ref=''):
     """Merge 3D image stacks to virtual 4D datasets."""
 
     inputfiles = glob(inputpat)
@@ -876,7 +882,7 @@ def gather_4D(inputpat, outputfile, idss=['data']):
     if not inputfiles:
         return
     if outputfile.endswith('.ims'):
-        ims_linked_channels(outputfile, inputfiles, inputs['ims_ref'])
+        ims_linked_channels(outputfile, inputfiles, ims_ref)
     elif '.h5' in outputfile:
         for ids in idss:
             inputpaths = [f'{inputfile}/{ids}' for inputfile in inputfiles]

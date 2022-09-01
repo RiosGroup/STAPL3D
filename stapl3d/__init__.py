@@ -3417,7 +3417,8 @@ class Stapl3r(object):
         for ids, p in paths.items():
             if '.h5' in p:
                 p = p.split('.h5')[0]
-            os.makedirs(os.path.dirname(p), exist_ok=True)
+            if p:
+                os.makedirs(os.path.dirname(p), exist_ok=True)
 
         return paths
 
@@ -4066,6 +4067,14 @@ class Stapl3r(object):
 
     def _merge(self, inputfiles, outputfile, fun, **kwargs):
         """Merge files."""
+
+        if not inputfiles:
+            print(f"WARNING: files could not be merged: no inputfiles specified")
+            return
+
+        if not outputfile:
+            print(f"WARNING: files could not be merged: no outputfile specified")
+            return
 
         try:
             os.makedirs(os.path.dirname(outputfile), exist_ok=True)

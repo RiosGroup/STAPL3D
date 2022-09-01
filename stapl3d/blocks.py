@@ -31,13 +31,16 @@ logger = logging.getLogger(__name__)
 def main(argv):
     """Block operations."""
 
-    steps = ['split', 'merge']  # TODO: make this useful
-    args = parse_args('blocks', steps, *argv)
-
-    subclasses = {'split': Splitt3r, 'merge': Merg3r}
+    stepdict = {
+        'blockinfo': {'subclass': Block3r, 'step_id': 'blocks'},
+        'split': {'subclass': Splitt3r, 'step_id': 'splitter'},
+        'merge': {'subclass': Merg3r, 'step_id': 'merger'},
+        }
+    args = parse_args('blocks', list(stepdict.keys()), *argv)
 
     for step in args.steps:
-        block3r = subclasses[step](
+        args.step_id = stepdict[step]['step_id']  # read the right yml-entries
+        block3r = stepdict[step]['subclass'](
             args.image_in,
             args.parameter_file,
             step_id=args.step_id,
@@ -696,6 +699,7 @@ class Block3r(Stapl3r):
             moduledir='blocks',
             prefixes=prefixes,
             suffixes=[{suffix: 'p'}],
+            rel=False,
             )
 
         blockdir = os.path.join(self.datadir, 'blocks')
@@ -743,6 +747,8 @@ class Block3r(Stapl3r):
                        for al, slc in block.slices.items()}
                 print(f'Block {i:05d} with id {block.id} contains region (padded)')
                 print(yaml.dump(slc, default_flow_style=False))
+
+    blockinfo = write_blockinfo
 
     def generate_blocks(self):
         """Generate blocks from attributes."""
@@ -1153,7 +1159,7 @@ class Splitt3r(Block3r):
         """Process datablock."""
 
         block_ds_in = block.datasets['data']
-        block_ds_in.read(from_source=True)
+        block_ds_in.read(from_source=True)  # TODO: read only required channels!
         im = block_ds_in.image
 
         voldicts = self._get_voldicts(im.get_props2())
@@ -1202,6 +1208,10 @@ class Splitt3r(Block3r):
                 create_image=True,
                 )
             block.datasets[ods].write(np.squeeze(mo.ds, axis=axes))
+
+            del block.datasets[ods]
+
+        del block.datasets['data']
 
     def _get_voldicts(self, props):
 
