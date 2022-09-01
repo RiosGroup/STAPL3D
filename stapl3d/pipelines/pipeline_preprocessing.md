@@ -84,6 +84,6 @@
 
 - Run 3D inhomogeneity correction:
   ```
-  conda activate stapl3d-dev1.0.0
+  conda activate stapl3d
   python <path_to_stapl3d>/stapl3d/preprocessing/biasfield.py -i <path_to_stitched_data> -x <dataset>
   ```
