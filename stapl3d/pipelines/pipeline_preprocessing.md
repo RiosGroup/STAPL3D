@@ -24,7 +24,7 @@
       ```
       from stapl3d.preprocessing import shading
 
-      dataset = 'subset_tiled'
+      dataset = 'HFK16w'
       filepath_raw = f'{dataset}.czi'
       steps = ['estimate', 'process', 'postprocess']
 
@@ -64,7 +64,7 @@
       ```
       from stapl3d.preprocessing import shading
 
-      dataset = 'subset_tiled'
+      dataset = 'HFK16w'
       filepath_raw = f'{dataset}.czi'
       steps = ['estimate', 'process', 'postprocess']
 
