@@ -3099,20 +3099,13 @@ class Stapl3r(object):
 
         imdims = ['stacks', 'channels', 'planes']
         if any(pp in imdims for pp in parallelized_pars):
-            # if 'data' in self.inputs:
-            #     # shading:estimate,
-            #     image_in = self.inputs['data']  # shading, biasfield
-            # elif 'metrics' in self.inputs:
-            #     image_in = self.inputs['estimate']['data']
-            # else:
-            #     image_in = self.inputpaths['prep']['data']  # stitching
             first_step = list(self.inputpaths.keys())[0]
             image_in = self.inputpaths[first_step]['data']
             from stapl3d.preprocessing import shading  # TODO: without import
             iminfo = shading.get_image_info(image_in)
             pars = [getset(pp, iminfo[pp]) for pp in parallelized_pars]
 
-        elif parallelized_pars == ['filepaths']:  # may generalize this?
+        elif parallelized_pars == ['filepaths']:
             filepaths = self.filepaths
             pars = [getset(pp, filepaths) for pp in parallelized_pars]
 
@@ -3120,27 +3113,13 @@ class Stapl3r(object):
             blocks = list(range(len(self._blocks)))
             pars = [getset(pp, blocks) for pp in parallelized_pars]
 
-        # elif parallelized_pars == ['blockfiles']:
-        #     filepaths = self.blockfiles
-        #     if self.blocks:
-        #         filepaths = [filepaths[i] for i in self.blocks]
-        #     pars = [getset(pp, filepaths) for pp in parallelized_pars]
-
-        # elif parallelized_pars == ['_blocks']:
-        #     if self.blocks:
-        #         block_idxs = self.blocks
-        #     else:
-        #         block_idxs = [block.idx for block in self._blocks]
-        #     block_obs = [block for block in self._blocks if block.idx in block_idxs]
-        #     pars = [getset(pp, block_obs) for pp in parallelized_pars]
-
         elif parallelized_pars == ['vols']:
-            volumes = self.volumes
+            volumes = {k: v for k, v in self.volumes.items()}
             def extract(name, node):
                 if isinstance(node, h5py.Dataset):
-                    volumes.append({name: {}})
+                    volumes[name] = {'format': 'h5', 'suffix': None}
                 return None
-            if not volumes:
+            if not volumes: # try to merge all datasets in blockfiles
                 with h5py.File(self._blocks[0].path, 'r') as f:
                     f.visititems(extract)
             idxs = list(range(len(volumes)))
