@@ -1485,7 +1485,9 @@ class Merg3r(Block3r):
 
                 # Set slices on output volume
                 for al in mo.axlab:
-                    mo.slices[mo.axlab.index(al)] = block_ds_in.slices_region[al]
+                    if al in block_ds_in.slices_region.keys():
+                        mo.slices[mo.axlab.index(al)] = block_ds_in.slices_region[al]
+                    # assuming single-channel, single-timepoint for now
 
 #                if props['path'].endswith('.ims'):
 #                    data *= 65535  # TODO: integrate with Backproject3r
