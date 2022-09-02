@@ -1335,22 +1335,28 @@ class Merg3r(Block3r):
         blockdir = os.path.join(self.datadir, 'blocks')
         os.makedirs(blockdir, exist_ok=True)
 
+        if self.image_in.endswith('.ims'):
+            ext = ext_a = 'ims'
+        else:
+            ext = 'h5'
+            ext_a = 'h5/{a}'
+
         self._paths.update({
             'merge': {
                 'inputs': {
                     **{'blockfiles': blockfiles},
                     },
                 'outputs': {
-                    'volume': self._build_basename(prefixes=[self.prefix, '{A}'], ext='h5/{a}'),
+                    'volume':  self._build_basename(prefixes=[self.prefix, '{A}'], ext=ext_a),
                     'ulabels': self._build_basename(prefixes=[self.prefix, '{A}'], ext='npy'),
                     },
                 },
             'postprocess': {
                 'inputs': {
-                    'volume': self._build_basename(prefixes=[self.prefix, '{A}'], ext='h5'),
+                    'volume': self._build_basename(prefixes=[self.prefix, '{A}'], ext=ext),
                     },
                 'outputs': {
-                    'aggregate': self._build_basename(ext='h5'),
+                    'aggregate': self._build_basename(ext=ext),
                     },
                 },
             })
