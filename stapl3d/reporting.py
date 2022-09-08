@@ -194,7 +194,7 @@ def get_centreslices_bak(info_dict, idss=[], ch=0):
     return centreslices
 
 
-def get_centreslices(info_dict, idss=[], ch=0):
+def get_centreslices(info_dict, idss=[], ch=0, axlab='zyx'):
     """Get the centreslices for all dims and steps."""
 
     def extract(name, node):
@@ -208,19 +208,19 @@ def get_centreslices(info_dict, idss=[], ch=0):
             f.visititems(extract)
 
     centreslices = {ids: {dim: get_centreslice(h5_path, ids, dim, ch)
-                          for dim in 'zyx'}
+                          for dim in axlab}
                     for ids in idss}
 
     return centreslices
 
 
-def get_centreslice(image_in, ids, dim='z', ch=0):
+def get_centreslice(image_in, ids, dim='z', ch=0, tp=0):
     """Return an image's centreslice for a dimension."""
 
     if isinstance(image_in, Image):
         im = image_in
     else:
-        im = Image('{}/{}'.format(image_in, ids), permission='r')
+        im = Image(f'{image_in}/{ids}', permission='r')
         try:
             im.load(load_data=False)
         except KeyError:
@@ -229,14 +229,21 @@ def get_centreslice(image_in, ids, dim='z', ch=0):
 
     slcs = [slc for slc in im.slices]
 
-    if len(im.dims) > 3:
+    if len(im.dims) == 2:
+        data = im.slice_dataset()
+        return data
+
+    if 'c' in im.axlab:
         ch_idx = im.axlab.index('c')
         im.slices[ch_idx] = slice(ch, ch + 1, 1)
-    # elif len(im.dims) == 2:
-    #     data = im.slice_dataset()
+
+    if 't' in im.axlab:
+        tp_idx = im.axlab.index('t')
+        im.slices[tp_idx] = slice(tp, tp + 1, 1)
+
     dim_idx = im.axlab.index(dim)
     cslc = int(im.dims[dim_idx] / 2)
-    im.slices[dim_idx] = slice(cslc, cslc+1, 1)
+    im.slices[dim_idx] = slice(cslc, cslc + 1)
 
     data = im.slice_dataset()
 

@@ -487,18 +487,22 @@ class Image(object):
         iminfo = shading.get_image_info(self.path)
 
         if load_data:
+            # TODO: generalize
             from tifffile import create_output
             data = create_output(None, iminfo['zstack_shape'], iminfo['dtype'])
             data = np.squeeze(shading.read_zstack(self.path, 0, data))
             if len(data.shape) == 2:
-                data = np.expand_dims(data, 0)
-            if len(data.shape) == 4:
+                dims = iminfo['dims_zyxc'][1:3]
+            elif len(data.shape) == 3:
+                dims = iminfo['dims_zyxc'][:3]
+            elif len(data.shape) == 4:
                 data = np.transpose(data, axes=[1, 2, 3, 0])  # czyx to zyxc
+                dims = iminfo['dims_zyxc']
         else:
             data = []
 
         self.ds = data
-        self.dims = iminfo['dims_zyxc']
+        self.dims = dims
         self.dtype = iminfo['dtype']
         self.chunks = None
 

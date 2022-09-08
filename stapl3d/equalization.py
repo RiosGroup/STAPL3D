@@ -713,6 +713,7 @@ class Equaliz3r(Stapl3r):
         filepath = kwargs['inputs']['data']
         kwargs['props'] = get_imageprops(filepath)
         kwargs['paths'] = get_paths(filepath)
+        kwargs['axlab'] = 'z'  # TODO: 3D report option of EqAssay?
         kwargs['centreslices'] = get_centreslices(kwargs)
 
         return kwargs
@@ -761,9 +762,10 @@ class Equaliz3r(Stapl3r):
         thresholds = [info_dict['threshold_{}'.format(k)] for k in t]
 
         # image with scalebar
-        x_idx = 2; y_idx = 1;  # FIXME
-        w = info_dict['props']['elsize'][x_idx] * image.shape[1]  # note xyz nifti
-        h = info_dict['props']['elsize'][y_idx] * image.shape[0]
+        x_idx = info_dict['props']['axlab'].index('x')
+        w = info_dict['props']['elsize'][x_idx] * image.shape[x_idx]
+        y_idx = info_dict['props']['axlab'].index('y')
+        h = info_dict['props']['elsize'][y_idx] * image.shape[y_idx]
         extent = [0, w, 0, h]
 
         ax = axdict['image']
@@ -952,13 +954,6 @@ def load_image(inputpath):
     props = im.get_props()
     im.close()
 
-    if len(data.shape) == 2:
-        data = np.expand_dims(data, 0)
-        props['shape'] = [1] + props['shape']
-        props['elsize'] = [1] + props['elsize']
-        props['axlab'] = 'z' + props['axlab']
-        props['slices'] = [slice(0, 1)] + props['slices']
-
     return data, props
 
 
@@ -973,13 +968,14 @@ def write_image(data, props, attrs={}):
     mo.close()
 
 
-def merge_csvs(csvs, outputpath):
+def merge_csvs(csvs, outputpath, **kwargs):
     df = pd.DataFrame()
     for csvfile in csvs:
         df0 = pd.read_csv(csvfile)
         df = pd.concat([df, df0], axis=0)
-    df = df.set_index('sample_id')
-    df.to_csv(outputpath, index_label='sample_id')
+    index_label = kwargs[index_label] if 'index_label' in kwargs.keys() else 'sample_id'
+    df = df.set_index(index_label)
+    df.to_csv(outputpath, index_label=index_label)
 
 
 def merge_parameters(ymls, outputpath, **kwargs):
