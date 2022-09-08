@@ -877,5 +877,15 @@ def get_maxlabels_from_attribute(filelist, ids, maxlabelfile):
     return maxlabels
 
 
+def get_cslc(data, axis=0):
+    """Get centreslices from a numpy array."""
+
+    slcs = [slice(0, s, 1) for s in data.shape]
+    cslc = int(data.shape[axis] / 2)
+    slcs[axis] = slice(cslc, cslc+1, 1)
+
+    return np.copy(np.squeeze(data[tuple(slcs)]))
+
+
 if __name__ == "__main__":
     main(sys.argv[1:])

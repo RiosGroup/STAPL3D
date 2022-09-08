@@ -40,7 +40,6 @@ from stapl3d.imarisfiles import (
 from stapl3d.reporting import (
     gen_orthoplot_with_colorbar,
     get_centreslices,
-    get_zyx_medians,
     )
 
 logger = logging.getLogger(__name__)
@@ -987,6 +986,29 @@ def extract_zyx_profiles(filepath, ch=0):
     d['n_samples'] = {dim: np.sum(mask, axis=i) for i, dim in enumerate('zyx')}
 
     return d
+
+
+def get_zyx_medians(data, mask=None, thr=0, metric='median'):
+    """Compute the dataset (masked) median profiles over z, y, and x."""
+
+    if mask is None:
+        mask = data < thr
+    d = np.ma.masked_array(data, mask)
+
+    tps = {'z': [0, 1, 2], 'y': [1, 2, 0], 'x': [2, 0, 1]}
+    meds = {dim: get_dim_median(d, tp, metric) for dim, tp in tps.items()}
+
+    return meds
+
+
+def get_dim_median(d, tp, metric='median'):
+    if metric == 'median':
+        return np.ma.median(np.reshape(np.transpose(d, tp), [d.shape[tp[0]], -1]), axis=1)
+    elif metric == 'mean':
+        return np.ma.mean(np.reshape(np.transpose(d, tp), [d.shape[tp[0]], -1]), axis=1)
+    elif metric == 'std':
+        return np.ma.std(np.reshape(np.transpose(d, tp), [d.shape[tp[0]], -1]), axis=1)
+
 
 def create_ref_ims(filepath_ims, filepath_ref, outputpath):
 
