@@ -411,31 +411,33 @@ class Featur3r(Block3r):
 
     def _load_intens_images(self, block, data_paths):
 
-        intens_from_blocks = False  # TODO
+        # switch for 4D full input or stacks
+        intens_from_blocks = self._inputmode == 'stacks'
 
-        # Load intensity images  # NOTE: assuming 4D full input for now
+        # Load intensity images
         data_ims = {}
         for i, data_path in enumerate(data_paths):
+
             pf = 'im{:02d}'.format(i)
 
             if intens_from_blocks:
                 data_path = self.filepaths[block.idx]
 
-            data = Image(data_path, permission='r')
-            data.load(load_data=False)
-            ch_idx = data.axlab.index('c')
+            im = Image(data_path, permission='r')
+            im.load(load_data=intens_from_blocks)  # load full stacks for now # TODO
+            ch_idx = im.axlab.index('c')
             chs = [int(ch) for ch in self.channels.keys()]
             names = [self.channels[ch] for ch in chs]
-            data_ims[pf] = {'im': data, 'ch': chs, 'names': names}
+            data_ims[pf] = {'im': im, 'ch': chs, 'names': names}
 
         # Slice intensity images
         all_data = {}
         for dpf, datadict in data_ims.items():
-            data = datadict['im']
-            data.slices = [block.slices[al] for al in data.axlab]
+            im = datadict['im']
+            im.slices = [block.slices[al] for al in im.axlab]
             for ch, name in zip(datadict['ch'], datadict['names']):
-                data.slices[data.axlab.index('c')] = slice(ch, ch + 1, 1)
-                ch_data = data.slice_dataset()
+                im.slices[im.axlab.index('c')] = slice(ch, ch + 1, 1)
+                ch_data = im.slice_dataset()
                 all_data[name] = ch_data
 
         return data_ims, all_data

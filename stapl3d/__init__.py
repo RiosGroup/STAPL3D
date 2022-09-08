@@ -499,7 +499,7 @@ class Image(object):
                 data = np.transpose(data, axes=[1, 2, 3, 0])  # czyx to zyxc
                 dims = iminfo['dims_zyxc']
         else:
-            data = []
+            self.ds = []
 
         self.ds = data
         self.dims = dims
@@ -3673,7 +3673,8 @@ class Stapl3r(object):
 
             if self._view_stacked:
                 z_idx = block_ds.axlab.index('z')
-                stack_offset += elsize[z_idx] * block_ds.image.ds.shape[z_idx]
+                depth = elsize[z_idx] * block_ds.image.ds.shape[z_idx]
+                stack_offset[z_idx] = stack_offset[z_idx] + depth
 
         axlab = block.axlab
 
