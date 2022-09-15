@@ -2,6 +2,7 @@
 
 """Co-acquisition image registration.
 
+    FIXME: only works in conda base environment (with stapl3d installed, via conda.pth).
 """
 
 """ Example LSD coregistration pipeline.
@@ -761,6 +762,57 @@ def landmarks_to_labels(pts_filepath, shape, elsize, expand=0):
         labels = expand_labels(labels, elsize, expand)
 
     return labels
+
+
+def write_pointsfile(filepath, points, pointstype):
+
+    pointstypes = {
+        'point': {'dtype': float, 'format': '%f'},
+        'index': {'dtype': int  , 'format': '%d'},
+    }
+
+    formatstring = pointstypes[pointstype]['format']
+    with open(filepath, 'w') as f:
+        f.write(f'{pointstype}\n{len(points)}\n\n')
+        b = '\n'.join(' '.join(formatstring %x for x in y) for y in points)
+        f.write(b)
+
+
+def convert_pointsfile(fpath_points_in, fpath_image_in, padding=[0, 0, 0], fpath_points_out=''):
+
+    pointstypes = {
+        'point': {'dtype': float, 'format': '%d'},
+        'index': {'dtype': int  , 'format': '%f'},
+    }
+
+    # Read points.
+    with open(fpath_points_in) as f:
+        pointstype = f.readline().strip()
+    datatype = pointstypes[pointstype]['dtype']
+    points_in = np.loadtxt(fpath_points_in, dtype=datatype, delimiter=' ', skiprows=3)
+
+    # Get image parameters.
+    from stapl3d import Image
+    im = Image(fpath_image_in)
+    im.load()
+    offset = im.ims_load_extent('Min')[::-1]
+    elsize = im.ims_load_elsize()[:3][::-1]
+    im.close()
+
+    # Convert points.
+    if pointstype == 'point':
+        points = (points_in - np.array(offset)) / np.array(elsize) + np.array(padding)
+    elif pointstype == 'index':
+        points = (points_in - np.array(padding)) * np.array(elsize) + np.array(offset)
+
+    pointstype = 'index' if pointstype == 'point' else 'point'
+    datatype = pointstypes[pointstype]['dtype']
+    points = points.astype(datatype)
+
+    if fpath_points_out:
+        write_pointsfile(fpath_points_out, points, pointstype)
+
+    return points
 
 
 def unpad(data, pad_width):
