@@ -1045,28 +1045,25 @@ class Image(object):
 
     def ims_load_elsize(self):
 
+        extMin = np.array(self.ims_load_extent(bound='Min'))
+        extMax = np.array(self.ims_load_extent(bound='Max'))
+        dims = np.array(self.ims_get_dims()[:3])
+
+        elsize_zyx = (extMax - extMin) / dims
+
+        return list(elsize_zyx) + [1, 1]
+
+    def ims_load_extent(self, bound):
+
         def att2str(att):
             return ''.join([t.decode('utf-8') for t in att])
 
         im_info = self.file['/DataSetInfo/Image']
 
-        extmin0 = float(att2str(im_info.attrs['ExtMin0']))
-        extmin1 = float(att2str(im_info.attrs['ExtMin1']))
-        extmin2 = float(att2str(im_info.attrs['ExtMin2']))
-        extmax0 = float(att2str(im_info.attrs['ExtMax0']))
-        extmax1 = float(att2str(im_info.attrs['ExtMax1']))
-        extmax2 = float(att2str(im_info.attrs['ExtMax2']))
+        extent = [float(att2str(im_info.attrs[f'Ext{bound}{i}']))
+                  for i in [2, 1, 0]]
 
-        extX = extmax0 - extmin0
-        extY = extmax1 - extmin1
-        extZ = extmax2 - extmin2
-
-        dims = self.ims_get_dims()
-        elsizeX = extX / dims[2]
-        elsizeY = extY / dims[1]
-        elsizeZ = extZ / dims[0]
-
-        return [elsizeZ, elsizeY, elsizeX, 1, 1]
+        return extent
 
     def ims_get_dims(self):
 
