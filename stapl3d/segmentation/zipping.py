@@ -71,23 +71,16 @@ class Zipp3r(Block3r):
 
         self._fun_selector.update({
             'relabel': self.relabel,
-            'copyblocks': self.copyblocks,
             'estimate': self.estimate,
             })
 
         self._parallelization.update({
             'relabel': ['blocks'],
-            'copyblocks': ['blocks'],
             'estimate': ['blocks'],
             })
 
         self._parameter_sets.update({
             'relabel': {
-                'fpar': self._FPAR_NAMES,
-                'ppar': ('blocksize', 'blockmargin'),
-                'spar': ('_n_workers', 'blocks'),
-                },
-            'copyblocks': {
                 'fpar': self._FPAR_NAMES,
                 'ppar': ('blocksize', 'blockmargin'),
                 'spar': ('_n_workers', 'blocks'),
@@ -107,7 +100,8 @@ class Zipp3r(Block3r):
             'ods_labels': 'segm/labels_zip',
             'ods_zipmask': 'segm/labels_zipmask',
             'ods_blocks': '',
-            'ods_copied': '',
+            '_bg_label': 0,
+            'force_relabel_sequential': False,
             'segmentation_id': 'segmentation',
         }  # TODO: to saved paths
         for k, v in default_attr.items():
@@ -172,6 +166,7 @@ class Zipp3r(Block3r):
             self.outputpaths[step] = self._merge_paths(self._paths[step], step, 'outputs', step_id)
 
     def _gather_maxlabels(self, ids):
+        """Write the maximum of each labelvolume to file."""
 
         maxlabelfile = self._prep_paths(self.outputs)['maxlabelfile']
 
@@ -197,96 +192,65 @@ class Zipp3r(Block3r):
             pool.starmap(self._relabel_blocks, arglist)
 
     def _relabel_blocks(self, block):
-        """Relabel dataset sequentially."""
+        """Relabel dataset."""
 
         block = self._blocks[block]
         inputs = self._prep_paths(self.inputs, reps={'b': block.idx})
         outputs = self._prep_paths(self.outputs, reps={'b': block.idx})
 
-        maxlabels = np.loadtxt(outputs['maxlabelfile'], dtype=np.uint32)
-        maxlabel = np.sum(maxlabels[:block.idx])
-
         filepath = inputs['blockfiles']
-
         image_in = f'{filepath}/{self.ids_labels}'
         im = LabelImage(image_in)
         im.load()
         data = im.slice_dataset()
 
-        bg_label = 0
-        mask = data == bg_label
-
-        force_sequential = False
-        if force_sequential:
-            data, fw, _ = relabel_sequential(data, offset=maxlabel)
-        else:
-            data[~mask] += maxlabel
-
-        outpath =f'{filepath}/{self.ods_labels}'
-        mo = write_output(outpath, data, props=im.get_props(), imtype='Label')
-
+        # Retrieve max of all labels up to this block.
+        maxlabels = np.loadtxt(outputs['maxlabelfile'], dtype=np.uint32)
+        maxlabel = np.sum(maxlabels[:block.idx])
+        # Retrieve the maxlabel of the current block.
         try:
             maxlabel_block = im.ds.attrs['maxlabel']
         except KeyError:
             maxlabel_block = None
 
-        if force_sequential or (maxlabel_block is None):
-            mo.set_maxlabel()
+        # Relabel the volume.
+        if self.force_relabel_sequential:
+            # create sequential labels from maxlabel
+            data, fw, _ = relabel_sequential(data, offset=maxlabel)
         else:
-            mo.maxlabel = maxlabel + maxlabel_block
+            # increment all foreground labels with maxlabel
+            mask = data == self._bg_label
+            data[~mask] += maxlabel
 
+        # Write relabeled block.
+        outpath =f'{filepath}/{self.ods_labels}'
+        mo = write_output(outpath, data, props=im.get_props(), imtype='Label')
+
+        # Update the maxlabel attribute on the block.
+        if self.force_relabel_sequential or (maxlabel_block is None):
+            mo.set_maxlabel()  # find in relabeled volume
+        else:
+            mo.maxlabel = maxlabel + maxlabel_block  # from increment
         mo.ds.attrs.create('maxlabel', mo.maxlabel, dtype='uint32')
         mo.close()
 
-    def copyblocks(self, **kwargs):
-        """Copy labels to new dataset."""
 
-        arglist = self._prep_step('copyblocks', kwargs)
-        self._gather_maxlabels(self.ods_labels)
-
-        with multiprocessing.Pool(processes=self._n_workers) as pool:
-            pool.starmap(self._copy_blocks, arglist)
-
-    def _copy_blocks(self, block_idx):
-
-        def write_maxlabel_attribute(im, mo):
-            # TODO make ulabels/maxlabel standard attributes to write into LabelImages.
-            try:
-                maxlabel = im.ds.attrs['maxlabel']
-            except:
-                mo.set_maxlabel()
-                maxlabel = mo.maxlabel
-            mo.ds.attrs.create('maxlabel', maxlabel, dtype='uint32')
-
-        block = self._blocks[block_idx]
-        inputs = self._prep_paths(self.inputs, reps={'b': block.idx})
-
-        filepath = inputs['blockfiles']
-        image_in = f'{filepath}/{self.ids_labels}'
-        im = LabelImage(image_in)
-        im.load()
-
+        # Volume to hold the zipmask.
         if self.ods_zipmask:
             outpath =f'{filepath}/{self.ods_zipmask}'
             data = np.zeros(im.dims, dtype='bool')
             mo = write_output(outpath, data, props=im.get_props(), imtype='Mask')
             mo.close()
 
+        # Volume with the block indices.
         if self.ods_blocks:
             outpath =f'{filepath}/{self.ods_blocks}'
             data = np.ones(im.dims, dtype='uint16') * (block_idx + 1)
             mo = write_output(outpath, data, props=im.get_props(), imtype='Label')
-            write_maxlabel_attribute(im, mo)
+            mo.set_maxlabel()
+            maxlabel = mo.maxlabel
+            mo.ds.attrs.create('maxlabel', maxlabel, dtype='uint32')
             mo.close()
-
-        if self.ods_copied:
-            outpath =f'{filepath}/{self.ods_copied}'
-            data = im.slice_dataset()
-            mo = write_output(outpath, data, props=im.get_props(), imtype='Label')
-            write_maxlabel_attribute(im, mo)
-            mo.close()
-
-        im.close()
 
     def estimate(self, **kwargs):
         """Resegment the dataset block boundaries."""
