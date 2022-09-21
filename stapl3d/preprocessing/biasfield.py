@@ -368,6 +368,10 @@ class Homogeniz3r(Stapl3r):
         """Set the resolution level parameter."""
 
         if self.downsample_factors:
+            self.downsample_factors = {
+                **{d: 1 for d in 'zyxct'},
+                **self.downsample_factors,
+            }
             return
 
         # downsample factors to reach target resolution
