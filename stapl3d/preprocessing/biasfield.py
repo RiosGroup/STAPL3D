@@ -423,8 +423,9 @@ class Homogeniz3r(Stapl3r):
         self._set_downsampling_parameters(self.inputpaths['estimate']['data'])
 
         if self.outputpaths['apply']['channels'].endswith('.ims'):
+            # TODO: copy per-channel image display settings from original imaris file
             if not self.inputpaths['apply']['ims_ref']:
-                filepath_ims = self.inputpaths['estimate']['data']
+                filepath_ims = self.inputpaths['apply']['data']
                 filepath_ref = filepath_ims.replace('.ims', '_ref.ims')
                 # TODO: protect existing files
                 create_ref(filepath_ims)
