@@ -179,6 +179,8 @@ class Homogeniz3r(Stapl3r):
             'n_bspline_cps': {'z': 5, 'y': 5, 'x': 5},
             'blocksize_xy': 1280,
             'tasks': 1,
+            'sigma': {'z': 10, 'y': 10, 'x': 10},
+            'normalize_bias': False,
         }
         for k, v in default_attr.items():
             setattr(self, k, v)
@@ -251,6 +253,7 @@ class Homogeniz3r(Stapl3r):
         for step in self._fun_selector.keys():
             self.inputpaths[step]  = self._merge_paths(self._paths[step], step, 'inputs')
             self.outputpaths[step] = self._merge_paths(self._paths[step], step, 'outputs')
+
 
     def estimate(self, **kwargs):
         """Perform inhomogeneity estimation."""
