@@ -184,6 +184,7 @@ class Deshad3r(Stapl3r):
                 },
             'process': {
                 'inputs': {
+                    'data': self.image_in,
                     'metrics': f'{pmat}.npz',
                     },
                 'outputs': {
@@ -195,6 +196,7 @@ class Deshad3r(Stapl3r):
                 },
             'postprocess': {
                 'inputs': {
+                    'data': self.image_in,
                     'report': f'{cmat}.pdf',
                     },
                 'outputs': {
