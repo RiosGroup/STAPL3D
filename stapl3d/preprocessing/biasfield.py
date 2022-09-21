@@ -448,7 +448,10 @@ class Homogeniz3r(Stapl3r):
         im = Image(inputs['data'], permission='r+' if in_place else 'r')
         im.load(load_data=False)
 
-        if self.method == 'attenuation':
+        if self.method == 'attenuation_foo':
+            # TODO?: or just use biasfield output?
+            # NOTE: when applying estimate from mean to all channels,
+            # this may not work as it is based on the mean/std
 
             filepath = inputs['bias'].replace('.h5/bias', '_att.npz')
             npzfile = np.load(filepath)
@@ -544,7 +547,7 @@ class Homogeniz3r(Stapl3r):
             data = im.slice_dataset().astype('float')
 
             # Get the upsampled bias field.
-            if self.method == 'attenuation':
+            if self.method == 'attenuation_foo':
                 data_corr = np.zeros_like(data)
                 for i, slc in enumerate(data):
                     data_corr[i, :, :] = ref_mean + ref_std * ((slc - means[i]) / stds[i])
@@ -775,6 +778,7 @@ def smooth_division(im, sigma={}, normalize_bias=False, outputpath=''):
 
 
 def attenuation_correction(im, radius=2, ref_idx=None, outputpath=''):
+
     from skimage.morphology import opening, disk
     selem = disk(radius)
     vol = im.slice_dataset()
