@@ -1018,12 +1018,10 @@ class Block3r(Stapl3r):
     def _prep_paths_blockfiles(self, paths, block, key='blockfiles', reps={}):
         """Format path to blockfile."""
 
-        blockbase = self._blocks[block.idx].path
-        filepath = os.path.join(self.datadir, blockbase)
-        filestem = os.path.basename(filepath)
-
         reps['b'] = block.idx
-        reps['f'] = filestem
+
+        blockpath = self._blocks[block.idx].path
+        reps['f'] = os.path.basename(blockpath.split('.h5')[0])
 
         return self._prep_paths(paths, reps=reps)
 
@@ -1031,6 +1029,8 @@ class Block3r(Stapl3r):
         """Determine the number of seams in the blocked dataset."""
         # TODO?: write to blockfiles?
         # TODO?: generalize and change to blockgrid
+        # FIXME?: this just captures the shape, but has sequential indices
+        # where is it actually used?
 
         fullsize = fullsize or self.fullsize
         blocksize = blocksize or self.blocksize
