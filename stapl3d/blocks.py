@@ -399,9 +399,8 @@ class Block_dataset(Block):
         """Read block data from full dataset."""
 
         path = self.blocker_info['inputpath']
-#        if self.ids_in:
-#            path = path + f'/{self.ids_in}'  # FIXME: read from h5
-        src_im = Image(path, permission='r')
+        imtypes = {'': Image, 'Image': Image, 'Mask': MaskImage, 'Label': LabelImage}
+        src_im = imtypes[self.imtype](path, permission='r')
         src_im.load()
 
         # TODO: padding into slice_dataset method?
