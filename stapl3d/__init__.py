@@ -1923,13 +1923,23 @@ class Image(object):
                 raise
 
     def get_props2(self):
+
         # TODO: replace get_props throughout
         props = {k:v for k, v in vars(self).items()}
+
         props['path'] = ''
+
         props.pop('file')
         props.pop('filereader')
         props.pop('ds')
         props.pop('format')
+
+        if 'maxlabel' in props.keys() and not isinstance(self, LabelImage):
+            props.pop('maxlabel')
+
+        if 'ulabels' in props.keys() and not isinstance(self, LabelImage):
+            props.pop('ulabels')
+
         return props
 
     def downsampled(self, downsample_factors, ismask=False, outputpath=''):
