@@ -3115,6 +3115,10 @@ class Stapl3r(object):
             blocks = list(range(len(self._blocks)))
             pars = [getset(pp, blocks) for pp in parallelized_pars]
 
+        elif parallelized_pars == ['seams']:
+            seams = [seam for seam in self._seams]  #list(range(len(self._seams)))
+            pars = [getset(pp, seams) for pp in parallelized_pars]
+
         elif parallelized_pars == ['vols']:
             volumes = {k: v for k, v in self.volumes.items()}
             def extract(name, node):
