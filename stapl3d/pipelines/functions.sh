@@ -1660,7 +1660,7 @@ function get_py_zipping_postproc {
     echo '#!/usr/bin/env python'
     echo ''
     echo "from glob import glob"
-    echo "from stapl3d.reporting import merge_reports"
+    echo "from stapl3d.reporting import merge_reports"  # TODO: change to _merge_reports from Stapl3r
     echo "pdfs = glob('${blockdir}/${dataset_preproc}_reseg_axis?-seam???-j???.pdf')"
     echo "pdfs.sort()"
     echo "merge_reports(
