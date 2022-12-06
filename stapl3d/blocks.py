@@ -1502,7 +1502,7 @@ class Merg3r(Block3r):
                 im.close()
 
             except FileNotFoundError:
-                print(f'{blockpath} not found')
+                print(f'{block.path} not found')
 
             if is_labelimage:
                 ulabels |= set(np.unique(data))
