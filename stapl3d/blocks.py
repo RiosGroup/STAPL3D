@@ -303,8 +303,8 @@ class Block(object):
         blockfile = blockfile or self.path
 
         axlab = axlab or self.axlab  # selector of axes subsets
-        elsize = {al: {**elsize, **self.elsize}[al] for al in axlab}
-        slices = {al: {**slices, **self.slices}[al] for al in axlab}
+        elsize = {al: {**self.elsize, **elsize}[al] for al in axlab}
+        slices = {al: {**self.slices, **slices}[al] for al in axlab}
 
         binfo = {**self.blocker_info, **blocker_info}  # insert axes found in blocker_info argument
         _, attr_dict = self._get_blocker_attributes()
