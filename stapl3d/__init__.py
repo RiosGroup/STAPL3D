@@ -498,11 +498,12 @@ class Image(object):
             elif len(data.shape) == 4:
                 data = np.transpose(data, axes=[1, 2, 3, 0])  # czyx to zyxc
                 dims = iminfo['dims_zyxc']
+            self.ds = data
+            self.dims = dims
         else:
             self.ds = []
+            self.dims = iminfo['dims_zyxc']
 
-        self.ds = data
-        self.dims = dims
         self.dtype = iminfo['dtype']
         self.chunks = None
 
