@@ -16,14 +16,12 @@ import yaml
 
 import numpy as np
 
-from skimage.transform import resize
-
-from stapl3d import parse_args, Stapl3r, Image, LabelImage, imarisfiles
+from stapl3d import parse_args, Stapl3r, Image, MaskImage, LabelImage, imarisfiles
 from stapl3d.preprocessing.registration import get_affine
 
 import glob
 import h5py
-import pathlib
+
 
 logger = logging.getLogger(__name__)
 
