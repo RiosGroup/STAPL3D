@@ -319,6 +319,36 @@ class Block(object):
 
         if create_image:
             self.datasets[ids].create_image()
+            #self.datasets[ids].create_image(f'{blockfile}/{ods}')
+
+    def _get_zip_slices(self, side_selector, n, include_margin=False):
+        """"Get slices (full-dataset) for selecting seams."""
+
+        slices = dict(self.slices)  # initialize at full extent
+
+        # Subselection of data along zip-axes.
+        for al, side in side_selector.items():
+            slices[al] = self._get_margin_slice(
+                side,
+                self.slices[al],
+                self.blocker_info['blockmargin'][al],
+                self.blocker_info['blockmargin'][al] * n[al],
+                include_margin,
+                )
+
+        return slices
+
+    def _get_margin_slice(self, side, slc, margin, N_margins, include_margin=False):
+        """"Get subselection around a seam."""
+
+        if side == 'upper':
+            start = slc.stop - N_margins - margin
+            stop = slc.stop if include_margin else slc.stop - margin
+        elif side == 'lower':
+            start = slc.start if include_margin else slc.start + margin
+            stop = slc.start + N_margins + margin
+
+        return slice(start, stop)
 
     def __str__(self):
         return yaml.dump(vars(self), default_flow_style=False)
