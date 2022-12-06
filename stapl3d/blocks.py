@@ -808,6 +808,7 @@ class Block3r(Stapl3r):
         inputpath = self.inputpaths['blockinfo']['data']
 
         self.filepaths = self._glob_h5(self._pat2mat(self._abs(inputpath)))
+        # FIXME: does not handle full h5path {f}.h5/<ids>
 
         self._set_inputmode(inputpath)
 
@@ -851,7 +852,7 @@ class Block3r(Stapl3r):
         else:
             self._inputmode = 'grid'  # '<dataset>.ims'
 
-        print(f'Input mode set to "{self._inputmode}"')
+        # print(f'Input mode set to "{self._inputmode}"')
 
     def set_fullsize(self, fullsize={}):
         """Set the shape of the full dataset."""
@@ -873,14 +874,14 @@ class Block3r(Stapl3r):
         # argument overrides attribute overrides image shape
         self.fullsize = {**imsize, **self.fullsize, **fullsize}
 
-        print(f'Full dataset size set to "{self.fullsize}"')
+        # print(f'Full dataset size set to "{self.fullsize}"')
 
     def set_blocksize(self, blocksize={}):
         """Set the size of the block."""
 
         self.blocksize = {**self.fullsize, **self.blocksize, **blocksize}
 
-        print(f'Block size set to "{self.blocksize}"')
+        # print(f'Block size set to "{self.blocksize}"')
 
     def set_blockmargin(self, blockmargin={}):
         """Set the margins of the block."""
@@ -888,7 +889,8 @@ class Block3r(Stapl3r):
         bm_im = {d: 0 for d in self.blocksize.keys()}
         self.blockmargin = {**bm_im, **self.blockmargin, **blockmargin}
 
-        logging.info(f'Block margin set to "{self.blockmargin}"')
+        # print(f'Block margin set to "{self.blockmargin}"')
+
 
     def _generate_blocks(self):
 
