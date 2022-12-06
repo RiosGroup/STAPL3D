@@ -171,6 +171,7 @@ class Structur3r(Block3r):
         write_structure_tensor(filepath, out, props)
 
 
+
 def load_data(filepath, ids):
     im = Image(filepath + f'/{ids}')
     im.load()
@@ -181,7 +182,7 @@ def load_data(filepath, ids):
 
 
 def write_data(filepath, ods, props, data):
-    im = Image(filepath + f'/{ods}', **props)
+    im = Image(f'{filepath}/{ods}', **props)
     im.create()
     im.write(data)
     im.close()
