@@ -2048,7 +2048,6 @@ class LabelImage(Image):
         if load_data:  # TODO: look at downstream
             self.set_maxlabel()
 
-
     def read_labelsets(self, lsfile):
         """Read labelsets from file."""
 
@@ -2103,14 +2102,18 @@ class LabelImage(Image):
 
         self.ulabels = np.unique(self.ds)
 
-    def set_maxlabel(self):
+    def set_maxlabel(self, maxlabel=None):
 
+        if maxlabel is not None:
+            self.maxlabel = maxlabel
+            return
+
+        try:
+            self.maxlabel = self.ds.attrs['maxlabel']
+        except (AttributeError, KeyError):
         if not self.ulabels.any():
             self.set_ulabels()
         self.maxlabel = int(np.amax(self.ulabels))
-#         print("{} labels (max: {}) in volume {}".format(len(self.ulabels) - 1,
-#                                                         self.maxlabel,
-#                                                         self.path))
 
     def get_fwmap(self, empty=False):
 
