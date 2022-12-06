@@ -297,7 +297,8 @@ class Block(object):
         self.blocker_info = blocker_info
 
     def create_dataset(self, ids='', blockfile='', axlab='', elsize={},
-                       dtype='', slices={}, blocker_info={}, create_image=False):
+                       dtype='', slices={}, blocker_info={},
+                       create_image=False, imtype=''):
         """Create an ND dataset in the Block."""
 
         blockfile = blockfile or self.path
@@ -313,7 +314,7 @@ class Block(object):
 
         self.datasets[ids] = Block_dataset(
             ids, blockfile, axlab, elsize,
-            dtype, slices, binfo,
+            dtype, slices, binfo, imtype,
             )
 
         if create_image:
@@ -326,7 +327,7 @@ class Block(object):
 class Block_dataset(Block):
     """Block dataset."""
 
-    def __init__(self, ids, blockfile, axlab, elsize, dtype, slices, blocker_info):
+    def __init__(self, ids, blockfile, axlab, elsize, dtype, slices, blocker_info, imtype):
 
         self.ids = ids
         self.blockfile = blockfile
@@ -340,13 +341,17 @@ class Block_dataset(Block):
 
         self.dtype = dtype
         self.chunks = None
+        self.imtype = imtype
         self.image = None
 
     def create_image(self, path='', data=None, from_source=False, from_block=False):
         """Create the block Image object."""
 
+
+        imtypes = {'': Image, 'Image': Image, 'Mask': MaskImage, 'Label': LabelImage}
+
         if from_block:
-            im = Image(path, permission='r')
+            im = imtypes[self.imtype](path, permission='r')
             im.load()
             props = im.get_props2()
             props['path'] = ''
@@ -361,7 +366,7 @@ class Block_dataset(Block):
                 'chunks': self.chunks,
             }
 
-        self.image = Image(**props)
+        self.image = imtypes[self.imtype](**props)
         self.image.create()  # FIXME: dat_create creates empty np array on self.image.ds
 
         if data is not None:
@@ -415,17 +420,24 @@ class Block_dataset(Block):
         return data
 
     def read_data_from_blockfile(self, padded=True):
-        """Read block data from blockfile.
-        """
+        """Read block data from blockfile."""
 
         path = self.path
-        src_im = Image(path, permission='r')
+        imtypes = {'': Image, 'Image': Image, 'Mask': MaskImage, 'Label': LabelImage}
+        src_im = imtypes[self.imtype](path, permission='r')
         src_im.load()
 
         if not padded:
             src_im.slices = [self.slices_region_blockfile[al] for al in src_im.axlab]
 
         data = src_im.slice_dataset(squeeze=False)
+
+        if self.imtype == 'Label':
+            src_im.set_maxlabel()
+            maxlabel = src_im.maxlabel
+            # print(f'maxlabel : {maxlabel}')
+        else:
+            maxlabel = None
 
         # grp = src_im.ds
         axlab = src_im.ds.attrs['DIMENSION_LABELS']
