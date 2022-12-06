@@ -891,6 +891,17 @@ class Block3r(Stapl3r):
 
         # print(f'Block margin set to "{self.blockmargin}"')
 
+    def _get_blocker_info(self, axlab, b_idx=0):
+
+        blocker_info = {k:v for k, v in vars(self).items()
+                        if k in self._parameter_table.keys()}
+        blocker_info['_axlab'] = axlab
+        if self._inputmode == 'stacks':
+            blocker_info['inputpath'] = self.filepaths[b_idx]
+        else:
+            blocker_info['inputpath'] = self.inputpaths['blockinfo']['data']
+
+        return blocker_info
 
     def _generate_blocks(self):
 
@@ -910,14 +921,6 @@ class Block3r(Stapl3r):
             slices = {al: slice(int(sta), int(sto))
                       for al, sta, sto in zip(axlab, start, stop)}
 
-            blocker_info = {k:v for k, v in vars(self).items()
-                            if k in self._parameter_table.keys()}
-            blocker_info['_axlab'] = axlab
-            if self._inputmode == 'stacks':
-                blocker_info['inputpath'] = self.filepaths[b_idx]
-            else:
-                blocker_info['inputpath'] = self.inputpaths['blockinfo']['data']
-
             block = Block(
                 id=self._suffix_formats['b'].format(b=b_idx),
                 idx=b_idx,
@@ -925,7 +928,7 @@ class Block3r(Stapl3r):
                 axlab=axlab,
                 elsize=elsize,
                 slices=slices,
-                blocker_info=blocker_info,
+                blocker_info=self._get_blocker_info(axlab, b_idx),
                 )
             blocks.append(block)
 
