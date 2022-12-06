@@ -3589,6 +3589,8 @@ class Stapl3r(object):
 
         if isinstance(input, list):
             self.view_blocks(input, images, labels, slices)
+        if isinstance(input, dict):
+            self.view_pairs(input, images, labels, slices)
         elif isinstance(input, str):
             self.view_single(input, images, labels, slices)
 
@@ -3613,7 +3615,9 @@ class Stapl3r(object):
                 self.viewer.add_labels(data, name=ids)
                 self.view_set_axes(filepath, ids)
 
-    def view_blocks(self, block_idxs=[], images=[], labels=[], slices={}):
+    def view_blocks(self, block_idxs=[], images=[], labels=[], slices={}, zips=False):
+
+        from stapl3d.preprocessing.registration import get_affine
 
         def create_grid(shape, dtype='uint16', labelval=1, thickness=1):
 
@@ -3629,69 +3633,83 @@ class Stapl3r(object):
 
         stack_offset = np.array([0, 0, 0])
 
-        for block_idx in block_idxs:
+        for i, block_idx in enumerate(block_idxs):
 
             block = self._blocks[block_idx]
 
             for ids in images + labels + self.view_block_layout:
 
+                # block_ds
                 if not ids in self.view_block_layout:
+
+                    if zips:
+                        axlab = 'zyx'
+                        zipsels = self._get_zipsels(len(block_idxs))
+                        zipsel = zipsels[i]
+                        slices = self._get_additional_block_slices(block, zipsel, axlab)
+                        block_ds = self.read_blockdata(block, zipsel, ids, axlab, slices)
+                    else:
                     block.create_dataset(ids)
                     block_ds = block.datasets[ids]
                     block_ds.read(from_block=True)
+                        slices = block_ds.slices  # TODO: CHECK!!!
+
+
                 elif not images + labels:  # only layout => construct all dimensions, possibly cannot do affine
                     pass  # TODO
 
                 elsize = [block_ds.elsize[al] for al in block_ds.axlab]
 
+                # name, data, affine
                 if ids == 'margins':
                     name = f'{block.id}_margin'
-                    affine = block.affine
+                    starts = [slc.start for al, slc in block_ds.slices.items()]
                     slices = [block_ds.slices[al] for al in block_ds.axlab]
                     shape = [slc.stop - slc.start for slc in slices]
                     data = create_grid(np.array(shape), labelval=3)
-
                 elif ids == 'blocks':
                     name = f'{block.id}_region'
-                    affine = block.affine_region
+                    starts = [slc.start for al, slc in block_ds.slices_region.items()]
                     slices = [block_ds.slices_region[al] for al in block_ds.axlab]
                     shape = [slc.stop - slc.start for slc in slices]
                     data = create_grid(np.array(shape), labelval=2)
-
                 elif ids == 'fullsize':
                     if block_idx != block_idxs[-1]:  # only on the last block
                         continue
                     name = f'dataset_region'
-                    from stapl3d.preprocessing.registration import get_affine  #TODO
-                    affine = get_affine([0, 0, 0], elsize, [0, 0, 0])
+                    starts = [0, 0, 0]
                     data = create_grid(
                         np.array([self.fullsize[al] for al in block_ds.axlab]),
                         labelval=1, dtype='uint8', thickness=1,
                         )
-
                 else:
                     name = f'{block.id}_{ids}'
-                    affine = block.affine
+                    starts = [slc.start for al, slc in slices.items()]
                     data = block_ds.image.ds
 
-                affine = np.copy(affine)
+                affine = np.copy(get_affine([0, 0, 0], elsize, starts))
+
                 for i in range(3):
                     affine[i, 3] = affine[i, 3] + stack_offset[i]
 
+                # plot
                 if ids in images:
-                    self.viewer.add_image(data, name=name, scale=elsize, affine=affine)
+                    #self.viewer.add_image(data, name=name, scale=elsize, affine=affine)
+                    self.viewer.add_image(data, name=name, affine=affine)
                     # set equal clim
                     clim = self.viewer.layers[f'{block0.id}_{ids}'].contrast_limits
                     self.viewer.layers[f'{block.id}_{ids}'].contrast_limits = clim
                 else:
-                    self.viewer.add_labels(data, name=name, scale=elsize, affine=affine)
+                    #self.viewer.add_labels(data, name=name, scale=elsize, affine=affine)
+                    self.viewer.add_labels(data, name=name, affine=affine)
+                    # TODO: retrace what test the remove of 'scale' parameter was for => it breaks the viz of regular blocks in the demos
 
             if self._view_stacked:
                 z_idx = block_ds.axlab.index('z')
                 depth = elsize[z_idx] * block_ds.image.ds.shape[z_idx]
                 stack_offset[z_idx] = stack_offset[z_idx] + depth
 
-        axlab = block.axlab
+        axlab = block_ds.axlab
 
         """
         if self._view_stacked:
