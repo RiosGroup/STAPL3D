@@ -125,11 +125,6 @@ class Block(object):
         fc and fC are start and stop of the slice in the dataset voxel space
         """
 
-        #fullsize = self.blocker_info['fullsize'][al]
-        #blocksize = self.blocker_info['blocksize'][al]
-        #margin = self.blocker_info['blockmargin'][al]
-        #shift_final_block_inward = self.blocker_info['shift_final_block_inward']
-
         final_block = fC >= fullsize
 
         if shift_final_block_inward and final_block:
