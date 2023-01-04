@@ -718,6 +718,8 @@ def im_to_itk_props(im, th={'z': 0, 'y': 0, 'x': 0}, pad={'z': (0, 0), 'y': (0, 
     elif th['y'] == -np.pi / 2:
         origin = np.array([extent[2], 0, extent[0]])
 
+    origin = origin.astype('float')
+
     return {'spacing': spacing, 'origin': origin , 'direction': direction}
 
 
