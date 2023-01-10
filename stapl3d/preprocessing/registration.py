@@ -85,14 +85,14 @@ from glob import glob
 
 import numpy as np
 
-    import SimpleITK as sitk  # NOTE: this needs to have SimpleElastix
+from scipy.special import expit
 
 from skimage.io import imread, imsave
 from skimage.filters import gaussian, median
-from skimage.morphology import disk
 from skimage.transform import resize
+from skimage.morphology import disk
 
-from scipy.special import expit
+import SimpleITK as sitk  # NOTE: this needs to have SimpleElastix
 
 from stapl3d import parse_args, Stapl3r, Image, transpose_props
 
