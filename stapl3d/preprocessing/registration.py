@@ -115,7 +115,7 @@ def main(argv):
     )
 
     for step in args.steps:
-        registrator._fun_selector[step]()
+        registrat3r._fun_selector[step]()
 
 
 class Registrat3r(Stapl3r):
