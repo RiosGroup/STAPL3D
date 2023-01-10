@@ -3416,7 +3416,7 @@ class Stapl3r(object):
             if '.h5' in p:
                 p = p.split('.h5')[0]
             if p:
-                os.makedirs(os.path.dirname(p), exist_ok=True)
+                os.makedirs(os.path.dirname(os.path.abspath(p)), exist_ok=True)
 
         return paths
 
