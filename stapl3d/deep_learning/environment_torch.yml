@@ -1,0 +1,44 @@
+name: stapl3d_torch
+channels:
+  - conda-forge
+  - simpleitk
+  - pytorch
+  - defaults
+dependencies:
+  - python=3
+  - pip
+  - jupyter
+  - ipykernel
+  - seaborn
+  - numpy<=1.21  # For numba in scanpy
+  - pandas
+  - pypdf2
+  - pyyaml
+  - h5py
+  - mpi4py
+  - scikit-image
+  - scikit-learn
+  - pydantic!=1.10.0  # https://pullanswer.com/questions/typeerror-unhashable-type-color-during-qt-resource-compilation
+  - napari
+  - tifffile
+  - czifile
+  - readlif
+  - nibabel
+  # - simpleitk
+  # - stardist
+  # - scanpy
+  # - leidenalg
+  - pytorch
+  - torchvision
+  - tensorboard
+  - pip:
+    - elasticdeform
+    - .
+
+
+# ON GPU NODE:
+# conda remove -n stapl3d_torch --all
+# conda env create -f environment_torch.yml
+# conda activate stapl3d_torch
+# pip install .  # conda develop .
+# python -m ipykernel install --user --name=stapl3d_torch
