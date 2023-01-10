@@ -286,7 +286,7 @@ class Registrat3r(Stapl3r):
         elastixImageFilter = self._get_filter()
 
         if init_suffix:
-            if not ispath(init_suffix):
+            if not os.path.exist(init_suffix):
                 init_suffix = f"{filestem}_transformix_{init_suffix}.txt"
             elastixImageFilter.SetInitialTransformParameterFileName(init_suffix)
 
