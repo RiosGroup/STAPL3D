@@ -2111,8 +2111,8 @@ class LabelImage(Image):
         try:
             self.maxlabel = self.ds.attrs['maxlabel']
         except (AttributeError, KeyError):
-        if not self.ulabels.any():
-            self.set_ulabels()
+            if not self.ulabels.any():
+                self.set_ulabels()
         self.maxlabel = int(np.amax(self.ulabels))
 
     def get_fwmap(self, empty=False):
