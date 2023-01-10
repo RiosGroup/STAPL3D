@@ -97,7 +97,7 @@ from skimage.transform import resize
 
 from scipy.special import expit
 
-from stapl3d import parse_args, Stapl3r, Image, format_, wmeMPI, transpose_props
+from stapl3d import parse_args, Stapl3r, Image, transpose_props
 
 logger = logging.getLogger(__name__)
 
