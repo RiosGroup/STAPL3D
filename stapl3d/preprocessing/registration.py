@@ -85,10 +85,7 @@ from glob import glob
 
 import numpy as np
 
-try:
     import SimpleITK as sitk  # NOTE: this needs to have SimpleElastix
-except ImportError:
-    print("SimpleITK could not be loaded")
 
 from skimage.io import imread, imsave
 from skimage.filters import gaussian, median
