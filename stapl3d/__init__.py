@@ -3649,9 +3649,9 @@ class Stapl3r(object):
                         slices = self._get_additional_block_slices(block, zipsel, axlab)
                         block_ds = self.read_blockdata(block, zipsel, ids, axlab, slices)
                     else:
-                    block.create_dataset(ids)
-                    block_ds = block.datasets[ids]
-                    block_ds.read(from_block=True)
+                        block.create_dataset(ids)
+                        block_ds = block.datasets[ids]
+                        block_ds.read(from_block=True)
                         slices = block_ds.slices  # TODO: CHECK!!!
 
 
