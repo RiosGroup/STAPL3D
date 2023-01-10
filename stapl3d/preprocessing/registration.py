@@ -362,8 +362,8 @@ class Registrat3r(Stapl3r):
         outputs = self._prep_paths(self.outputs, reps={'f': filestem})
 
         # Target voxelsize and shape
-        lr_elsize, lr_shape = get_shapes(inputs['lowres'])
-        hr_elsize, hr_shape = get_shapes(inputs['highres'])
+        lr_elsize, lr_shape = self._get_shapes(inputs['lowres'])
+        hr_elsize, hr_shape = self._get_shapes(inputs['highres'])
         tgt_elsize = {**lr_elsize, **self.target_voxelsize}
         tgt_shape = {d: int( (hr_shape[d] * hr_elsize[d]) / tgt_elsize[d] )
                      for d in 'xyz'}
@@ -511,8 +511,8 @@ class Registrat3r(Stapl3r):
     def _slc_lowres(self, inputs):
         """Get a slice for the lowres cutout matching the highres zstack."""
 
-        hr_elsize, hr_shape = get_shapes(inputs['highres'])
-        lr_elsize, lr_shape = get_shapes(inputs['lowres'])
+        hr_elsize, hr_shape = self._get_shapes(inputs['highres'])
+        lr_elsize, lr_shape = self._get_shapes(inputs['lowres'])
 
         name = inputs['lowres'].replace(f'{self.LR_suffix}.czi', '')
         if name in self.centrepoints.keys():
@@ -943,7 +943,14 @@ def get_filter():
     elastixImageFilter.LogToConsoleOn()
 
     return elastixImageFilter
+    def _get_shapes(self, filepath):
+        """Return zyx voxel and matrix size."""
 
+        im = Image(filepath)
+        im.load()
+        elsize = {d: im.elsize[im.axlab.index(d)] for d in 'zyx'}
+        shape = {d: im.dims[im.axlab.index(d)] for d in 'zyx'}
+        im.close()
 
 def run_filter(elastixImageFilter, fixed, moving, parmap):
     """Execute a filter after setting the images and parameters."""
@@ -1150,14 +1157,7 @@ def apply_registration(fpath_fixed, fpath_moving, filestem, suffix='deformable',
     mo.write(datas)
     mo.close()
 
-
-def get_shapes(filepath):
-    im = Image(filepath)
-    im.load()
-    elsize = {d: im.elsize[im.axlab.index(d)] for d in 'zyx'}
-    shape = {d: im.dims[im.axlab.index(d)] for d in 'zyx'}
-    im.close()
-    return elsize, shape
+        return elsize, shape
 
 
 def get_moving(inputs, vol, slc={}, padding={}):
