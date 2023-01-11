@@ -1157,8 +1157,6 @@ def apply_registration(fpath_fixed, fpath_moving, filestem, suffix='deformable',
     mo.write(datas)
     mo.close()
 
-        return elsize, shape
-
 
 def get_moving(inputs, vol, slc={}, padding={}):
 
