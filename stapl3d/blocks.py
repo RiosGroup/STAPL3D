@@ -229,14 +229,17 @@ class Block(object):
         attr_simple, attr_dict, attr_slices = self._get_block_attributes()
 
         for attr_name in attr_simple:
+            if attr_name in attrs.keys():
             setattr(self, attr_name, attrs[attr_name])
 
         axlab = ''.join(axlab) or ''.join(self.axlab)  # for loading axlab subset
         for attr_name in attr_dict:
+            if attr_name in attrs.keys():
             attr_value = {al: attrs[f'{attr_name}_{al}'] for al in axlab}
             setattr(self, attr_name, attr_value)
 
         for attr_name in attr_slices:
+            if attr_name in attrs.keys():
             attr_value = {al: slice(
                 attrs[f'{attr_name}_{al}_start'],
                 attrs[f'{attr_name}_{al}_stop'],
