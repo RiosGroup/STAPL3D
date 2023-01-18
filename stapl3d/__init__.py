@@ -3685,11 +3685,12 @@ class Stapl3r(object):
                         block_ds.read(from_block=True)
                         slices = block_ds.slices  # TODO: CHECK!!!
 
-
                 elif not images + labels:  # only layout => construct all dimensions, possibly cannot do affine
                     pass  # TODO
 
-                elsize = [block_ds.elsize[al] for al in block_ds.axlab]
+                #elsize = [block_ds.elsize[al] for al in block_ds.axlab if al in 'zyx']
+                elsize = [block_ds.image.elsize[block_ds.axlab.index(al)] for al in block_ds.axlab if al in 'zyx']
+                # segment3r._blocks[0].datasets['mask_ds'].image.elsize
 
                 # name, data, affine
                 if ids == 'margins':
