@@ -411,6 +411,17 @@ class Block_dataset(Block):
 
         self.image.close()
 
+    def load(self, load_data=True):
+        """Load block image."""
+
+        imtypes = {'': Image, 'Image': Image, 'Mask': MaskImage, 'Label': LabelImage}
+        self.image = imtypes[self.imtype](self.path, permission='r')
+        self.image.load(load_data=load_data)
+        if self.imtype == 'Label':
+            self.image.maxlabel = self.image.ds.attrs['maxlabel']
+            self.maxlabel = self.image.ds.attrs['maxlabel']
+        self.image.close()
+
     def read(self, from_source=False, from_block=False, padded=True):
         """Read block data."""
 
