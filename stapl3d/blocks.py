@@ -230,21 +230,21 @@ class Block(object):
 
         for attr_name in attr_simple:
             if attr_name in attrs.keys():
-            setattr(self, attr_name, attrs[attr_name])
+                setattr(self, attr_name, attrs[attr_name])
 
         axlab = ''.join(axlab) or ''.join(self.axlab)  # for loading axlab subset
         for attr_name in attr_dict:
             if attr_name in attrs.keys():
-            attr_value = {al: attrs[f'{attr_name}_{al}'] for al in axlab}
-            setattr(self, attr_name, attr_value)
+                attr_value = {al: attrs[f'{attr_name}_{al}'] for al in axlab}
+                setattr(self, attr_name, attr_value)
 
         for attr_name in attr_slices:
             if attr_name in attrs.keys():
-            attr_value = {al: slice(
-                attrs[f'{attr_name}_{al}_start'],
-                attrs[f'{attr_name}_{al}_stop'],
-                ) for al in axlab}
-            setattr(self, attr_name, attr_value)
+                attr_value = {al: slice(
+                    attrs[f'{attr_name}_{al}_start'],
+                    attrs[f'{attr_name}_{al}_stop'],
+                    ) for al in axlab}
+                setattr(self, attr_name, attr_value)
 
         self.axlab = ''.join(axlab)
 
@@ -495,10 +495,10 @@ class Block_dataset(Block):
         axlab = src_im.ds.attrs['DIMENSION_LABELS']
         # TODO: gracefully handle absent attrs
         if 'block_info' in src_im.file.keys():
-        grp = src_im.file['block_info']
-        self.load_block_attributes(grp, axlab)
+            grp = src_im.file['block_info']
+            self.load_block_attributes(grp, axlab)
             if 'blocker_info' in grp.keys():
-        self.load_blocker_attributes(src_im.file['block_info']['blocker_info'])
+                self.load_blocker_attributes(src_im.file['block_info']['blocker_info'])
 
         src_im.close()
 
@@ -820,7 +820,7 @@ class Block3r(Stapl3r):
         inputpath = self.inputpaths['blockinfo']['data']
         print(f'Generating blocks from "{inputpath}"')
         self._set_inputmode(inputpath)
-        assert self._inputmode in ['grid', 'stacks']
+        assert self._inputmode in ['grid', 'stacks', 'manual']
         self._generate_blocks()
 
     def load_blocks(self, filepaths=''):
@@ -837,25 +837,34 @@ class Block3r(Stapl3r):
 
         inputpath = self.inputpaths['blockinfo']['data']
 
-        self.filepaths = self._glob_h5(self._pat2mat(self._abs(inputpath)))
+        # self.filepaths = self._glob_h5(self._pat2mat(self._abs(inputpath)))
         # FIXME: does not handle full h5path {f}.h5/<ids>
 
+        self._set_filepaths(inputpath)
         self._set_inputmode(inputpath)
-
         self.set_fullsize()  # FIXME: only correct for firstfile of stacks
         self.set_blocksize()  # FIXME: only correct for firstfile of stacks
         self.set_blockmargin()
 
         if (set(self.fullsize.keys()) ==
             set(self.blocksize.keys()) ==
-            set(self.blockmargin.keys())) and self.fullsize:
+            set(self.blockmargin.keys())):  #  and self.fullsize
 
-            if self._inputmode == 'blockfiles':
-                self._load_blocks()
+            if self._inputmode == 'manual':
+                return
+            elif self._inputmode == 'blockfiles':
+                self._load_blocks(self.filepaths)
             else:
                 self._generate_blocks()
 
-            self._set_seamgrid()  # TODO: for load_blocks_from_blockfiles
+            if self.fullsize.keys():
+                self._set_seamgrid()  # TODO: for load_blocks_from_blockfiles
+
+    def _set_filepaths(self, inputpath=''):
+
+        inputpath = inputpath or self.inputpaths['blockinfo']['data']
+
+        self.filepaths = self._glob_h5(self._pat2mat(self._abs(inputpath)))
 
     def _set_inputmode(self, inputpath=''):
         """Set the inputmode according to inputpath (grid, stacks or blocks)."""
@@ -875,28 +884,33 @@ class Block3r(Stapl3r):
                     self._inputmode = 'stacks'  # '{f}.czi'
                 except KeyError:
                     self._inputmode = 'stacks'  # '{f}.czi'
+                except OSError:
+                    print('OSError: Unable to read attribute (bad global heap collection signature)')
+                    self._inputmode = 'stacks'  # '{f}.czi'
                 else:
                     self._inputmode = 'blockfiles'  # 'blocks\\blocks_B{b:05d}.h5'
             else:
                 self._inputmode = 'stacks'  # '{f}.czi'
+        elif not inputpath:
+            self._inputmode = 'manual'
         else:
             self._inputmode = 'grid'  # '<dataset>.ims'
-
-        # print(f'Input mode set to "{self._inputmode}"')
 
     def set_fullsize(self, fullsize={}):
         """Set the shape of the full dataset."""
 
         try:
             dims = None
-            for i, filepath in enumerate(self.filepaths):
-                im = Image(filepath, permission='r')
-                im.load(load_data=False)
-                im.close()
-                if dims is None:
-                    dims = np.array([0] * len(im.dims))
-                dims = [d.item() for d in np.maximum(dims, np.array(im.dims))]
-                self._elsize = dict(zip(im.axlab, im.elsize))
+            # FIXME: does not take blockfiles without ids
+            # for i, filepath in enumerate(self.filepaths):
+            filepath = self.filepaths[0]
+            im = Image(filepath, permission='r')
+            im.load(load_data=False)
+            im.close()
+            if dims is None:
+                dims = np.array([0] * len(im.dims))
+            dims = [d.item() for d in np.maximum(dims, np.array(im.dims))]
+            self._elsize = dict(zip(im.axlab, im.elsize))
             imsize = dict(zip(im.axlab, dims))
         except:
             imsize = {}
@@ -904,22 +918,16 @@ class Block3r(Stapl3r):
         # argument overrides attribute overrides image shape
         self.fullsize = {**imsize, **self.fullsize, **fullsize}
 
-        # print(f'Full dataset size set to "{self.fullsize}"')
-
     def set_blocksize(self, blocksize={}):
         """Set the size of the block."""
 
         self.blocksize = {**self.fullsize, **self.blocksize, **blocksize}
-
-        # print(f'Block size set to "{self.blocksize}"')
 
     def set_blockmargin(self, blockmargin={}):
         """Set the margins of the block."""
 
         bm_im = {d: 0 for d in self.blocksize.keys()}
         self.blockmargin = {**bm_im, **self.blockmargin, **blockmargin}
-
-        # print(f'Block margin set to "{self.blockmargin}"')
 
     def _get_blocker_info(self, axlab, b_idx=0):
 
@@ -951,10 +959,15 @@ class Block3r(Stapl3r):
             slices = {al: slice(int(sta), int(sto))
                       for al, sta, sto in zip(axlab, start, stop)}
 
+            block_path = self._get_blockpath(block_template, b_idx)
+            if self._inputmode == 'stacks':
+                block_id = os.path.splitext(os.path.basename(block_path))[0]
+            else:
+                block_id = self._suffix_formats['b'].format(b=b_idx)
             block = Block(
-                id=self._suffix_formats['b'].format(b=b_idx),
+                id=block_id,
                 idx=b_idx,
-                path=self._get_blockpath(block_template, b_idx),
+                path=block_path,
                 axlab=axlab,
                 elsize=elsize,
                 slices=slices,
@@ -1071,7 +1084,9 @@ class Block3r(Stapl3r):
         for fp in filepaths:  # NB/FIXME: requires all blocks to be globbed
             block = Block()
             block.load_blockinfo(fp)
+            block.path = fp
             self._blocks.append(block)
+
 
         # Load blocker_info from last block.
         attrs = block.blocker_info
