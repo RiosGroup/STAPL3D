@@ -65,7 +65,7 @@ class Image(object):
                  elsize=None, axlab=None, dtype='float', reslev=0,
                  shape=None, dims=None, dataslices=None, slices=None,
                  chunks=None, compression='gzip', series=0,
-                 protective=False, permission='r+'):
+                 protective=False, permission='r+', maxlabel=0, ulabels=[]):
 
         # TODO: squeeze and permute?
 
