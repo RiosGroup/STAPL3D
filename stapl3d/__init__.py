@@ -1942,7 +1942,7 @@ class Image(object):
 
         return props
 
-    def downsampled(self, downsample_factors, ismask=False, outputpath=''):
+    def downsampled(self, factors, ismask=False, outputpath=''):
 
         props = self.get_props2()
         props['path'] = outputpath
@@ -1950,16 +1950,16 @@ class Image(object):
         mo = Image(**props)
 
         # downsample
-        dsfac = tuple([downsample_factors[dim] for dim in self.axlab])
+        facs = tuple([factors[dim] for dim in self.axlab])
         ds = self.slice_dataset()
         if ismask:
-            data = block_reduce(ds, dsfac, np.max)
+            data = block_reduce(ds, facs, np.max)
         else:
-            data = downscale_local_mean(ds, dsfac).astype('float32')
+            data = downscale_local_mean(ds, facs).astype('float32')
 
         mo.shape = data.shape
         mo.dims = data.shape
-        mo.elsize = [es * ds for es, ds in zip(self.elsize, dsfac)]
+        mo.elsize = [es * fac for es, fac in zip(self.elsize, facs)]
         mo.slices = None
         mo.dtype = data.dtype
 
@@ -1967,6 +1967,35 @@ class Image(object):
         mo.write(data)
 
         return mo
+
+    def upsampled(self, factors=None, dims=None, order=0, outputpath=''):
+
+        props = self.get_props2()
+        props['path'] = outputpath
+        props['permission'] = 'r+'
+        mo = Image(**props)
+
+        ds = self.slice_dataset()
+        if dims is not None:
+            facs = [d0 / d1 for d0, d1 in zip(dims, self.dims)]
+            data = resize(ds, dims, order=order, preserve_range=True)
+        elif factors is not None:
+            facs = [factors[al] for al in self.axlab]
+            data = rescale(ds, facs, order=order, preserve_range=True)
+
+        mo.shape = data.shape
+        mo.dims = data.shape
+
+        mo.elsize = [es / fac for es, fac in zip(self.elsize, facs)]
+
+        mo.slices = None
+        mo.dtype = data.dtype
+
+        mo.create()
+        mo.write(data)
+
+        return mo
+
 
     def extract_channel(self, ch=0, tp=0, outputpath=''):
 
