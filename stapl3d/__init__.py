@@ -37,7 +37,7 @@ import matplotlib.gridspec as gridspec
 import nibabel as nib
 
 from skimage.io import imread, imsave
-from skimage.transform import downscale_local_mean
+from skimage.transform import downscale_local_mean, resize, rescale
 from skimage.measure import block_reduce
 
 from PyPDF2 import PdfFileMerger
