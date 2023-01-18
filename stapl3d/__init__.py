@@ -3803,6 +3803,20 @@ class Stapl3r(object):
                     except AttributeError:
                         pass
 
+        # Set the layer colormap.
+        if 'cmap' in settings.keys():
+            if isinstance(settings['cmap'], dict):
+                for key, cmap in settings['cmap'].items():
+                    for lay in self.viewer.layers:
+                        if key in lay.name:
+                            lay.colormap = cmap
+            else:
+                for lay in self.viewer.layers:
+                    try:
+                        lay.colormap = settings['cmap']
+                    except AttributeError:
+                        pass
+
         # Set the layer opacity.
         if 'opacity' in settings.keys():
             if isinstance(settings['opacity'], dict):
