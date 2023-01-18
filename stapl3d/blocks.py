@@ -432,7 +432,7 @@ class Block_dataset(Block):
         """Read block data."""
 
         if from_source:
-            data = self.read_data_from_source(padded=True)
+            data, maxlabel = self.read_data_from_source(padded=True)
             #data = self.read_data_from_source(padded)
             self.dtype = self.dtype or data.dtype
             if self.image is None:
@@ -441,8 +441,9 @@ class Block_dataset(Block):
         elif from_block:
             if self.image is None:
                 self.create_image(self.path, from_block=True)
-            data = self.read_data_from_blockfile(padded=True)
+            data, maxlabel = self.read_data_from_blockfile(padded=True)
 
+        self.image.maxlabel = maxlabel
         self.image.ds[:] = data
 
     def read_data_from_source(self, padded=True):
@@ -466,7 +467,7 @@ class Block_dataset(Block):
         if pad_width is not None:
             data = np.pad(data, pad_width, **self.blocker_info['pad_kwargs'])
 
-        return data
+        return data, None  # FIXME: maxlabel
 
     def read_data_from_blockfile(self, padded=True):
         """Read block data from blockfile."""
@@ -478,6 +479,8 @@ class Block_dataset(Block):
 
         if not padded:
             src_im.slices = [self.slices_region_blockfile[al] for al in src_im.axlab]
+        else:
+            src_im.slices = [self.slices_blockfile[al] for al in src_im.axlab]
 
         data = src_im.slice_dataset(squeeze=False)
 
@@ -490,13 +493,16 @@ class Block_dataset(Block):
 
         # grp = src_im.ds
         axlab = src_im.ds.attrs['DIMENSION_LABELS']
+        # TODO: gracefully handle absent attrs
+        if 'block_info' in src_im.file.keys():
         grp = src_im.file['block_info']
         self.load_block_attributes(grp, axlab)
+            if 'blocker_info' in grp.keys():
         self.load_blocker_attributes(src_im.file['block_info']['blocker_info'])
 
         src_im.close()
 
-        return data
+        return data, maxlabel
 
     def get_padding(self):
         """Return pad_width from slices overshoot and truncated slices."""
@@ -526,7 +532,7 @@ class Block_dataset(Block):
 
         return tuple(padding), slices
 
-    def write(self, data):
+    def write(self, data, maxlabel=None):
         """Write the block data to file."""
 
         if self.image.format == '.dat':  # we have an image in memory
@@ -538,6 +544,10 @@ class Block_dataset(Block):
             self.image.load()
 
         self.image.write(data)
+
+        if isinstance(self.image, LabelImage):
+            self.image.set_maxlabel(maxlabel)
+            self.image.ds.attrs.create('maxlabel', self.image.maxlabel, dtype='uint32')
 
         self.write_block_attributes(self.image.ds)
         self.write_blockinfo(filepath=self.blockfile)  # TODO: conditional (write-protection?)
@@ -782,7 +792,7 @@ class Block3r(Stapl3r):
 
         for i, block in enumerate(self._blocks):
             if i in self.blocks:
-                block.write_blockinfo()
+                block.write_blockinfo()  # FIXME: make writing optional
 
     def print_blockinfo(self, **kwargs):
         """Print the region's slices into the full dataset for all blocks."""
