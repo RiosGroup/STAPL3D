@@ -380,6 +380,12 @@ class Block_dataset(Block):
     def create_image(self, path='', data=None, from_source=False, from_block=False):
         """Create the block Image object."""
 
+        def get_dtype_from_block(path):
+            im = imtypes[self.imtype](path, permission='r')
+            im.load()
+            props = im.get_props2()
+            im.close()
+            return props['dtype']
 
         imtypes = {'': Image, 'Image': Image, 'Mask': MaskImage, 'Label': LabelImage}
 
@@ -394,7 +400,7 @@ class Block_dataset(Block):
                 'path': path,
                 'elsize': self.elsize,
                 'axlab': self.axlab,
-                'dtype': self.dtype,
+                'dtype': self.dtype if self.dtype else get_dtype_from_block(self.path),  # FIXME: tmp fix for Zipset:
                 'shape': self.shape,
                 'chunks': self.chunks,
             }
