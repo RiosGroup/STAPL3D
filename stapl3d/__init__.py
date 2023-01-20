@@ -3139,10 +3139,21 @@ class Stapl3r(object):
 
         def getset(parname, alt_val):
             par = getattr(self, parname) or alt_val
+            """
             # There may not be need / desire to set this
             # For eg biasfield, when done on mean and applied to channels
-            # TODO: make sure this doesn't break other module
-            #setattr(self, parname, par)
+            # TODO: make sure this doesn't break other modules
+            # NOTE: it does break other modules:
+            for instance...
+            features.py: self.blocks
+            stardist_nuclei.py: self.blocks
+            zipping.py: self.blocks
+            backproject.py: self.features
+            blocks.py: self.blocks, self.vols
+            equalization.py: self.filepaths
+            """
+            setattr(self, parname, par)
+
             return par
 
         imdims = ['stacks', 'channels', 'planes']
