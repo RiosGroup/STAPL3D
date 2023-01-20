@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-"""Perform planarity estimation.
+"""Imaris file functionality.
 
 """
 
@@ -12,6 +12,7 @@ import pickle
 import shutil
 import multiprocessing
 import subprocess
+import tempfile
 
 from glob import glob
 
@@ -24,7 +25,6 @@ import yaml
 import xml.etree.ElementTree as ET
 
 from stapl3d import (
-    # parse_args_common,
     get_n_workers,
     get_outputdir,
     get_imageprops,
@@ -35,7 +35,7 @@ from stapl3d import (
 
 
 def main(argv):
-    """"Enhance the membrane with ACME.
+    """"Imaris file functionality.
 
     """
 
@@ -58,6 +58,7 @@ def main(argv):
 #             )
 
 
+# TODO: rewrite to Stapl3r or remove
 def split_channels(
     image_in,
     parameter_file,
@@ -120,7 +121,10 @@ def split_channels(
 
 
 def extract_channel(ims_path, ref_path, channel, outputpath):
-    """Split an imarisfile into channels."""
+    """Extract a channel from an Imarisfile.
+    
+    NOTE: this is probably redundant with subset function
+    """
 
     f = h5py.File(ims_path, 'r')
     n_channels = len(f['/DataSet/ResolutionLevel 0/TimePoint 0'])
@@ -156,26 +160,12 @@ def extract_channel(ims_path, ref_path, channel, outputpath):
     f.close()
 
 
-def copy_groups(f, g, root, groups_src, groups_dst=[]):
 
-    groups_dst = groups_dst or groups_src
 
-    for grp_src, grp_dst in zip(groups_src, groups_dst):
-
-        g.require_group(root)
-
-        try:
-            del g[root][grp_dst]
-        except KeyError:
-            pass
-
-        try:
-            f.copy(f[root][grp_src], g[root], name=grp_dst)
-        except KeyError:
-            pass
 
 
 def subset(filepath_ims, filepath_ref, timepoints=[0], channels=[0]):
+    """Extract a subset of channels and timepoints from an Imaris file."""
 
     f = h5py.File(filepath_ims, 'r')
     g = h5py.File(filepath_ref, 'a')
@@ -213,25 +203,85 @@ def subset(filepath_ims, filepath_ref, timepoints=[0], channels=[0]):
     g.close()
 
 
-def create_ref(filepath_ims):
-    filepath_ch0 = filepath_ims.replace('.ims', '_ch0.ims')
-    filepath_ref = filepath_ims.replace('.ims', '_ref.ims')
-    subset(filepath_ims, filepath_ch0)
-    ims_to_zeros(filepath_ch0)
-    subprocess.call(['h5repack', filepath_ch0, filepath_ref])
-    os.remove(filepath_ch0)
+def copy_groups(f, g, root, groups_src, groups_dst=[]):
+    """Copy groups of a hdf5 dataset (between files)."""
+
+    groups_dst = groups_dst or groups_src
+
+    for grp_src, grp_dst in zip(groups_src, groups_dst):
+
+        g.require_group(root)
+
+        # Remove the destination if it exists.
+        try:
+            del g[root][grp_dst]
+        except KeyError:
+            pass
+
+        # Copy the group to the destination.
+        try:
+            f.copy(f[root][grp_src], g[root], name=grp_dst)
+        except KeyError:
+            pass
 
 
-def aggregate_file(tgt_file, channels, ch_offset=0):
-    """Create an aggregate file with links to individual channels."""
+def create_ref(filepath_ims, suffix_ref='_ref'):
+    """Create an empty 1-channel, 1-timepoint Imaris file from template."""
 
-    for i, ch_dict in enumerate(channels):
+    filepath_tmp = next(tempfile._get_candidate_names())
+    filepath_ref = filepath_ims.replace('.ims', f'{suffix_ref}.ims')
+
+    subset(filepath_ims, filepath_tmp)
+
+    ims_to_zeros(filepath_tmp)
+
+    subprocess.call(['h5repack', filepath_tmp, filepath_ref])
+
+    os.remove(filepath_tmp)
+
+
+def aggregate_file_merged(tgt_file, channels, ch_offset=0):
+    """Create an aggregate file with all data in a new file."""
+
+    mo = Image(tgt_file, permission='r+')
+
+    for i, (filepath, ch_dict) in enumerate(channels.items()):
+
         ch = ch_offset + i
+
+        if i == 0:
+            mo.load()
+        else:
+            mo.create()
+            mo.slices[3] = slice(ch, ch + 1)
+
+        im = Image(filepath)
+        im.load()
+        data = im.slice_dataset()
+        im.close
+
+        mo.write(data)
+
+        ims_set_attr(tgt_file, ch, ch_dict)
+
+    mo.close()
+
+
+def aggregate_file_linked(tgt_file, channels, ch_offset=0):
+    """Create an aggregate file with symlinks to channels."""
+
+    for i, (filepath, ch_dict) in enumerate(channels.items()):
+
+        ch = ch_offset + i
+
         if i != 0:
-            copy_dsi_int(tgt_file, ch, ch_dict['filepath'])
-        linked_path = os.path.relpath(ch_dict['filepath'], os.path.dirname(tgt_file))
+            copy_dsi_int(tgt_file, ch, filepath)
+
+        linked_path = os.path.relpath(filepath, os.path.dirname(tgt_file))
+
         create_linked_channel(tgt_file, ch, pathlib.Path(linked_path).as_posix())
-        set_attr(tgt_file, ch, ch_dict)
+
+        ims_set_attr(tgt_file, ch, ch_dict)
 
 
 def copy_dsi_int(tgt_file, tgt_ch, ext_file, ext_ch=0, prefix='/DataSetInfo'):
@@ -270,17 +320,25 @@ def create_ext_link(f, tgt_ch, ext_file, ext_ch=0, prefix=''):
     f[tgt_loc] = h5py.ExternalLink(ext_file, ext_loc)
 
 
-def set_attr(tgt_file, ch, ch_dict={}):
+def ims_set_attr(filepath, ch, ch_dict={}):
     """Set attributes of a channel."""
 
-    f = h5py.File(tgt_file, 'r+')
-    prefix = '/DataSetInfo'
-    ch = f[prefix]['Channel {}'.format(ch)]
-    attr_keys = ['Name', 'Color', 'ColorRange', 'ColorMode']
+    f = h5py.File(filepath, 'r+')
+    ch = f['/DataSetInfo']['Channel {}'.format(ch)]
     for key, val in ch_dict.items():
-        if key in attr_keys:
-            ch.attrs[key] = np.array([c for c in ch_dict[key]], dtype='|S1')
+        ch.attrs[key] = np.array([c for c in ch_dict[key]], dtype='|S1')
     f.close()
+
+
+def ims_get_attr(filepath, ch=0, attr_keys=['Name', 'ColorMode', 'Color', 'ColorRange']):
+    """Get attributes of a channel."""
+
+    f = h5py.File(filepath, 'r')
+    ch = f['/DataSetInfo']['Channel {}'.format(ch)]
+    ch_dict = {key: att2str(ch.attrs[key]) for key in attr_keys}
+    f.close()
+
+    return ch_dict
 
 
 def correct_histogram(infile):
@@ -292,7 +350,7 @@ def correct_histogram(infile):
 
     f = h5py.File(infile)
 
-    data = f['/DataSet/ResolutionLevel 4/TimePoint 0/Channel 0/Data']
+    data = f['/DataSet/ResolutionLevel 4/TimePoint 0/Channel 0/Data']  # FIXME?
     hist = np.histogram(data, bins=256)[0]
     histminmax = [0, 65535]
 
@@ -363,23 +421,41 @@ def make_aggregate(outputfile, ref_path,
     aggregate_file(outputfile, channels, ch_offset=0)
 
 
-def ims_linked_channels(outputfile, inputfiles, filepath_ref,
-                        color=[1, 1, 1], crange=[0, 20000]):
-    """Gather the inputfiles into an imarisfile by symbolic links."""
+def get_ch_dict(filepath='', ch=0,
+                name='chan', mode='BaseColor', color=[1, 1, 1], crange=[0, 20000]):
+    """Create a attribute dict for Imaris channels"""
 
-    channels = [
-        {
-         'filepath': inputfile,
-         'Name': 'chan',
+    if filepath:
+        ch_dict = ims_get_attr(filepath, ch)
+
+    ch_dict = {
+         'Name': name,
+         'ColorMode': mode,
          'Color': ' '.join(['{:.3f}'.format(i) for i in color]),
          'ColorRange': ' '.join(['{:.3f}'.format(i) for i in crange]),
-         'ColorMode': 'BaseColor',
-         } for inputfile in inputfiles]
+    }
+
+    return ch_dict
+
+def merge_channels_ims(outputfile, inputfiles, filepath_ref,
+                       is_linked=True, delete_channels=True
+                       ):
+    """Gather the inputfiles into an imarisfile."""
+
+    channels = {inputfile: get_ch_dict(inputfile) for inputfile in inputfiles}
 
     if not filepath_ref:
         filepath_ref = inputfiles[0]
     shutil.copy2(filepath_ref, outputfile)
-    aggregate_file(outputfile, channels, ch_offset=0)
+
+    if is_linked:
+        aggregate_file_linked(outputfile, channels, ch_offset=0)
+    else:
+        aggregate_file_merged(outputfile, channels, ch_offset=0)
+        if delete_channels:
+            for inputfile in inputfiles:
+                os.remove(inputfile)
+
 
 def ref_to_zeros(image_in):
     """Set BigDataViewer datasets to all-zeros."""
@@ -454,6 +530,17 @@ def find_resolution_level(image_in):
 
 def att2str(att):
     return ''.join([t.decode('utf-8') for t in att])
+
+
+def att2list(att):
+    return [float(s) for s in att2str(att).split()]
+
+
+def att2out(key, att):
+    if key in ['Color', 'ColorRange']:
+        return att2list(att)
+    else:
+        return att2str(att)
 
 
 def find_downsample_factors(image_in, rl0_idx, rl1_idx):
@@ -651,6 +738,14 @@ def bdv_to_virtual(outputfile, inputfile, reslev=0):
         outputfile = '{}{}{}'.format(filestem, '_virt', ext)
     with h5py.File(outputfile, 'w', libver='latest') as f:
         f.create_virtual_dataset('data', layout, fillvalue=0)
+
+
+def merge_channels_h5(outputfile, inputfiles, idss=['data', 'bias', 'corr']):
+    """Merge 3D image stacks to virtual 4D datasets."""
+
+    for ids in idss:
+        inputpaths = [f'{inputfile}/{ids}' for inputfile in inputfiles]
+        h5chs_to_virtual(inputpaths, f'{outputfile}/{ids}')
 
 
 def h5chs_to_virtual(inputpaths, outputpath='', ext='.h5'):

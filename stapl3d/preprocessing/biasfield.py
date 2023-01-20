@@ -33,7 +33,10 @@ from stapl3d import get_paths, get_imageprops  # TODO: into Image/Stapl3r
 from stapl3d.imarisfiles import (
     find_downsample_factors,
     find_resolution_level,
-    ims_linked_channels,
+    merge_channels_h5,
+    merge_channels_ims,
+    ims_get_attr,
+    ims_set_attr,
     h5chs_to_virtual,
     create_ref,
     )
@@ -181,6 +184,7 @@ class Homogeniz3r(Stapl3r):
             'tasks': 1,
             'sigma': {'z': 10, 'y': 10, 'x': 10},
             'normalize_bias': False,
+            'symlinked_channels': True,
         }
         for k, v in default_attr.items():
             setattr(self, k, v)
@@ -276,6 +280,10 @@ class Homogeniz3r(Stapl3r):
         inputs = self._prep_paths(self.inputs, reps={'c': channel})
         outputs = self._prep_paths(self.outputs, reps={'c': channel})
 
+#        print(inputs)
+#        print(outputs)
+#        print(self.resolution_level, channel, self.downsample_factors)
+
         ds_im = downsample_channel(
             inputs['data'], self.resolution_level, channel,
             self.downsample_factors, False,
@@ -357,11 +365,13 @@ class Homogeniz3r(Stapl3r):
         if self._downsample_factors_reslev:
             return
 
+        axlab = 'zyxct'
         if ('.ims' in inputpath or '.bdv' in inputpath):
-            axlab = 'zyxct'
             dsfacs = find_downsample_factors(inputpath, 0, self.resolution_level)
-
             dsfacs = [d.item() for d in np.array(list(dsfacs) + [1, 1])]
+        else:
+            dsfacs = [d.item() for d in np.array([1, 1, 1, 1, 1])]
+
             self._downsample_factors_reslev = dict(zip(axlab, dsfacs))
 
     def _set_downsample_factors(self, inputpath):
@@ -394,23 +404,47 @@ class Homogeniz3r(Stapl3r):
         self.downsample_factors = dict(zip(axlab, dsfacs))
 
     def postprocess(self, **kwargs):
-        """Merge bias field estimation files."""
+        """Merge channels for biasfield module.
+        
+        1. merge outputs of estimate method (always h5)
+        2. merge output of apply method (ims or h5)
+        3. merge reports of estimate method (pdf)
+        """
 
         self._prep_step('postprocess', kwargs)
-
-        if not self.inputs['ims_ref']:
-            filepath_ims = self.inputpaths['estimate']['data']
-            filepath_ref = filepath_ims.replace('.ims', '_ref.ims')
-            self.inputs['ims_ref'] = filepath_ref
 
         inputs = self._prep_paths(self.inputs)
         outputs = self._prep_paths(self.outputs)
 
-        gather_4D(inputs['channels'], outputs['aggregate'],
-                  ['data'], inputs['ims_ref'])
-        gather_4D(inputs['channels_ds'], outputs['aggregate_ds'],
-                  ['data', 'bias', 'corr'], inputs['ims_ref'])
+        # Merge biasfield estimation output over channels.
+        inputfiles = glob(inputs['channels_ds'])
+        inputfiles.sort()
 
+        merge_channels_h5(outputs['aggregate_ds'], inputfiles)
+
+        # Merge biasfield apply output over channels.
+        inputfiles = glob(inputs['channels'])
+        inputfiles.sort()
+
+        if '.h5' in inputs['channels']:
+
+            merge_channels_h5(outputs['aggregate'], inputfiles, idss=['data'])
+
+        elif inputs['channels'].endswith('.ims'):
+
+        if not self.inputs['ims_ref']:
+                filepath_ims = self.image_in  # self.inputpaths['estimate']['data']
+            filepath_ref = filepath_ims.replace('.ims', '_ref.ims')
+            self.inputs['ims_ref'] = filepath_ref
+
+            merge_channels_ims(
+                outputs['aggregate'],
+                inputfiles,
+                self.inputs['ims_ref'],
+                self.symlinked_channels,
+                )
+
+        # Merge estimation reports.
         pdfs = glob(inputs['report'])
         pdfs.sort()
         self._merge(pdfs, outputs['report'], self._merge_reports)
@@ -422,8 +456,8 @@ class Homogeniz3r(Stapl3r):
 
         self._set_downsampling_parameters(self.inputpaths['estimate']['data'])
 
+        # Generate imaris 1-ch empty reference dataset.
         if self.outputpaths['apply']['channels'].endswith('.ims'):
-            # TODO: copy per-channel image display settings from original imaris file
             if not self.inputpaths['apply']['ims_ref']:
                 filepath_ims = self.inputpaths['apply']['data']
                 filepath_ref = filepath_ims.replace('.ims', '_ref.ims')
@@ -477,11 +511,20 @@ class Homogeniz3r(Stapl3r):
 
         # Create the output image.
         if inputs['ims_ref']:
+
+            # Copy reference imaris file.
             shutil.copy2(inputs['ims_ref'], outputs['channels'])
+            # Set channel specific attributes.
+            ch_dict = ims_get_attr(inputs['data'], ch=channel)
+            ims_set_attr(outputs['channels'], 0, ch_dict)
+
             mo = Image(outputs['channels'])
             mo.load()
+
         # TODO: write to bdv pyramid
+
         else:
+
             props = im.get_props()
             if len(im.dims) > 4:
                 props = im.squeeze_props(props, dim=4)
@@ -491,6 +534,7 @@ class Homogeniz3r(Stapl3r):
             mo = Image(outputs['channels'], **props)
             mo.create()
 
+#        print(self._downsample_factors_reslev)
         downsample_factors = {}
         for dim, dsfac in self._downsample_factors_reslev.items():
             downsample_factors[dim] = dsfac * self.downsample_factors[dim]
@@ -749,9 +793,10 @@ def downsample_channel(inputpath, resolution_level, channel,
 
     im = Image(inputpath, permission='r', reslev=resolution_level)
     im.load(load_data=False)
-    dsfacs_rl = dict(zip(im.axlab, im.find_downsample_factors()))
+    dsfacs_rl = dict(zip(im.axlab, im.find_downsample_factors()))  # FIXME?
     im_ch = im.extract_channel(channel)
     im.close()
+#    print(downsample_factors)
     if downsample_factors is not None:
         ds_im = im_ch.downsampled(downsample_factors, ismask, outputpath)
     else:
@@ -883,21 +928,6 @@ def write_image(im, outputpath, data):
     # if 'downsample_factors' in im.ds.attrs:
     #     mo.ds.attrs['downsample_factors'] = im.ds.attrs['downsample_factors']
     return mo
-
-
-def gather_4D(inputpat, outputfile, idss=['data'], ims_ref=''):
-    """Merge 3D image stacks to virtual 4D datasets."""
-
-    inputfiles = glob(inputpat)
-    inputfiles.sort()
-    if not inputfiles:
-        return
-    if outputfile.endswith('.ims'):
-        ims_linked_channels(outputfile, inputfiles, ims_ref)
-    elif '.h5' in outputfile:
-        for ids in idss:
-            inputpaths = [f'{inputfile}/{ids}' for inputfile in inputfiles]
-            h5chs_to_virtual(inputpaths, f'{outputfile}/{ids}')
 
 
 def stack_bias(inputfiles, outputfile, idss=['data', 'bias', 'corr']):

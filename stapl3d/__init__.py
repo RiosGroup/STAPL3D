@@ -3139,7 +3139,10 @@ class Stapl3r(object):
 
         def getset(parname, alt_val):
             par = getattr(self, parname) or alt_val
-            setattr(self, parname, par)
+            # There may not be need / desire to set this
+            # For eg biasfield, when done on mean and applied to channels
+            # TODO: make sure this doesn't break other module
+            #setattr(self, parname, par)
             return par
 
         imdims = ['stacks', 'channels', 'planes']

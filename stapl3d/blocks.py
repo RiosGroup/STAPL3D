@@ -1682,7 +1682,7 @@ class Merg3r(Block3r):
         if outputfile.endswith('.ims'):
             inputpaths = list(volumes.values())
             inputpaths.sort()
-            imarisfiles.ims_linked_channels(outputfile, inputpaths, inputs['ims_ref'])
+            imarisfiles.merge_channels_ims(outputfile, inputpaths, inputs['ims_ref'])
         elif '.h5' in outputfile:
             channels = [{'Name': volname, 'filepath': inputpath}
                         for volname, inputpath in volumes.items()]
