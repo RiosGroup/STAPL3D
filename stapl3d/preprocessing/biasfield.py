@@ -98,6 +98,12 @@ class Homogeniz3r(Stapl3r):
         Maximal concurrent threads for estimation (passed to ITK filter).
     blocksize_xy : int, default 1280
         In-plane size of the block used during the 'apply' step.
+    sigma : dict, default {'z': 10, 'y': 10, 'x': 10}
+        Smooth kernel for smooth_division method.
+    normalize_bias : bool, default False
+        Switch for normalization of 'bias field' for smooth_division method.
+    symlinked_channels : bool, default True
+        Switch between symlinked channels in imarisfile vs all data in one file.
     """
     _doc_meth = """
 
@@ -258,7 +264,6 @@ class Homogeniz3r(Stapl3r):
             self.inputpaths[step]  = self._merge_paths(self._paths[step], step, 'inputs')
             self.outputpaths[step] = self._merge_paths(self._paths[step], step, 'outputs')
 
-
     def estimate(self, **kwargs):
         """Perform inhomogeneity estimation."""
 
@@ -279,10 +284,6 @@ class Homogeniz3r(Stapl3r):
 
         inputs = self._prep_paths(self.inputs, reps={'c': channel})
         outputs = self._prep_paths(self.outputs, reps={'c': channel})
-
-#        print(inputs)
-#        print(outputs)
-#        print(self.resolution_level, channel, self.downsample_factors)
 
         ds_im = downsample_channel(
             inputs['data'], self.resolution_level, channel,
@@ -372,7 +373,7 @@ class Homogeniz3r(Stapl3r):
         else:
             dsfacs = [d.item() for d in np.array([1, 1, 1, 1, 1])]
 
-            self._downsample_factors_reslev = dict(zip(axlab, dsfacs))
+        self._downsample_factors_reslev = dict(zip(axlab, dsfacs))
 
     def _set_downsample_factors(self, inputpath):
         """Set the resolution level parameter."""
@@ -432,10 +433,10 @@ class Homogeniz3r(Stapl3r):
 
         elif inputs['channels'].endswith('.ims'):
 
-        if not self.inputs['ims_ref']:
+            if not self.inputs['ims_ref']:
                 filepath_ims = self.image_in  # self.inputpaths['estimate']['data']
-            filepath_ref = filepath_ims.replace('.ims', '_ref.ims')
-            self.inputs['ims_ref'] = filepath_ref
+                filepath_ref = filepath_ims.replace('.ims', '_ref.ims')
+                self.inputs['ims_ref'] = filepath_ref
 
             merge_channels_ims(
                 outputs['aggregate'],
@@ -534,7 +535,6 @@ class Homogeniz3r(Stapl3r):
             mo = Image(outputs['channels'], **props)
             mo.create()
 
-#        print(self._downsample_factors_reslev)
         downsample_factors = {}
         for dim, dsfac in self._downsample_factors_reslev.items():
             downsample_factors[dim] = dsfac * self.downsample_factors[dim]
@@ -796,7 +796,7 @@ def downsample_channel(inputpath, resolution_level, channel,
     dsfacs_rl = dict(zip(im.axlab, im.find_downsample_factors()))  # FIXME?
     im_ch = im.extract_channel(channel)
     im.close()
-#    print(downsample_factors)
+
     if downsample_factors is not None:
         ds_im = im_ch.downsampled(downsample_factors, ismask, outputpath)
     else:
@@ -1051,17 +1051,6 @@ def get_dim_median(d, tp, metric='median'):
     elif metric == 'std':
         return np.ma.std(np.reshape(np.transpose(d, tp), [d.shape[tp[0]], -1]), axis=1)
 
-
-def create_ref_ims(filepath_ims, filepath_ref, outputpath):
-
-    outputpath = self.outputpaths['apply']['channels']
-    ims_ref = self.inputpaths['apply']['ims_ref']
-    filepath_ims = self.inputpaths['estimate']['data']
-    if outputpath.endswith('.ims'):
-        if not ims_ref:
-            filepath_ref = filepath_ims.replace('.ims', '_ref.ims')
-            create_ref(filepath_ims)
-    return filepath_ref
 
 if __name__ == "__main__":
     main(sys.argv[1:])
