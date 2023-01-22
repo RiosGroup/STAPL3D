@@ -103,9 +103,9 @@ def main(argv):
     """Co-acquisition image registration."""
 
     steps = ['estimate', 'apply', 'postprocess']
-    args = parse_args('registration', steps, *argv)
+    args = parse_args('registration_coacq', steps, *argv)
 
-    registrat3r = Registrat3r(
+    registrat3r = Registrat3r_CoAcq(
         args.image_in,
         args.parameter_file,
         step_id=args.step_id,
@@ -119,29 +119,1101 @@ def main(argv):
 
 
 class Registrat3r(Stapl3r):
+    """Image coregistration.
+    
+    A base class for coregistration in STAPL3D.
+    Refer to Registrat3r_LSD and Registrat3r_COACQ for specific applications.
+    """
+
+    def __init__(self, image_in='', parameter_file='', **kwargs):
+
+        if 'module_id' not in kwargs.keys():
+            kwargs['module_id'] = 'registration'
+
+        super(Registrat3r, self).__init__(
+            image_in, parameter_file,
+            **kwargs,
+            )
+
+        self._fun_selector = {}
+
+        self._parallelization = {}
+
+        self._parameter_sets = {}
+
+        self._parameter_table = {}
+
+        default_attr = {}
+        for k, v in default_attr.items():
+            setattr(self, k, v)
+
+        for step in self._fun_selector.keys():
+            self.set_parameters(step)
+
+        self._init_paths()
+
+        self._init_log()
+
+        self._images = []
+        self._labels = []
+
+    def _init_paths(self):
+
+        self._paths = {}
+
+        for step in self._fun_selector.keys():
+            self.inputpaths[step]  = self._merge_paths(self._paths[step], step, 'inputs')
+            self.outputpaths[step] = self._merge_paths(self._paths[step], step, 'outputs')
+
+    def convert_pointsfile(self,
+        fpath_points_in, fpath_image_in,
+        padding=[0, 0, 0], fpath_points_out='',
+        ):
+        """Convert between ITK points formats: world <=> voxel."""
+
+        pointstypes = {
+            'point': {'dtype': float, 'format': '%d'},
+            'index': {'dtype': int  , 'format': '%f'},
+        }
+
+        # Read points.
+        with open(fpath_points_in) as f:
+            pointstype = f.readline().strip()
+        datatype = pointstypes[pointstype]['dtype']
+        points_in = np.loadtxt(
+            fpath_points_in,
+            dtype=datatype,
+            delimiter=' ',
+            skiprows=3,
+            )
+
+        # Get image parameters.
+        im = Image(fpath_image_in)
+        im.load()
+        offset = im.ims_load_extent('Min')[::-1]
+        elsize = im.ims_load_elsize()[:3][::-1]
+        im.close()
+
+        # Convert points.
+        if pointstype == 'point':
+            points = points_in - np.array(offset)
+            points /= np.array(elsize)
+            points += np.array(padding)
+        elif pointstype == 'index':
+            points = points_in - np.array(padding)
+            points *= np.array(elsize)
+            points += np.array(offset)
+
+        pointstype = 'index' if pointstype == 'point' else 'point'
+        datatype = pointstypes[pointstype]['dtype']
+        points = points.astype(datatype)
+
+        if fpath_points_out:
+           self.write_pointsfile(fpath_points_out, points, pointstype)
+
+        return points
+
+    def write_pointsfile(self, filepath, points, pointstype):
+        """Write ITK pointsfile to disk."""
+
+        pointstypes = {
+            'point': {'dtype': float, 'format': '%f'},
+            'index': {'dtype': int  , 'format': '%d'},
+        }
+
+        formatstring = pointstypes[pointstype]['format']
+        with open(filepath, 'w') as f:
+            f.write(f'{pointstype}\n{len(points)}\n\n')
+            b = '\n'.join(' '.join(formatstring %x for x in y) for y in points)
+            f.write(b)
+
+    def read_image(self, filepath, slc={},
+                   rl=0, channel=0, timepoint=0,
+                   transform={},
+                   ):
+        """Read a 3D volume."""
+
+        im = Image(filepath, reslev=rl, permission='r')
+        im.load()
+
+        tp = timepoint
+        ch = channel
+        pad = transform['pad']
+
+        if 't' in im.axlab:
+            if tp == -1:
+                tp = im.dims[im.axlab.index('t')] - 1
+            im.slices[im.axlab.index('t')] = slice(tp, tp + 1, 1)
+
+        if 'c' in im.axlab and ch != -1:
+            im.slices[im.axlab.index('c')] = slice(ch, ch + 1, 1)
+
+        for k, v in slc.items():  # spatial slices
+            im.slices[im.axlab.index(k)] = v
+
+        data = im.slice_dataset()
+        if data.dtype == 'bool':
+            data = data.astype('uint8')
+
+        if ch == -1:
+            data = np.mean(data, axis=im.axlab.index('c'))
+
+        mask = np.ones(data.shape, dtype='uint8')
+
+        pad_width = tuple(pad[al] for al in im.axlab if al in pad.keys())
+        data = np.pad(data, pad_width)
+        mask = np.pad(mask, pad_width)
+
+        im.close()
+
+        itk_props = self.im_to_itk_props(im, **transform)
+
+        return im, data, mask, itk_props
+
+    def im_to_itk_props(self, im,
+                        theta={'z': 0, 'y': 0, 'x': 0},
+                        pad={'z': (0, 0), 'y': (0, 0), 'x':(0, 0)},
+                        translate={'z': 0, 'y': 0, 'x': 0},
+                        ):
+        """Convert STAPL3D Image class attributes to ITK form."""
+
+        elsize_xyz = [im.elsize[im.axlab.index(al)] for al in 'xyz']
+        spacing = np.array(elsize_xyz, dtype='float')
+
+        # TODO: make sure to get the order right in the rotation
+        rotation_moving = self.axis_angles_to_matrix(**theta)
+        direction = rotation_moving[:3, :3].ravel()
+
+        origin = np.array([-pad[al][0] for al in 'xyz']) * spacing
+
+        # FIXME!!: tie the translation to the rotation in the right way
+        extent = np.array([im.dims[im.axlab.index(al)] for al in 'xyz']) * spacing
+        if theta['y'] == 0:
+            origin = np.array([0, 0, 0])
+        elif theta['y'] == np.pi / 2:
+            origin = np.array([extent[2], 0, 0])
+        elif theta['y'] == np.pi:
+            origin = np.array([extent[0], 0, extent[2]])
+        elif theta['y'] == -np.pi / 2:
+            origin = np.array([extent[2], 0, extent[0]])
+
+        origin += np.array([translate[al] for al in 'xyz'])
+
+        origin = origin.astype('float')
+
+        return {'spacing': spacing, 'origin': origin , 'direction': direction}
+
+    def axis_angles_to_matrix(self, x=0, y=0, z=0, tol=1e-12):
+        """Convert axis-angle rpresentation to rotation matrix."""
+
+        # TODO: make sure to get the order right in the rotation
+        Rz, Ry, Rx = np.eye(4), np.eye(4), np.eye(4)
+
+        Rz[:3, :3] = np.array([
+                [np.cos(z), -np.sin(z), 0],
+                [np.sin(z),  np.cos(z), 0],
+                [        0,          0, 1],
+            ])
+        Ry[:3, :3] = np.array([
+                [ np.cos(y), 0, np.sin(y)],
+                [         0, 1,         0],
+                [-np.sin(y), 0, np.cos(y)],
+                ])
+        Rx[:3, :3] = np.array([
+                [1,         0,          0],
+                [0, np.cos(x), -np.sin(x)],
+                [0, np.sin(x),  np.cos(x)],
+                ])
+
+        R = Rz @ Ry @ Rx
+
+        R[abs(R) < tol] = 0
+
+        return R
+
+    def write_3d_as_nii(self, outpath, data, itk_props={}):
+        """Write a 3D volume to nifti format."""
+
+        default_props = {
+            'spacing': [1, 1, 1],
+            'origin': (0, 0, 0),
+            'direction': [1, 0, 0, 0, 1, 0, 0, 0, 1],
+            'dtype': 'float32',
+            }
+        itk_props ={**default_props, **itk_props}
+        itk_im = self.data_to_itk(data,
+            itk_props['spacing'],
+            itk_props['origin'],
+            itk_props['direction'],
+            itk_props['dtype'],
+            )
+        sitk.WriteImage(itk_im, outpath)
+
+    def data_to_itk(self, data, spacing=[1, 1, 1], origin=(0, 0, 0),
+                    direction=[1, 0, 0, 0, 1, 0, 0, 0, 1], dtype='float32',
+                    ):
+        """Numpy array (zyx) to ITK image (xyz)."""
+
+        itk_im = sitk.GetImageFromArray(data.astype(dtype))
+        itk_im.SetSpacing(np.array(spacing, dtype='float'))
+        itk_im.SetOrigin(np.array(origin, dtype='float'))
+        itk_im.SetDirection(np.array(direction, dtype='float'))
+
+        return itk_im
+
+    def _get_filter(self):
+        """Initiate an empty elastix filter."""
+
+        elastixImageFilter = sitk.ElastixImageFilter()
+        elastixImageFilter.LogToFileOn()
+        elastixImageFilter.LogToConsoleOn()
+
+        return elastixImageFilter
+
+    def _run_filter(self, elastixImageFilter, fixed, moving, parmap):
+        """Execute a filter after setting the images and parameters."""
+
+        elastixImageFilter.SetParameterMap(parmap)
+        elastixImageFilter.SetFixedImage(fixed)
+        elastixImageFilter.SetMovingImage(moving)
+        elastixImageFilter.Execute()
+
+        return elastixImageFilter
+
+    def _write_filter(self, parmap, IF, filepaths):
+        """Write filter result and parameters to file."""
+
+        if filepaths['elastix']:
+            sitk.WriteParameterFile(parmap, filepaths['elastix'])
+
+        if filepaths['transformix']:
+            tpMap = IF.GetTransformParameterMap()
+            #tpMap[0]['FinalBSplineInterpolationOrder'] = '1',
+            #tpMap[0]['ResultImagePixelType'] = "uint16",
+            sitk.WriteParameterFile(tpMap[0], filepaths['transformix'])
+
+        result = IF.GetResultImage()
+
+        if filepaths['result']:
+            sitk.WriteImage(result, filepaths['result'])
+
+        return result
+
+    def _get_parmap(self, parpath):
+        """Get a default or specific parameter map."""
+
+        if parpath in ['rigid', 'affine', 'bspline']:
+            parmap = sitk.GetDefaultParameterMap(parpath)
+        else:
+            parmap = sitk.ReadParameterFile(parpath)
+
+        return parmap
+
+
+class Registrat3r_LSD(Registrat3r):
+    """mLSR3D to Live image coregistration."""
+
+    def __init__(self, image_in='', parameter_file='', **kwargs):
+
+        if 'module_id' not in kwargs.keys():
+            kwargs['module_id'] = 'registration_lsd'
+
+        super(Registrat3r_LSD, self).__init__(
+            image_in, parameter_file,
+            **kwargs,
+            )
+
+        self._fun_selector.update({
+            'prepare': self.prepare,
+            'estimate': self.estimate,
+            'apply': self.apply,
+            'postprocess': self.postprocess,
+            })
+
+        self._parallelization.update({
+            'prepare': [],  # ['_datasets'],
+            'estimate': [],
+            'apply': ['channels', 'timepoints'],
+            'postprocess': [],
+            })
+
+        self._parameter_sets.update({
+            'prepare': {
+                'fpar': self._FPAR_NAMES,
+                'ppar': (),
+                'spar': ('_n_workers',),
+                },
+            'estimate': {
+                'fpar': self._FPAR_NAMES,
+                'ppar': (),
+                'spar': ('_n_workers',),
+                },
+            'apply': {
+                'fpar': self._FPAR_NAMES,
+                'ppar': (),
+                'spar': ('_n_workers', 'channels', 'timepoints'),
+                },
+            'postprocess': {
+                'fpar': self._FPAR_NAMES,
+                'ppar': (),
+                'spar': ('_n_workers',),
+                },
+            })
+
+        self._parameter_table.update({
+            })
+
+        prep_dict = {
+            'convert_points': False,
+            'image': {
+                'channel': 0,
+                'timepoint': -1,
+                'transform': {
+                    'pad': {'z': (0, 0), 'y': (0, 0), 'x':(0, 0)},
+                    'theta': {'z': 0, 'y': 0, 'x': 0},
+                    'translate': {'z': 0, 'y': 0, 'x': 0},
+                    },
+                },
+            'unwobble': {},
+            'modulate_z': {},
+            }
+        default_attr = {
+            'prep_live': {k: v for k, v in prep_dict.items()},
+            'prep_mLSR3D': {k: v for k, v in prep_dict.items()},
+            'registration_steps': {'rigid': {}, 'deformable': {}},
+            'channels': [],
+            'timepoints': [],
+            '_suffixes': {'live': 'fixed', 'mLSR3D': 'moving'},
+#            '_fixed_image': 'live',
+#            '_datasets': ['live', 'mLSR3D'],
+            '_registration_step': '',
+        }
+        for k, v in default_attr.items():
+            setattr(self, k, v)
+
+        for step in self._fun_selector.keys():
+            self.set_parameters(step)
+
+        self._init_paths_lsd()
+
+        self._init_log()
+
+        self._images = []
+        self._labels = []
+
+    def _init_paths_lsd(self):
+
+        self._paths.update({
+            'prepare': {
+                'inputs': {
+                    'data': '',
+                    'live': '',
+                    'mLSR3D': '',
+                    'points_live': '',
+                    'points_mLSR3D': '',
+                    },
+                'outputs': {
+                    'filestem': '',
+                    'fixed': '',
+                    'moving': '',
+                    'mask_fixed': '',
+                    'mask_moving': '',
+                    'points_fixed': '',
+                    'points_moving': '',
+                    },
+                },
+            'estimate': {
+                'inputs': {
+                    'filestem': '',
+                    'fixed': '',
+                    'moving': '',
+                    'mask_fixed': '',
+                    'mask_moving': '',
+                    'points_fixed': '',
+                    'points_moving': '',
+                    'parameters_rigid': '',
+                    'parameters_deformable': '',
+                    },
+                'outputs': {
+                    'rigid': '',
+                    'deformable': '',
+                    'elastix_rigid': '',
+                    'elastix_deformable': '',
+                    'transformix_rigid': '',
+                    'transformix_deformable': '',
+                    },
+                },
+            'apply': {
+                'inputs': {
+                    'live': '',
+                    'mLSR3D': '',
+                    'filestem': '',
+                    'parpath': '',
+                    },
+                'outputs': {
+                    'filestem': '',
+                    'regdir': 'reg/ch{c:02d}_tp{t:03d}',
+                    'append_to_ims': '',
+                    },
+            },
+            'postprocess': {
+                'inputs': {
+                    'regdir': 'reg/ch{c:02d}_tp{t:03d}',
+                    },
+                'outputs': {
+                    'out': 'reg/ch{c:02d}_tp{t:03d}/reg.nii.gz',
+                    },
+                },
+        })
+
+        for step in self._fun_selector.keys():
+            self.inputpaths[step]  = self._merge_paths(self._paths[step], step, 'inputs')
+            self.outputpaths[step] = self._merge_paths(self._paths[step], step, 'outputs')
+
+    def prepare(self, **kwargs):
+        """Prepare datasets for mLSR3D to Live registration."""
+
+        _ = self._prep_step('prepare', kwargs)
+        arglist = (('live',), ('mLSR3D',))  # TODO: HPC parallization
+        self._set_n_workers(len(arglist))
+        with multiprocessing.Pool(processes=self._n_workers) as pool:
+            pool.starmap(self._prepare_dataset, arglist)
+
+    def _prepare_dataset(self, dset):
+        """Prepare dataset for mLSR3D to Live registration.
+
+        Optional steps:
+        1. Convert landmark file to voxel coordinates.
+        2. Unwobble dataset.
+        3. Modulate intensities over Z.
+        """
+
+        inputs = self._prep_paths(self.inputs)
+        outputs = self._prep_paths(self.outputs)
+
+        pars = {'live': self.prep_live, 'mLSR3D': self.prep_mLSR3D}[dset]
+
+        filepath_dset = inputs[dset]
+        pointspath_um =     inputs[f'points_{dset}'] or filepath_dset.replace('.ims', '.txt')
+
+        suffix = self._suffixes[dset]
+        outstem =         outputs['filestem']         or os.path.splitext(inputs['live'])[0]
+        points_path_vx  = outputs[f'points_{suffix}'] or f'{outstem}_{suffix}.txt'
+        nifti_path_data = outputs[suffix]             or f'{outstem}_{suffix}.nii.gz'
+        nifti_path_mask = outputs[f'mask_{suffix}']   or f'{outstem}_{suffix}_mask.nii.gz'
+
+        im, data, mask, itk = self.read_image(filepath_dset, **pars['image'])
+
+        # 1. Convert landmark files (from world to voxel coordinates).
+        if pars['convert_pointsfile']:
+            pad = pars['image']['transform']['pad']
+            pad_lower = [pad[al][0] for al in 'xyz']
+            _ = self.convert_pointsfile(
+                pointspath_um,
+                filepath_dset,
+                pad_lower,
+                points_path_vx,
+                )
+
+        # 2. Unwobble.
+        if pars['unwobble']:
+
+            # Generate mask.
+            tissue_mask = self.unwobble_mask(
+                im, data, pars['image'],
+                **pars['unwobble']['tissue_mask'],
+                )
+
+            if 'map_z_distance' in pars['unwobble'].keys():
+                # Calculate distance to top/bottom.
+                distance = self.unwobble_distance(
+                    im, data, pars['image'],
+                    tissue_mask,
+                    pars['unwobble']['direction'],
+                    pars['unwobble']['map_z_distance']['filters'],
+                    )
+
+            if 'shift_data' in pars['unwobble'].keys():
+                # Shift data columns by distance in z.
+                data = self.unwobble_data(
+                    im, data, pars['image'],
+                    distance,
+                    pars['unwobble']['direction'],
+                    )
+
+            if 'shift_points' in pars['unwobble'].keys():
+                # Shift data colums by distance in z.
+                self.unwobble_points(
+                    points_path_vx,
+                    distance,
+                    pars['unwobble']['direction'],
+                    points_path_vx,
+                    )
+
+        # 3. Modulate intensities over Z.
+        if pars['modulate_z']:
+            data = self.modulate_z(
+                im, data,
+                **pars['modulate_z'],
+                )
+
+        self.write_3d_as_nii(nifti_path_data, data, itk)
+        self.write_3d_as_nii(nifti_path_mask, mask, itk)
+
+    def unwobble_mask(
+        self,
+        im, data, impars,
+        read_mask=False,
+        reslev=4,
+        sigma={'z': 5, 'y': 20, 'x':20},
+        threshold=0,
+        ):
+        """"""
+
+        # TODO: to outputpaths
+        filepath_dset = im.path
+        data_path_lr = filepath_dset.replace('.ims', f'_rl{reslev}.nii.gz')
+        filt_path_lr = filepath_dset.replace('.ims', f'_rl{reslev}_smooth.nii.gz')
+        mask_path_lr = filepath_dset.replace('.ims', f'_rl{reslev}_tissuemask.nii.gz')
+
+        if read_mask:
+
+            # Read wobblemask.
+            im_lr = Image(mask_path_lr, permission='r')
+            im_lr.load()
+            tissue_mask = im_lr.slice_dataset()
+            tissue_mask = tissue_mask.transpose()  # nii-xyz to zyx
+            im_lr.close()
+
+            return tissue_mask
+
+        # Write nifti at low resolution for generating a tissue mask.
+        im_lr, data_lr, _, itk_lr = self.read_image(
+            filepath_dset, rl=reslev, **impars,
+            )
+        self.write_3d_as_nii(data_path_lr, data_lr, itk_lr)
+
+        # Smooth volume.
+        elsize = dict(zip(im_lr.axlab, im_lr.elsize))
+        sigma_vx = [max(1, int(sigma[al] / es))
+                    for al, es in elsize.items() if al in 'zyx']
+        data_smooth = gaussian(data_lr, sigma=sigma_vx, preserve_range=True)
+        self.write_3d_as_nii(filt_path_lr, data_smooth, itk_lr)
+
+        # Threshold smoothed volume
+        if not threshold:
+            threshold = threshold_otsu(data_smooth)
+        tissue_mask = data_smooth > threshold
+        self.write_3d_as_nii(mask_path_lr, tissue_mask.astype('uint8'), itk_lr)
+
+        return tissue_mask
+
+    def unwobble_distance(
+        self,
+        im, data, impars,
+        tissue_mask,
+        direction='bottom',
+        filters={'gaussian': 10},
+        ):
+        """Calculate the distance in z from mask to the volume top or bottom."""
+
+        filepath_dset = im.path
+        filepath_tif = filepath_dset.replace('.ims', f'_distance_{direction}.tif')
+
+        dims_yx = [im.dims[im.axlab.index(al)] for al in 'yx']
+
+        if direction == 'top':
+            tissue_mask = np.flip(tissue_mask, axis=0)
+
+        distance = np.argmax(tissue_mask, axis=0)
+
+        for filtertype, filterpar in filters.items():
+            if filtertype == 'gaussian':
+                distance = gaussian(distance.astype(float), filterpar)
+            if filtertype == 'median':
+                distance = median(distance, footprint=disk(filterpar))
+
+        distance = resize(distance, dims_yx, preserve_range=True)
+
+        if filepath_tif:
+            filepath_png = filepath_tif.replace('.tif', '.png')
+            imsave(filepath_tif, distance.astype('int'))
+            imsave(filepath_png, distance.astype('int'))
+
+        return distance.astype('int')
+
+    def unwobble_data(
+        self,
+        im, data, impars,
+        distance,
+        direction='bottom',
+        ):
+        """Shift each z-column by a distance."""
+
+        axlab = im.axlab
+        dims = im.dims
+
+        data_shifted = np.zeros_like(data)
+
+        for x in range(data.shape[axlab.index('x')]):
+            for y in range(data.shape[axlab.index('y')]):
+
+                if direction == 'top':
+                    z_dim = dims[axlab.index('z')]  # NOTE: why not from shape?
+                    d = data[:z_dim - distance[y][x], y, x]
+                    data_shifted[distance[y][x]:, y, x] = d
+
+                elif direction == 'bottom':
+                    d = data[distance[y][x]:, y, x]
+                    data_shifted[:d.shape[0], y, x] = d
+
+        return data_shifted
+
+    def unwobble_points(self, pointsfile_in, distance, direction, pointsfile_out):
+        """Shift each point by a distance in z."""
+
+        points_in = np.loadtxt(pointsfile_in, dtype='int', delimiter=' ', skiprows=3)
+
+        for pt in points_in:
+            if direction == 'top':
+                pt[2] += distance[pt[1], pt[0]]
+            elif direction == 'bottom':
+                pt[2] -= distance[pt[1], pt[0]]
+
+        self.write_pointsfile(pointsfile_out, points_in, 'index')
+
+
+
+    """
+    def unwobble(self,
+                 im, data, impars,
+                 reslev_mask_man=4,
+                 reslev_mask_proc=4,
+                 filters={'gaussian': 10},
+                 direction='top',
+                 ):
+
+        filepath_dset = im.path
+        outpath_lr = filepath_dset.replace('.ims', f'_rl{reslev_mask_man}.nii.gz')  # TODO: to outputpaths
+        outpath_mr = filepath_dset.replace('.ims', f'_rl{reslev_mask_proc}.nii.gz')  # TODO: to outputpaths
+        mask_path_lr = filepath_dset.replace('.ims', f'_rl{reslev_mask_man}_tissuemask.nii.gz')    # TODO: to inputpaths
+        mask_path_mr = filepath_dset.replace('.ims', f'_rl{reslev_mask_proc}_tissuemask.nii.gz')    # TODO: to inputpaths
+        filepath_tif = filepath_dset.replace('.ims', f'_distance_{direction}.tif')
+
+        # Create tissuemask manually... save as ..._tissuemask.nii.gz ...
+        # TODO: halt and pick up here
+        print(filepath_dset, mask_path_lr)
+        if not os.path.isfile(mask_path_lr):
+            print(f'Tissue mask does not exist')
+            print(f'Please create at {mask_path_lr}')
+            return 'foo'
+
+        # Iron out some kinks probably created by a manual mask.
+        wobblemask, dims_zyx = process_wobble(
+            filepath_dset, impars, mask_path_lr, reslev_mask_proc, threshold=0.99,
+            )
+
+        # Calculate distance to top/bottom.
+        distance = self.unwobble_distance(
+            wobblemask, dims_zyx[1:], filters, filepath_tif, direction=direction,
+            )
+
+        # Resample distance to full resolution.
+        dims_yx = [im.dims[im.axlab.index(al)] for al in 'yx']
+        distance = resize(distance, dims_yx, preserve_range=True)
+
+        return distance.astype('int')
+
+    def process_wobble(self, filepath_dset, impars, mask_path_lr, reslev_mask_proc, threshold=0.99):
+
+        # Process the wobblemask at reslev=2
+        im_mr, data_mr, _, itk_mr = self.read_image(
+            filepath_dset, rl=reslev_mask_proc, **impars,
+            )
+        # Reduce irregularities.
+        wobblemask = binary_dilation(binary_erosion(wobblemask)).astype(float)
+        # Interpolate the mask a bit.
+        dims_zyx = [im_mr.dims[im_mr.axlab.index(al)] for al in 'zyx']
+        wobblemask = resize(wobblemask, dims_zyx, preserve_range=True, order=1)
+        wobblemask = wobblemask > threshold
+        # Save to disk for inspection.
+        self.write_3d_as_nii(outpath_mr, data_mr, itk_mr)
+        self.write_3d_as_nii(mask_path_mr, wobblemask.astype('uint8'), itk_mr)
+
+        return wobblemask, dims_zyx
+    """
+
+
+
+
+
+
+
+    def modulate_z(self, im, data,
+                   slope=5, width=30, reverse=False,
+                   offset=0, plot_curve=False,
+                   ):
+        """Modulate the intensities in the volume with a logistic over Z."""
+
+        # Define logistic function.
+        x = np.linspace(slope, -slope, width)
+        y = expit(x)
+
+        # Place it at offset in a vector of len(z_dim), padded with 1's.
+        z_dim = data.shape[im.axlab.index('z')]
+        z_fac = np.zeros(z_dim)
+        z_fac[:y.shape[0]] = y
+        z_fac = np.roll(z_fac, offset)
+        z_fac[:offset] = 1
+
+        # Flip it.
+        if reverse:
+            z_fac = z_fac[::-1]
+
+        # Plot it.
+        if plot_curve:
+            plt.plot(list(range(z_dim)), z_fac)
+            plt.grid()
+            plt.xlabel('slices')
+            plt.title('simulated attenuation')
+            plt.show()
+
+        # Multiply with profile.
+        tileshape = [data.shape[im.axlab.index(al)] for al in 'xy'] + [1]
+        z = np.tile(z_fac, tileshape).transpose()
+
+        return np.multiply(data, z)
+
+    def estimate(self, **kwargs):
+        """mLSR3D to Live registration."""
+
+        _ = self._prep_step('estimate', kwargs)
+        self._register()
+
+    def _register(self, prev_step=''):
+        """Register images."""
+
+        inputs = self._prep_paths(self.inputs)
+        outputs = self._prep_paths(self.outputs)
+
+        filepaths = self._get_registration_filepaths(inputs, outputs)
+#        print(filepaths)
+
+        for curr_step, overrides in self.registration_steps.items():
+            self.run_registration(
+                filepaths,
+                curr_step,
+                not prev_step,
+                prev_step,
+                overrides,
+                )
+            prev_step = curr_step
+
+    def _get_registration_filepaths(self, inputs, outputs):
+        """Gather all filepaths used in the regsitration proper.
+        
+        Entries specified in parameterfile or defaulting to {filestem}_....<ext>
+        """
+
+        filestem = os.path.splitext(self.inputpaths['prepare']['live'])[0]
+        filestem = inputs['filestem'] or filestem
+
+        filepaths = {}
+
+        intypes = {'': 'nii.gz', 'mask': 'nii.gz', 'points': 'txt'}
+        outtypes = {'elastix': 'txt', 'transformix': 'txt', '': 'nii.gz'}
+
+        # Set paths to input files, masks and landmarks for fixed and moving.
+        for intype, ext in intypes.items():
+            for _, suffix in self._suffixes.items():
+                key = self.format_([intype, suffix])
+                filename = "_".join([filestem, suffix])
+                filepaths[key] = inputs[key] or f'{filename}.{ext}'
+                """
+                # FIXME: null spec does not function. => None was already replace by '' in self._merge_paths
+                if inputs[key] is None:
+                    filepaths[key] = ''
+                elif not inputs[key]:
+                    filepaths[key] = f'{filename}.{ext}'
+                else:
+                    filepaths[key] = inputs[key]
+                """
+
+        for step, _ in self.registration_steps.items():
+
+            # Set paths to input parameters for each step.
+            key = f'parameters_{step}'
+            filename = "_".join([filestem, key])
+            filepaths[key] = inputs[key] or f'{filename}.txt'
+
+            # Set paths to output parameters and nifti's for each step.
+            for outtype, ext in outtypes.items():
+                key = self.format_([outtype, step])
+                filename = "_".join([filestem, key])
+                filepaths[key] = outputs[key] or f'{filename}.{ext}'
+                """
+                # FIXME: null spec does not function. => None was already replace by '' in self._merge_paths
+                if outputs[key] is None:
+                    filepaths[key] = ''
+                elif not outputs[key]:
+                    filepaths[key] = f'{filename}.{ext}'
+                else:
+                    filepaths[key] = outputs[key]
+                """
+
+        return filepaths
+
+    def run_registration(self, filepaths, curr_step, uselandmarks=False,
+                         init_suffix='', parmap_overrides={}):
+        """Register images."""
+
+        # Read the images.
+        fixed = sitk.ReadImage(filepaths['fixed'])
+        moving = sitk.ReadImage(filepaths['moving'])
+
+        # Get a basic ImageFilter object.
+        IF = self._get_filter()
+
+        # Set the initial tranform on concatenated transforms.
+        if init_suffix:
+            key = f'transformix_{init_suffix}'
+            IF.SetInitialTransformParameterFileName(filepaths[key])
+
+        # Read and adapt the parameter map.
+        key = f'parameters_{curr_step}'
+        parmap = self._get_parmap(filepaths[key])
+        for k, v in parmap_overrides.items():
+            if isinstance(v, list):
+                parmap[k] = tuple([str(e) for e in v])
+            else:
+                parmap[k] = str(v),
+
+        # Set landmark files.
+        if uselandmarks:
+            IF.SetFixedPointSetFileName(filepaths['points_fixed'])
+            IF.SetMovingPointSetFileName(filepaths['points_moving'])
+
+        # Read and set the masks.
+        if filepaths['mask_fixed']:
+            if isinstance(filepaths['mask_fixed'], str):
+                fixed_mask = sitk.ReadImage(filepaths['mask_fixed'])
+                fixed_mask = sitk.Cast(fixed_mask, sitk.sitkUInt8)
+            IF.SetFixedMask(fixed_mask)
+        if filepaths['mask_moving']:
+            if isinstance(filepaths['mask_moving'], str):
+                moving_mask = sitk.ReadImage(filepaths['mask_moving'])
+                moving_mask = sitk.Cast(moving_mask, sitk.sitkUInt8)
+            IF.SetMovingMask(moving_mask)
+
+        # Run registration
+        IF = self._run_filter(IF, fixed, moving, parmap)
+
+        # Write the results.
+        outpaths = {
+            'result': filepaths[curr_step],
+            'elastix': filepaths[f'elastix_{curr_step}'],
+            'transformix': filepaths[f'transformix_{curr_step}'],
+        }
+        result = self._write_filter(parmap, IF, outpaths)
+
+        return IF, parmap, result
+
+
+
+
+    def apply(self, **kwargs):
+        """Apply mLSR3D to Live registration parameters."""
+
+        arglist = self._prep_step('apply', kwargs)
+        # NOTE: ITK is already multithreaded => n_workers = 1
+        # self.n_threads = 1  # min(self.tasks, multiprocessing.cpu_count())
+        self._n_workers = 1
+
+        with multiprocessing.Pool(processes=self._n_workers) as pool:
+            pool.starmap(self._apply_channel_timepoint, arglist)
+
+    def _apply_channel_timepoint(self, ch=0, tp=0):
+        """Apply mLSR3D to Live registration parameters to 3D dataset."""
+
+        inputs = self._prep_paths(self.inputs)
+        outputs = self._prep_paths(self.outputs, reps={'c': ch, 't': tp})
+        os.makedirs(outputs['regdir'], exist_ok=True)
+
+        fpath_moving = inputs['mLSR3D']
+        filestem = inputs['filestem']
+        suffix = self._registration_step or self.registration_steps[-1]
+        parpath = f'{filestem}_transformix_{suffix}.txt'
+
+        pars = self.prep_mLSR3D
+        pad = pars['pad']
+        th = pars['theta']
+        translate = pars['translate']
+        im, data, _ = self.read_image(fpath_moving, ch=ch, tp=tp, slc={}, pad=pad)
+        itk_props = self.im_to_itk_props(im, th, pad)
+        itk_props['origin'] += np.array(translate)
+
+        if True:
+            # Convert 3D input volume to nifti for transformix binary.
+            fpath_moving_nii = os.path.join(outputs['regdir'], 'tmp.nii.gz')
+            self.write_3d_as_nii(fpath_moving_nii, data, itk_props)
+            # Run transformix.
+            cmdlist = [
+                'transformix',
+                '-in', fpath_moving_nii,
+                '-out', outputs['regdir'],
+                '-tp', parpath,
+#                '-threads', f'{self.n_threads:d}',
+            ]
+            subprocess.call(cmdlist)
+
+        if False:
+            moving = self.data_to_itk(data, **itk_props)
+            tpMap = sitk.ReadParameterFile(parpath)
+            transformixImageFilter = sitk.TransformixImageFilter()
+            transformixImageFilter.SetTransformParameterMap(tpMap)
+            transformixImageFilter.SetMovingImage(moving)
+            transformixImageFilter.Execute()
+            data = sitk.GetArrayFromImage(transformixImageFilter.GetResultImage())
+
+            fpath_result = os.path.join(outputs['regdir'], 'result.nii.gz')
+            self.write_3d_as_nii(fpath_result, data, itk_props)
+            # TODO: write as ims
+
+        print(f'channel={ch}, timepoint={tp} done')
+
+
+
+
+    def postprocess(self, **kwargs):
+        """mLSR3D to Live registration."""
+
+        arglist = self._prep_step('postprocess', kwargs)
+
+        inputs = self._prep_paths(self.inputs, reps={'c': ch, 't': tp})
+        outputs = self._prep_paths(self.outputs, reps={'c': ch, 't': tp})
+        fpath_moving = inputs['mLSR3D']
+
+        fpath_result_nii = os.path.join(inputs['regdir'], 'result.nii')
+
+        # Get the number of channels and timepoints in the moving image.
+        im = Image(fpath_moving)
+        im.load()
+        nchannels, ntimepoints = im.dims[3], im.dims[4]
+        im.close()
+
+        # Load final-timepoint Imaris file for props and appending channels.
+        # NOTE: extract in Imaris from live-imaging file (Edit => Crop Time)
+        fpath_live = append_to_ims or fpath_fixed
+        mo = Image(fpath_live, permission='r+')
+        mo.load()
+        ch_offset = mo.dims[3]
+        props = mo.get_props2()
+        props = mo.squeeze_props(props, 4)  # squeeze props for czyx output
+        mo.close()
+
+        channels = self.channels or list(range(nchannels))
+        timepoints = self.timepoints or list(range(ntimepoints))
+        datas = []
+        for ch in channels:
+            for tp in timepoints:
+                pass
+
+
+        # Get the number of channels and timepoints in the moving image.
+        #im = Image(fpath_moving)
+        #im.load()
+        #nchannels = im.dims[3]
+        #ntimepoints = im.dims[4]
+        #im.close()
+        #ch, tp = np.unravel_index(idx, [nchannels, ntimepoints])
+
+
+        # Load final-timepoint Imaris file for props and appending channels.
+        # NOTE: extract in Imaris from live-imaging file (Edit => Crop Time)
+        fpath_live = append_to_ims or fpath_fixed
+        mo = Image(fpath_live, permission='r+')
+        mo.load()
+        ch_offset = mo.dims[3]
+        props = mo.get_props2()
+        props = mo.squeeze_props(props, 4)  # squeeze props for czyx output
+        mo.close()
+
+        # Load result from disk for concatenated volume.
+        im = Image(os.path.join(chandir, 'result.nii'), permission='r')
+        im.load()
+        data = np.clip(im.slice_dataset().transpose(), 0, 65535)
+        datas.append(data)
+        im.close()
+
+        # Write to new Imaris channel.
+        mo.create()
+        mo.close()
+        mo.load()
+        mo.slices[3] = slice(ch_offset + ch, ch_offset + ch + 1)
+        mo.write(unpad(data, {al: pad_fixed[al] for al in 'zyx'}.values()).astype('uint16'))
+        mo.close()
+
+        # Remove intermediates.
+        os.remove(fpath_moving_nii)
+        shutil.rmtree(chandir)
+
+
+        """
+        # Write to 4D czyx .h5 file.
+        datas = np.stack(datas)
+        props['shape'] = props['dims'] = datas.shape
+        props = transpose_props(props, 'czyx')
+        props['shape'] = props['dims']
+        props['slices'] = None
+        del props['path']
+        del props['permission']
+        mo = Image(f'{prefix_moving}_padded.h5/reg', permission='r+', **props)
+        mo.create()
+        mo.write(datas)
+        mo.close()
+        """
+
+    def load_ims(self, filepath):
+        # Load final-timepoint Imaris file for props and appending channels.
+        # NOTE: extract in Imaris from live-imaging file (Edit => Crop Time)
+        mo = Image(filepath, permission='r+')
+        mo.load()
+        ch_offset = mo.dims[3]
+        props = mo.get_props2()
+        props = mo.squeeze_props(props, 4)  # squeeze props for czyx output
+        mo.close()
+        return ch_offset, props, mo
+
+    def view(self):
+        pass
+
+
+class Registrat3r_CoAcq(Stapl3r):
     """Co-acquisition image registration."""
 
     def __init__(self, image_in='', parameter_file='', **kwargs):
 
+        if 'module_id' not in kwargs.keys():
+            kwargs['module_id'] = 'registration_coacq'
+
         super(Registrat3r, self).__init__(
             image_in, parameter_file,
-            module_id='registration',
             **kwargs,
             )
 
-        self._fun_selector = {
+        self._fun_selector.update({
             'estimate': self.estimate,
             'apply': self.apply,
             'postprocess': self.postprocess,
-            }
+            })
 
-        self._parallelization = {
+        self._parallelization.update({
             'estimate': ['filepaths'],
             'apply': ['filepaths'],
             'postprocess': [],
-            }
+            })
 
-        self._parameter_sets = {
+        self._parameter_sets.update({
             'estimate': {
                 'fpar': self._FPAR_NAMES,
                 'ppar': (),
@@ -157,10 +1229,10 @@ class Registrat3r(Stapl3r):
                 'ppar': (),
                 'spar': ('_n_workers',),
                 },
-            }
+            })
 
-        self._parameter_table = {
-            }
+        self._parameter_table.update({
+            })
 
         default_attr = {
             'filepat': '*_LR.czi',
@@ -200,7 +1272,7 @@ class Registrat3r(Stapl3r):
         lr = '{f}' + f'{self.LR_suffix}{ext}'
         hr = '{f}' + f'{self.HR_suffix}{ext}'
 
-        self._paths = {
+        self._paths.update({
             'estimate': {
                 'inputs': {
                     'lowres': lr,
@@ -228,7 +1300,7 @@ class Registrat3r(Stapl3r):
                 'outputs': {
                     },
                 },
-        }
+        })
 
         for step in self._fun_selector.keys():
             self.inputpaths[step]  = self._merge_paths(self._paths[step], step, 'inputs')
@@ -303,40 +1375,9 @@ class Registrat3r(Stapl3r):
             elastixImageFilter.SetFixedPointSetFileName(f"{filestem}_fixed.txt")
             elastixImageFilter.SetMovingPointSetFileName(f"{filestem}_moving.txt")
 
-        self._run_filter(elastixImageFilter, fixed, moving, parmap)
+        _ = self._run_filter(elastixImageFilter, fixed, moving, parmap)
 
         return parmap, elastixImageFilter
-
-    def _get_filter(self):
-        """Initiate an empty elastix filter."""
-
-        elastixImageFilter = sitk.ElastixImageFilter()
-        elastixImageFilter.LogToFileOn()
-        elastixImageFilter.LogToConsoleOn()
-
-        return elastixImageFilter
-
-    def _run_filter(self, elastixImageFilter, fixed, moving, parmap):
-        """Execute a filter after setting the images and parameters."""
-
-        elastixImageFilter.SetParameterMap(parmap)
-        elastixImageFilter.SetFixedImage(fixed)
-        elastixImageFilter.SetMovingImage(moving)
-        elastixImageFilter.Execute()
-
-    def _write_filter(self, parmap, IF, filestem, suffix):
-        """Write filter result and parameters to file."""
-
-        sitk.WriteParameterFile(parmap, f'{filestem}_elastix_{suffix}.txt')
-        transformParameterMap = IF.GetTransformParameterMap()
-        #transformParameterMap[0]['FinalBSplineInterpolationOrder'] = '1',
-        #transformParameterMap[0]['ResultImagePixelType'] = "uint16",
-        tfpath = f'{filestem}_transformix_{suffix}.txt'
-        sitk.WriteParameterFile(transformParameterMap[0], tfpath)
-        result = IF.GetResultImage()
-        sitk.WriteImage(result, f'{filestem}_{suffix}.nii.gz')
-
-        return result
 
     def apply(self, **kwargs):
         """Co-acquisition image registration."""
