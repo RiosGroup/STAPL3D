@@ -556,6 +556,17 @@ class Registrat3r(Stapl3r):
             data = np.delete(data, idxs, axis=axis)
         return data
 
+    def _get_shapes(self, filepath):
+        """Return zyx voxel and matrix size."""
+
+        im = Image(filepath)
+        im.load()
+        elsize = {d: im.elsize[im.axlab.index(d)] for d in 'zyx'}
+        shape = {d: im.dims[im.axlab.index(d)] for d in 'zyx'}
+        im.close()
+
+        return elsize, shape
+
 
 def load_itk_image(filepath, rl=0, ch=0, tp=0, slc={}, padding={}, flip=''):
     """Read a 3D volume and return in ITK format."""
@@ -943,14 +954,7 @@ def get_filter():
     elastixImageFilter.LogToConsoleOn()
 
     return elastixImageFilter
-    def _get_shapes(self, filepath):
-        """Return zyx voxel and matrix size."""
 
-        im = Image(filepath)
-        im.load()
-        elsize = {d: im.elsize[im.axlab.index(d)] for d in 'zyx'}
-        shape = {d: im.dims[im.axlab.index(d)] for d in 'zyx'}
-        im.close()
 
 def run_filter(elastixImageFilter, fixed, moving, parmap):
     """Execute a filter after setting the images and parameters."""
