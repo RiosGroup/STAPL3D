@@ -837,7 +837,6 @@ class Registrat3r_LSD(Registrat3r):
         outputs = self._prep_paths(self.outputs)
 
         filepaths = self._get_registration_filepaths(inputs, outputs)
-#        print(filepaths)
 
         for curr_step, overrides in self.registration_steps.items():
             self.run_registration(
@@ -958,14 +957,11 @@ class Registrat3r_LSD(Registrat3r):
 
         return IF, parmap, result
 
-
-
-
     def apply(self, **kwargs):
         """Apply mLSR3D to Live registration parameters."""
 
         arglist = self._prep_step('apply', kwargs)
-        # NOTE: ITK is already multithreaded => n_workers = 1
+        # NOTE: ITK (transformix) is already multithreaded => n_workers = 1
         # self.n_threads = 1  # min(self.tasks, multiprocessing.cpu_count())
         self._n_workers = 1
 
@@ -979,50 +975,52 @@ class Registrat3r_LSD(Registrat3r):
         outputs = self._prep_paths(self.outputs, reps={'c': ch, 't': tp})
         os.makedirs(outputs['regdir'], exist_ok=True)
 
-        fpath_moving = inputs['mLSR3D']
-        filestem = inputs['filestem']
-        suffix = self._registration_step or self.registration_steps[-1]
-        parpath = f'{filestem}_transformix_{suffix}.txt'
+        #filestem = inputs['filestem']
+        fpath_moving = inputs['mLSR3D'] or self.inputpaths['prepare']['mLSR3D']
+        fpath_fixed = inputs['live'] or self.inputpaths['prepare']['live']
+        filestem = inputs['filestem'] or os.path.splitext(fpath_fixed)[0]
+        suffix = self._registration_step or list(self.registration_steps.keys())[-1]
+        parpath = f'{filestem}_transformix_{suffix}.txt'  # "TransformParameters.0.txt"
 
-        pars = self.prep_mLSR3D
-        pad = pars['pad']
-        th = pars['theta']
-        translate = pars['translate']
-        im, data, _ = self.read_image(fpath_moving, ch=ch, tp=tp, slc={}, pad=pad)
-        itk_props = self.im_to_itk_props(im, th, pad)
-        itk_props['origin'] += np.array(translate)
+        _, data, _, itk_props = self.read_image(
+            fpath_moving,
+            **self.prep_mLSR3D['image'],
+            )
 
-        if True:
-            # Convert 3D input volume to nifti for transformix binary.
-            fpath_moving_nii = os.path.join(outputs['regdir'], 'tmp.nii.gz')
-            self.write_3d_as_nii(fpath_moving_nii, data, itk_props)
-            # Run transformix.
-            cmdlist = [
-                'transformix',
-                '-in', fpath_moving_nii,
-                '-out', outputs['regdir'],
-                '-tp', parpath,
-#                '-threads', f'{self.n_threads:d}',
-            ]
-            subprocess.call(cmdlist)
-
-        if False:
-            moving = self.data_to_itk(data, **itk_props)
-            tpMap = sitk.ReadParameterFile(parpath)
-            transformixImageFilter = sitk.TransformixImageFilter()
-            transformixImageFilter.SetTransformParameterMap(tpMap)
-            transformixImageFilter.SetMovingImage(moving)
-            transformixImageFilter.Execute()
-            data = sitk.GetArrayFromImage(transformixImageFilter.GetResultImage())
-
-            fpath_result = os.path.join(outputs['regdir'], 'result.nii.gz')
-            self.write_3d_as_nii(fpath_result, data, itk_props)
-            # TODO: write as ims
+        self._apply_with_binary(outputs['regdir'], parpath, data, itk_props)
+        # self._apply_with_python(outputs['regdir'], parpath, data, itk_props)  # FIXME
 
         print(f'channel={ch}, timepoint={tp} done')
 
+    def _apply_with_binary(self, regdir, parpath, data, itk_props):
 
+        # Convert 3D input volume to nifti for transformix binary.
+        fpath_moving_nii = os.path.join(regdir, 'tmp.nii.gz')
+        self.write_3d_as_nii(fpath_moving_nii, data, itk_props)
 
+        # Run transformix.
+        cmdlist = [
+            'transformix',
+            '-in', fpath_moving_nii,
+            '-out', regdir,
+            '-tp', parpath,
+            #'-threads', f'{self.n_threads:d}',
+        ]
+        subprocess.call(cmdlist)
+
+    def _apply_with_python(self, regdir, parpath, data, itk_props):
+
+        moving = self.data_to_itk(data, **itk_props)
+
+        tpMap = sitk.ReadParameterFile(parpath)
+        transformixImageFilter = sitk.TransformixImageFilter()
+        transformixImageFilter.SetTransformParameterMap(tpMap)
+        transformixImageFilter.SetMovingImage(moving)
+        transformixImageFilter.Execute()
+        data = sitk.GetArrayFromImage(transformixImageFilter.GetResultImage())
+
+        fpath_result = os.path.join(regdir, 'result.nii.gz')
+        self.write_3d_as_nii(fpath_result, data, itk_props)
 
     def postprocess(self, **kwargs):
         """mLSR3D to Live registration."""
