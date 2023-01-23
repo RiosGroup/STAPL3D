@@ -83,6 +83,10 @@ import yaml
 
 from glob import glob
 
+import matplotlib
+import matplotlib.pyplot as plt
+import matplotlib.gridspec as gridspec
+
 import numpy as np
 
 from scipy.special import expit
