@@ -1024,93 +1024,123 @@ class Registrat3r_LSD(Registrat3r):
         self.write_3d_as_nii(fpath_result, data, itk_props)
 
     def postprocess(self, **kwargs):
-        """mLSR3D to Live registration."""
+        """Gather outputs of mLSR3D to Live registration."""
 
         arglist = self._prep_step('postprocess', kwargs)
 
-        inputs = self._prep_paths(self.inputs, reps={'c': ch, 't': tp})
-        outputs = self._prep_paths(self.outputs, reps={'c': ch, 't': tp})
-        fpath_moving = inputs['mLSR3D']
-
-        fpath_result_nii = os.path.join(inputs['regdir'], 'result.nii')
+        outputs = self._prep_paths(self.outputs)
 
         # Get the number of channels and timepoints in the moving image.
+        fpath_fixed = self.inputpaths['prepare']['live']  # FIXME: get it from the right location
+        fpath_moving = self.inputpaths['prepare']['mLSR3D']  # FIXME: get it from the right location
+
         im = Image(fpath_moving)
         im.load()
         nchannels, ntimepoints = im.dims[3], im.dims[4]
         im.close()
 
-        # Load final-timepoint Imaris file for props and appending channels.
-        # NOTE: extract in Imaris from live-imaging file (Edit => Crop Time)
-        fpath_live = append_to_ims or fpath_fixed
-        mo = Image(fpath_live, permission='r+')
-        mo.load()
-        ch_offset = mo.dims[3]
-        props = mo.get_props2()
-        props = mo.squeeze_props(props, 4)  # squeeze props for czyx output
-        mo.close()
-
         channels = self.channels or list(range(nchannels))
         timepoints = self.timepoints or list(range(ntimepoints))
+
         datas = []
-        for ch in channels:
-            for tp in timepoints:
-                pass
+        for tp in timepoints:
+            data_tp = []
+            for ch in channels:
 
+                # Get the path to the single-channel result nifti
+                inputs = self._prep_paths(self.inputs, reps={'c': ch, 't': tp})
+                fpath_result_nii = os.path.join(inputs['regdir'], 'result.nii')
+                # FIXME: this is for binary transformix
 
-        # Get the number of channels and timepoints in the moving image.
-        #im = Image(fpath_moving)
-        #im.load()
-        #nchannels = im.dims[3]
-        #ntimepoints = im.dims[4]
-        #im.close()
-        #ch, tp = np.unravel_index(idx, [nchannels, ntimepoints])
+                # Load result from disk for concatenated volume.
+                im = Image(fpath_result_nii, permission='r')
+                im.load()
+                data = np.clip(im.slice_dataset().transpose(), 0, 65535)
+                # FIXME: assuming uint16, xyz
+                im.close()
 
+                data_tp.append(data)
 
-        # Load final-timepoint Imaris file for props and appending channels.
-        # NOTE: extract in Imaris from live-imaging file (Edit => Crop Time)
-        fpath_live = append_to_ims or fpath_fixed
-        mo = Image(fpath_live, permission='r+')
-        mo.load()
-        ch_offset = mo.dims[3]
-        props = mo.get_props2()
-        props = mo.squeeze_props(props, 4)  # squeeze props for czyx output
-        mo.close()
+                # Remove intermediates.
+                #os.remove(fpath_moving_nii)
+                #shutil.rmtree(inputs['regdir'])
 
-        # Load result from disk for concatenated volume.
-        im = Image(os.path.join(chandir, 'result.nii'), permission='r')
+            data_tp = np.stack(data_tp, axis=3)
+            datas.append(data_tp)
+
+        datas = np.stack(datas, axis=4)  # zyxct
+
+        if outputs['h5']:
+            self._write_h5(outputs['h5'], fpath_fixed, datas)
+        if outputs['ims']:
+            self._write_ims(outputs['ims'], fpath_fixed, datas)
+
+    def _write_h5(self, filepath_out, filepath_ref, datas, axislabels_out='czyx'):
+        """Write registration results to hdf5."""
+
+        # Get output props
+        im = Image(filepath_ref, permission='r')
         im.load()
-        data = np.clip(im.slice_dataset().transpose(), 0, 65535)
-        datas.append(data)
+        props = im.get_props()
+
+        # zyxct to czyx  # TODO: other options
+        if 't' not in axislabels_out:
+            props = im.squeeze_props(props, 4)
+        props['shape'] = datas.shape[:len(axislabels_out)]
+        props = transpose_props(props, axislabels_out)
+
+        data = np.moveaxis(datas[:, :, :, :, 0], 3, 0)
+
+        props['slices'] = None
         im.close()
 
-        # Write to new Imaris channel.
+        # Write to hdf5 file.
+        mo = Image(filepath_out, permission='r+', **props)
         mo.create()
+        mo.write(data)
         mo.close()
+
+    def _write_ims(self, filepath_out, filepath_ims, datas):
+        """Write registration results to Imaris."""
+
+        from stapl3d import imarisfiles
+
+        # Create empty ref and copy it to outfile.
+        suffix_ref = '_ref'
+        imarisfiles.create_ref(filepath_ims, suffix_ref)
+        filepath_ref = filepath_ims.replace('.ims', f'{suffix_ref}.ims')
+        shutil.copy2(filepath_ref, filepath_out)
+
+        mo = Image(filepath_out, permission='r+')
         mo.load()
-        mo.slices[3] = slice(ch_offset + ch, ch_offset + ch + 1)
-        mo.write(unpad(data, {al: pad_fixed[al] for al in 'zyx'}.values()).astype('uint16'))
+
+        # First write the final-timepoint channels of live imaging
+        im = Image(filepath_ims, permission='r')
+        im.load()
+        im.slices[4] = slice(im.dims[4] - 1, im.dims[4])
+        for ch in range(im.dims[3]):
+            im.slices[3] = slice(ch, ch + 1)
+            if ch != 0:
+                mo.create()
+            mo.write(im.slice_dataset())
+
+        # Add the coregistration results.
+        pad_fixed = self.prep_mLSR3D['image']['transform']['pad']
+        pad_width = {al: pad_fixed[al] for al in 'zyx'}.values()
+        for ch_reg in range(datas.shape[3]):
+            mo.create()
+            data = unpad(datas[:, :, :, ch_reg, 0], pad_width).astype('uint16')
+            mo.write(data)
         mo.close()
 
-        # Remove intermediates.
-        os.remove(fpath_moving_nii)
-        shutil.rmtree(chandir)
+        # Set vizualization attributes.
+        for ch in range(im.dims[3]):
+            ch_dict = imarisfiles.ims_get_attr(filepath_ims, ch)
+            imarisfiles.ims_set_attr(filepath_out, ch, ch_dict)
 
-
-        """
-        # Write to 4D czyx .h5 file.
-        datas = np.stack(datas)
-        props['shape'] = props['dims'] = datas.shape
-        props = transpose_props(props, 'czyx')
-        props['shape'] = props['dims']
-        props['slices'] = None
-        del props['path']
-        del props['permission']
-        mo = Image(f'{prefix_moving}_padded.h5/reg', permission='r+', **props)
-        mo.create()
-        mo.write(datas)
-        mo.close()
-        """
+        ch_dict = imarisfiles.ims_get_attr(filepath_ims, ch=self.prep_live['image']['channel'])
+        for ch_reg in range(datas.shape[3]):
+            imarisfiles.ims_set_attr(filepath_out, ch + ch_reg, ch_dict)
 
     def load_ims(self, filepath):
         # Load final-timepoint Imaris file for props and appending channels.
