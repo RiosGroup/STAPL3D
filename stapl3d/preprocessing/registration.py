@@ -88,7 +88,7 @@ import numpy as np
 from scipy.special import expit
 
 from skimage.io import imread, imsave
-from skimage.filters import gaussian, median
+from skimage.filters import gaussian, median, threshold_otsu
 from skimage.transform import resize
 from skimage.morphology import disk
 
