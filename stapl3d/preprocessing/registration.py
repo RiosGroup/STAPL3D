@@ -507,6 +507,8 @@ class Registrat3r_LSD(Registrat3r):
 
     def _init_paths_lsd(self):
 
+        regpat = os.path.join('reg', 'ch{c:02d}_tp{t:03d}')
+
         self._paths.update({
             'prepare': {
                 'inputs': {
@@ -556,16 +558,17 @@ class Registrat3r_LSD(Registrat3r):
                     },
                 'outputs': {
                     'filestem': '',
-                    'regdir': 'reg/ch{c:02d}_tp{t:03d}',
+                    'regdir': regpat,
                     'append_to_ims': '',
                     },
             },
             'postprocess': {
                 'inputs': {
-                    'regdir': 'reg/ch{c:02d}_tp{t:03d}',
+                    'regdir': regpat,
                     },
                 'outputs': {
-                    'out': 'reg/ch{c:02d}_tp{t:03d}/reg.nii.gz',
+                    'h5': '',
+                    'ims': '',
                     },
                 },
         })
