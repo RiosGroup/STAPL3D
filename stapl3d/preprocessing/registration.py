@@ -980,7 +980,8 @@ class Registrat3r_LSD(Registrat3r):
         fpath_fixed = inputs['live'] or self.inputpaths['prepare']['live']
         filestem = inputs['filestem'] or os.path.splitext(fpath_fixed)[0]
         suffix = self._registration_step or list(self.registration_steps.keys())[-1]
-        parpath = f'{filestem}_transformix_{suffix}.txt'  # "TransformParameters.0.txt"
+        parpath = "TransformParameters.0.txt"  # f'{filestem}_transformix_{suffix}.txt
+        # FIXME: write this file to {filestem}_transformix_{}.txt
 
         _, data, _, itk_props = self.read_image(
             fpath_moving,
