@@ -1163,7 +1163,7 @@ class Registrat3r_LSD(Registrat3r):
         mo.close()
         return ch_offset, props, mo
 
-    def view(self, inputs):
+    def view(self, inputs, channel_axis=None):
 
         import napari
 
@@ -1173,10 +1173,7 @@ class Registrat3r_LSD(Registrat3r):
             im.load()
             data = im.slice_dataset()
             im.close
-            viewer.add_image(data)
-
-    def view_apply(self):
-
+            viewer.add_image(data, channel_axis=channel_axis)
 
 class Registrat3r_CoAcq(Stapl3r):
     """Co-acquisition image registration."""
