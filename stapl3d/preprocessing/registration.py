@@ -917,11 +917,6 @@ class Registrat3r_LSD(Registrat3r):
         # Get a basic ImageFilter object.
         IF = self._get_filter()
 
-        # Set the initial tranform on concatenated transforms.
-        if init_suffix:
-            key = f'transformix_{init_suffix}'
-            IF.SetInitialTransformParameterFileName(filepaths[key])
-
         # Read and adapt the parameter map.
         key = f'parameters_{curr_step}'
         parmap = self._get_parmap(filepaths[key])
@@ -930,6 +925,13 @@ class Registrat3r_LSD(Registrat3r):
                 parmap[k] = tuple([str(e) for e in v])
             else:
                 parmap[k] = str(v),
+
+        # Set the initial tranform on concatenated transforms.
+        if init_suffix:
+            key = f'transformix_{init_suffix}'
+            IF.SetInitialTransformParameterFileName(filepaths[key])
+            parmap['InitialTransformParametersFileName'] = filepaths[key],
+            # FIXME This may reset at: tpMap = IF.GetTransformParameterMap()???!!!
 
         # Set landmark files.
         if uselandmarks:
@@ -2056,13 +2058,14 @@ def run_registration(fixed, moving, filestem, suffix, parpath, uselandmarks=Fals
 
     elastixImageFilter = get_filter()
 
-    if init_suffix:
-        elastixImageFilter.SetInitialTransformParameterFileName(f"{filestem}_transformix_{init_suffix}.txt")
-
     if parpath in ['rigid', 'affine', 'bspline']:
         parmap = sitk.GetDefaultParameterMap(parpath)
     else:
         parmap = sitk.ReadParameterFile(parpath)
+
+    if init_suffix:
+        elastixImageFilter.SetInitialTransformParameterFileName(f"{filestem}_transformix_{init_suffix}.txt")
+        parmap['InitialTransformParametersFileName'] = f"{filestem}_transformix_{init_suffix}.txt",
 
     if uselandmarks:
         elastixImageFilter.SetFixedPointSetFileName(f"{filestem}_fixed.txt")
