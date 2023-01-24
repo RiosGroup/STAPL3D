@@ -1163,8 +1163,19 @@ class Registrat3r_LSD(Registrat3r):
         mo.close()
         return ch_offset, props, mo
 
-    def view(self):
-        pass
+    def view(self, inputs):
+
+        import napari
+
+        viewer = napari.Viewer()
+        for inputfile in inputs:
+            im = Image(inputfile)
+            im.load()
+            data = im.slice_dataset()
+            im.close
+            viewer.add_image(data)
+
+    def view_apply(self):
 
 
 class Registrat3r_CoAcq(Stapl3r):
