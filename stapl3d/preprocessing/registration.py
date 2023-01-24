@@ -577,6 +577,10 @@ class Registrat3r_LSD(Registrat3r):
             self.inputpaths[step]  = self._merge_paths(self._paths[step], step, 'inputs')
             self.outputpaths[step] = self._merge_paths(self._paths[step], step, 'outputs')
 
+        self.inputpaths['prepare']['data'] = self.inputpaths['prepare']['mLSR3D']
+        self.inputpaths['apply']['data'] = self.inputpaths['prepare']['mLSR3D']
+        # FIXME: this is a temp workaround for poor implementation of _get_arglist
+
     def prepare(self, **kwargs):
         """Prepare datasets for mLSR3D to Live registration."""
 
