@@ -1036,10 +1036,14 @@ class Registrat3r_LSD(Registrat3r):
 
         outputs = self._prep_paths(self.outputs)
 
-        # Get the number of channels and timepoints in the moving image.
         fpath_fixed = self.inputpaths['prepare']['live']  # FIXME: get it from the right location
         fpath_moving = self.inputpaths['prepare']['mLSR3D']  # FIXME: get it from the right location
 
+        filestem = fpath_fixed.replace('.ims', '')
+        output_h5 = outputs['h5'] or f'{filestem}_padded.h5/reg'
+        output_ims = outputs['ims'] or f'{filestem}_reg.ims'
+
+        # Get the number of channels and timepoints in the moving image.
         im = Image(fpath_moving)
         im.load()
         nchannels, ntimepoints = im.dims[3], im.dims[4]
@@ -1076,9 +1080,9 @@ class Registrat3r_LSD(Registrat3r):
 
         datas = np.stack(datas, axis=4)  # zyxct
 
-        if outputs['h5']:
+        if output_h5:
             self._write_h5(outputs['h5'], fpath_fixed, datas)
-        if outputs['ims']:
+        if output_ims:
             self._write_ims(outputs['ims'], fpath_fixed, datas)
 
     def _write_h5(self, filepath_out, filepath_ref, datas, axislabels_out='czyx'):
