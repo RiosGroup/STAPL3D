@@ -9,6 +9,8 @@ source "${HOME}/.stapl3d.ini" && load_stapl3d_config
 
 projectdir='/hpc/pmc_rios/mkleinnijenhuis/Kidney'
 projectdir='/hpc/pmc_rios/Kidney'
+projectdir='/hpc/pmc_rios/mkleinnijenhuis/1.projects/TEST'
+dataset='HFK16w'
 dataset='190910_rl57_fungi_16bit_25x_125um_corr-stitching'
 # dataset='200706_AP_P30T_LSR3D_25x_150um'
 # dataset='190921_P25T_RL57_FUnGI_16Bit_25x'
@@ -44,10 +46,42 @@ for blockstem in "${blockstems[@]}"; do
 done
 
 
+
+
+
+###==========================================================================###
+### analysis preparation: HFK16w
+
+source "${HOME}/.stapl3d.ini" && load_stapl3d_config
+
+projectdir='/hpc/pmc_rios/mkleinnijenhuis/1.projects/TEST'
+dataset='HFK16w'
+load_dataset "${projectdir}" "${dataset}"
+parfile="${dataset}.yml"
+load_parameters "${dataset}" -v "${parfile}"  # FIXME: dims not loaded
+
+C=2
+Z=106
+nb=64
+set_blockstems "$dataset"
+echo "${blockstems[@]}"
+# FIXME: '$dataset' not included in <>.sh => because image_in is not defined
+image_in='HFK16w.czi'
+
+
+idx=0
+image_in='HFK16w.czi'
+parfile='HFK16w.yml'
+from stapl3d.preprocessing import shading
+deshad3r = shading.Deshad3r(image_in, parfile)
+deshad3r.postprocess(channels=[idx])
+
+
 ###==========================================================================###
 ### preprocessing
 jid=''
 submit $( generate_script shading estimate ) $jid
+submit $( generate_script shading process ) $jid
 submit $( generate_script shading postprocess ) $jid
 submit $( generate_script shading apply ) $jid
 

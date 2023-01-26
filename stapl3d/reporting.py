@@ -81,6 +81,7 @@ def get_centreslice(image_in, ids, dim='z', ch=0, tp=0):
     return data
 
 
+
 def gen_orthoplot(f, gs, size_xy=5, size_z=1):
     """Create axes on a subgrid to fit three orthogonal projections."""
 
@@ -97,6 +98,34 @@ def gen_orthoplot(f, gs, size_xy=5, size_z=1):
     axs.append(f.add_subplot(gs_sub[:size_xy, size_xy:], sharey=axs[0]))
 
     return axs
+
+
+def gen_orthoplot_meh(f, gs, size_xy=5, size_z=1):
+    """Create axes on a subgrid to fit three orthogonal projections."""
+
+    axs = []
+    size_t = size_xy + size_z
+
+    gs_sub = gs.subgridspec(size_t, size_t)
+
+    # full histogram
+    ax = axdict['histogram']
+
+    ax.hist(np.ravel(image), bins=256, log=logscale, color=[0, 0, 0])
+    ax.set_xlim([0, dmax])
+
+
+    # smoothed image histogram with thresholds
+    ax = axdict['histogram smoothed image']
+    ax.hist(np.ravel(image_smooth), bins=256, log=logscale, color=[0, 0, 0])
+    linestyles = '--:'
+    if info_dict['threshold_otsu'] is None:
+        thresholds = thresholds[:2]
+        linestyles = linestyles[:2]
+        thrcolors = thrcolors[:2]
+    labels = ['{:.5}'.format(float(thr)) for thr in thresholds]
+    self._draw_thresholds(ax, thresholds, thrcolors, linestyles, labels)
+
 
 
 def gen_orthoplot_with_colorbar(f, gs, cbar='vertical', idx=0, add_profile_insets=False):

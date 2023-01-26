@@ -6,26 +6,84 @@ channels:
 dependencies:
   - python=3
   - pip
-  - cython
   - jupyter
-  - matplotlib
+  - ipykernel
   - seaborn
   - numpy<=1.21  # For numba in scanpy
-  - scipy
   - pandas
   - pypdf2
   - pyyaml
   - h5py
   - mpi4py
-  - scikit-image
   - scikit-learn
   - pydantic!=1.10.0  # https://pullanswer.com/questions/typeerror-unhashable-type-color-during-qt-resource-compilation
   - napari
   - tifffile
   - czifile
-  - readlif
   - nibabel
   - simpleitk
   - stardist
   - scanpy
   - leidenalg
+  - pip:
+    - .
+     - git+git://github.com/RiosGroup/scikit-image.git#egg=scikit-image
+     - git+git://github.com/RiosGroup/reaflif.git#egg=readlif
+
+#  - umap
+#  - plotly
+#  - structure_tensor
+#  - python-bioformats
+
+# conda remove -n stapl3d --all
+# conda env create -f environment.yml
+# conda activate stapl3d
+# pip install .  # conda develop .
+# python -m ipykernel install --user --name=stapl3d
+
+
+# FROM stapl3d_test:
+
+# name: stapl3d-test
+# channels:
+#   - conda-forge
+#   - defaults
+#   - nvidia
+#   - pytorch
+# dependencies:
+#   - python=3.8.5
+#   - h5py
+#   - matplotlib
+#   - numpy
+#   - pyyaml
+#   - scipy
+#   - pandas
+#   - pypdf2
+#   - cython
+#   - pip
+#   - scikit-image
+#   - docutils==0.17.1
+#   - jupyter
+#   - cudatoolkit=11.0.*
+#   - cudnn=8.0.*
+#   - pytorch
+#   - tensorboard
+#   - setuptools 59.5.0
+#   - scipy
+#   - pytest
+#   - seaborn
+#   - scikit-learn
+#   - statsmodels
+#   - numba
+#   - pytables
+#   - python-igraph
+#   - leidenalg
+#   - pip:
+#      - czifile>=2019.7.2
+#      - readlif>=0.2.1
+#      - nibabel>=3.1.0
+#      - 'napari[all]'
+#      - tensorflow==2.4.*
+#      - csbdeep
+#      - stardist
+#      - scanpy

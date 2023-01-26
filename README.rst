@@ -56,7 +56,7 @@ This software runs on Linux, MacOS and Windows. It has been tested on:
  - Windows: 10 Pro
 
 dependencies:
-Python (auto-installed through with conda or pip)
+Python (auto-installed through conda or pip)
 
  - python>=3.8
  - scikit-image
@@ -77,6 +77,11 @@ Other software packages:
  - `ACME <https://wiki.med.harvard.edu/SysBio/Megason/ACME>`_
  - `Ilastik <https://www.ilastik.org/documentation/basics/installation.html>`_ (optional)
  - `Fiji <https://imagej.net/downloads>`_ (optional)
+ - elastiX version of simpleitk
+ - Stardist
+ - PyTorch-3DUNET
+ - hyperopt (+ mongoDB)
+ - napari #pip install napari[all]
 
 
 Installation
@@ -100,10 +105,45 @@ Getting started
 
 Demos
 *****
-`Jupyter notebooks <https://jupyter-notebook-beginner-guide.readthedocs.io/en/latest/index.html>`_ are provided in the demos directory to showcase the basic functionality of STAPL-3D. The data for the demo (~6GB) can be downloaded `here <https://surfdrive.surf.nl/files/index.php/s/Q9wRT5cyKGERxI5>`_.
- - preprocessing_demo (runtime: 20 min)
- - segmentation_demo (runtime: 20 min)
- - feature_extraction_demo (runtime: 10 min)
+`Jupyter notebooks <https://jupyter-notebook-beginner-guide.readthedocs.io/en/latest/index.html>`_ are provided in the demos directory to showcase the basic functionality of STAPL-3D. 
+# The data for the demo (~6GB) can be downloaded `here <https://surfdrive.surf.nl/files/index.php/s/Q9wRT5cyKGERxI5>`_.
+FIXME: demo data download resolves czi to HFK16w_2ch-stack.czi, but HFK16w.czi is expected.
+
+.. list-table::
+   :widths: 25 25 25
+   :header-rows: 1
+
+   * - Demo Jupyter Notebooks
+     - Binders
+     - Duration
+   * - \1. Equalization
+     - |Binder Badge|
+     - \10 minutes
+   * - \2. Preprocessing
+     - |Binder Badge|
+     - \20 minutes
+   * - \3. Segmentation
+     - |Binder Badge|
+     - \20 minutes
+   * - \4. Feature extraction
+     - |Binder Badge|
+     - \10 minutes
+
+.. |Binder Badge| image:: http://mybinder.org/badge_logo.svg
+   :target: http://mybinder.org/v2/gh/binder-examples/conda_environment/master?filepath=index.ipynb
+   :alt: Binder Badge
+
+.. |Binder Badge| image:: http://mybinder.org/badge_logo.svg
+   :target: http://mybinder.org/v2/gh/binder-examples/conda_environment/master?filepath=index.ipynb
+   :alt: Binder Badge
+
+.. |Binder Badge| image:: http://mybinder.org/badge_logo.svg
+   :target: http://mybinder.org/v2/gh/binder-examples/conda_environment/master?filepath=index.ipynb
+   :alt: Binder Badge
+
+.. |Binder Badge| image:: http://mybinder.org/badge_logo.svg
+   :target: http://mybinder.org/v2/gh/binder-examples/conda_environment/master?filepath=index.ipynb
+   :alt: Binder Badge
 
 If you installed STAPL-3D using conda, you can start a notebook in the stapl3d enviroment as follows:
 
