@@ -38,6 +38,7 @@ setup(
         'Programming Language :: Python :: 3.7',
     ],
     test_suite='tests',
+    python_requires='>=3.8',
     install_requires=[],  # FIXME: add your package's dependencies to this list
     setup_requires=[
         # dependency for `python setup.py test`
@@ -56,3 +57,11 @@ setup(
         'dev':  ['prospector[with_pyroma]', 'yapf', 'isort'],
     }
 )
+
+#exec(open('pytorch3dunet/__version__.py').read())
+#setup(
+#    entry_points={'console_scripts': [
+#        'train3dunet=pytorch3dunet.train:main',
+#        'predict3dunet=pytorch3dunet.predict:main']
+#        }
+#)
