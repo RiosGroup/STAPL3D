@@ -19,6 +19,8 @@ import numpy as np
 
 import pandas as pd
 
+from scipy.stats import kurtosis, skew
+
 from skimage.measure import regionprops, regionprops_table
 
 from stapl3d import parse_args, Stapl3r, Image, LabelImage
@@ -483,6 +485,10 @@ class Featur3r(Block3r):
             extra_properties += [median_intensity]
         if 'variance_intensity' in features:
             extra_properties += [variance_intensity]
+        if 'skewness_intensity' in features:
+            extra_properties += [skewness_intensity]
+        if 'kurtosis_intensity' in features:
+            extra_properties += [kurtosis_intensity]
         if 'quantile95_intensity' in features:
             extra_properties += [quantile95_intensity]
 
@@ -894,6 +900,14 @@ def median_intensity(image, intensity_image):
 
 def variance_intensity(image, intensity_image):
     return np.var(intensity_image[image])
+
+
+def skewness_intensity(image, intensity_image):
+    return skew(intensity_image[image])
+
+
+def kurtosis_intensity(image, intensity_image):
+    return kurtosis(intensity_image[image])
 
 
 def quantile95_intensity(image, intensity_image):
