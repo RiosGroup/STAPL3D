@@ -48,6 +48,7 @@ done
 ### preprocessing
 jid=''
 submit $( generate_script shading estimate ) $jid
+submit $( generate_script shading process ) $jid
 submit $( generate_script shading postprocess ) $jid
 submit $( generate_script shading apply ) $jid
 
