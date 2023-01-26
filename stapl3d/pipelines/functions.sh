@@ -1873,6 +1873,17 @@ function get_py_stardist_merge {
 function get_cmd_stardist_merge { get_cmd ; }
 
 
+function get_py_torch {
+    echo "from stapl3d import stapl3d_torch"
+    echo "torch3r = stapl3d_torch.Torch3r(image_in, parameter_file)"
+}
+function get_py_torch_train {
+    get_py_header
+    get_py_torch
+    echo "torch3r.${step}()"
+}
+function get_cmd_torch_train { get_cmd "" ; }
+
 
 
 function get_cmd_unet3d_memb_train {
