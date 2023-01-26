@@ -56,7 +56,7 @@ This software runs on Linux, MacOS and Windows. It has been tested on:
  - Windows: 10 Pro
 
 dependencies:
-Python (auto-installed through with conda or pip)
+Python (auto-installed through conda or pip)
 
  - python>=3.8
  - scikit-image
