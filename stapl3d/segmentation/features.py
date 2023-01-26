@@ -90,7 +90,7 @@ class Featur3r(Block3r):
 
         default_attr = {
             'blocks': [],
-            'compartments': [],
+            'compartments': {},
             'channels': {},
             'filter_borderlabels': True,
             'morphological_features': 'minimal',
