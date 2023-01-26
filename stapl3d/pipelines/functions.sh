@@ -1013,6 +1013,7 @@ function set_submit_pars {
 
     # Generate array job specifier.
     #    Switch between parallelization modes.
+    # TODO: parallelization modes in plural to conform to Python pipeline
     case "${submit_pars[0]}" in
         'no')
             array_stop="1"
@@ -1211,7 +1212,7 @@ function get_py_general_LOCAL {
 function get_py_general_SLURM {
     get_py_header
     eval get_py_${stage}
-    echo "${stage}.${step}(blocks=[idx])"
+    echo "${stage}.${step}(${submit_pars[0]}=[idx])"
 }
 function get_py_general_SGE {
     get_py_header
