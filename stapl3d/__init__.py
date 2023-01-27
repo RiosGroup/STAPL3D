@@ -3716,6 +3716,14 @@ class Stapl3r(object):
                         zipsel = zipsels[i]
                         slices = self._get_additional_block_slices(block, zipsel, axlab)
                         block_ds = self.read_blockdata(block, zipsel, ids, axlab, slices)
+                    elif ids == 'raw':  # TMP for stacks
+                        from stapl3d import blocks
+                        block3r_raw = blocks.Block3r('{f}.czi')
+                        block_raw = block3r_raw._blocks[block.idx]
+                        block_raw.create_dataset('raw')
+                        block_ds = block_raw.datasets['raw']
+                        block_ds.read(from_source=True)  # TODO: read only required channels!
+                        slices = block_ds.slices  # TODO: CHECK!!!
                     else:
                         block.create_dataset(ids)
                         block_ds = block.datasets[ids]
@@ -3752,8 +3760,9 @@ class Stapl3r(object):
                         labelval=1, dtype='uint8', thickness=1,
                         )
                 else:
-                    name = f'{block.id}_{ids}'
-                    starts = [slc.start for al, slc in slices.items()]
+                    name = f'{block.id}_{ids}'  # TODO: name base as argument
+                    name = f'{ids}'
+                    starts = [slc.start for al, slc in slices.items() if al in 'zyx']
                     data = block_ds.image.ds
 
                 affine = np.copy(get_affine([0, 0, 0], elsize, starts))
@@ -3764,10 +3773,14 @@ class Stapl3r(object):
                 # plot
                 if ids in images:
                     #self.viewer.add_image(data, name=name, scale=elsize, affine=affine)
-                    self.viewer.add_image(data, name=name, affine=affine)
+                    if data.ndim == 4:
+                        for i in range(data.shape[3]):
+                            self.viewer.add_image(data[:, :, :, i], name=f'{name}_ch{i}', affine=affine)
+                    else:
+                        self.viewer.add_image(data, name=name, affine=affine)
                     # set equal clim
-                    clim = self.viewer.layers[f'{block0.id}_{ids}'].contrast_limits
-                    self.viewer.layers[f'{block.id}_{ids}'].contrast_limits = clim
+                    #clim = self.viewer.layers[f'{block0.id}_{ids}'].contrast_limits
+                    #self.viewer.layers[name].contrast_limits = clim
                 else:
                     #self.viewer.add_labels(data, name=name, scale=elsize, affine=affine)
                     self.viewer.add_labels(data, name=name, affine=affine)
