@@ -1246,10 +1246,10 @@ function write_pyfile {
     pyfile="${datadir}/${jobname}.py"
     eval get_py_${stage}_${step} > "${pyfile}"
 }
-function write_pyfile {
-    pyfile="${datadir}/${jobname}.py"
-    eval get_py_general_${compute_env} > "${pyfile}"
-}
+# function write_pyfile {
+#     pyfile="${datadir}/${jobname}.py"
+#     eval get_py_general_${compute_env} > "${pyfile}"
+# }
 
 
 function echo_pyfile {
@@ -1296,8 +1296,8 @@ function get_py_header {
     echo 'parameter_file = sys.argv[2]'
     echo 'if len(sys.argv) > 3:'
     echo '    idx = int(sys.argv[3])'
-    # echo 'if len(sys.argv) > 4:'
-    # echo '    idx2 = int(sys.argv[4])'
+    echo 'if len(sys.argv) > 4:'
+    echo '    idx2 = int(sys.argv[4])'
 
 }
 
@@ -1305,27 +1305,31 @@ function get_py_header {
 function get_py_shading {
     echo ''
     echo "from stapl3d.preprocessing import shading"
-    echo "deshader = shading.Deshader(image_in, parameter_file)"
+    echo "deshad3r = shading.Deshad3r(image_in, parameter_file)"
 }
 function get_py_shading_estimate {
     get_py_header
     get_py_shading
-    # echo "deshader.${step}(channels=[idx], planes=[idx2])"
-    echo "deshader.${step}(planes=[idx])"
+    echo "deshad3r.${step}(planes=[idx])"
 }
-# FIXME: too much io overhead for plane*channel paralellization
-# function get_cmd_shading_estimate { get_cmd "\${ch_idx}" "\${pl_idx}" ; }
 function get_cmd_shading_estimate { get_cmd "\${idx}" ; }
 function get_py_shading_postprocess {
     get_py_header
     get_py_shading
-    echo "deshader.${step}(channels=[idx])"
+    echo "deshad3r.${step}(channels=[idx])"
 }
 function get_cmd_shading_postprocess { get_cmd "\${idx}" ; }
+function get_py_shading_postprocess {
+    get_py_header
+    get_py_shading
+    echo "deshad3r.${step}()"
+}
+function get_cmd_shading_postprocess { get_cmd "" ; }
+
 function get_py_shading_apply {
     get_py_header
     get_py_shading
-    echo "deshader.${step}(stacks=[idx])"
+    echo "deshad3r.${step}(stacks=[idx])"
 }
 function get_cmd_shading_apply { get_cmd "\${idx}" ; }
 
