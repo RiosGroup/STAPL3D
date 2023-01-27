@@ -242,12 +242,12 @@ class Deshad3r(Stapl3r):
         dstack = read_tiled_plane(fp, channel, plane)
         out = {}
         for axis in [0, 1]:
-            dstacked = np.concatenate(dstack, axis=0)
+            dstacked = np.concatenate(dstack, axis=axis)
             ma_data = np.ma.masked_array(dstacked, dstacked < self.noise_threshold)
             if self.metric == 'median':
-                out[axis] = np.ma.median(ma_data, axis=0)
+                out[axis] = np.ma.median(ma_data, axis=axis)
             else:
-                out[axis] = np.ma.mean(ma_data, axis=0)
+                out[axis] = np.ma.mean(ma_data, axis=axis)
 
         np.savez(outputs['metrics'], X=out[1], Y=out[0])
 
@@ -279,7 +279,11 @@ class Deshad3r(Stapl3r):
             """Select, normalize and fit profiles; and save for report."""
 
             sel, dm, z_sel = select_z_range(meds, q_thr)
-            m, n, nm = normalize_profile(sel)
+            #dm = np.median(meds, axis=1)
+            #z_sel = np.array(range(0, 16))
+            #sel = meds[z_sel, :]
+
+            m, n, nm = normalize_profile(meds)
             f, fn = fit_profile(nm, order)
 
             np.savez(outputpath,
@@ -361,12 +365,36 @@ class Deshad3r(Stapl3r):
         inputs = self.inputs
         outputs = self.outputs
 
-        iminfo = get_image_info(self.image_in)
+        if '{f}' in self.image_in:
+
+            # TODO: self.filepaths implementation
+            # TODO: write to blocks...?
+            import re
+            mat = '*'
+            pat = r"{[^{}]+}"
+            foo = re.sub(pat, mat, self.image_in)
+            fps = sorted(glob(os.path.abspath(foo)))
+            image_in = fps[stack]
+            inputs['data'] = image_in
+            dir, filestem = os.path.split(os.path.splitext(image_in)[0])
+            ods = 'data'
+            outpath = os.path.join(dir, 'blocks', f'{filestem}.h5/{ods}')
+            stack = 0
+        else:
+
+            image_in = self.image_in
+
+        iminfo = get_image_info(image_in)
         out = create_output(None, iminfo['zstack_shape'], iminfo['dtype'])
 
         # Get stack data (CZYX)  # TODO/FIXME: timepoint / assumes T is squeezed
         c_axis = 0
         data = np.squeeze(read_zstack(inputs['data'], stack, out))
+
+        # FIXME: does not handle single-channeled data
+        # quickfix:
+        if len(data.shape) == 3:
+            data = np.expand_dims(data, 0)
 
         if self.clipping_mask:
             clip_mask = create_clipping_mask(data, axis=c_axis)
@@ -400,16 +428,14 @@ class Deshad3r(Stapl3r):
                 mo.write(data[tuple(slcs)])
                 mo.close()
 
-        # else:
-        #
-        #     outpath = self._outputs[0].format(stack)
-        #
-        #     idxs = [1, 2, 3, 0]  # czyx to zyxc
-        #     data = np.transpose(data, axes=idxs)
-        #     mo = Image(outpath, **props)
-        #     mo.create()
-        #     mo.write(data)
-        #     mo.close()
+        else:
+
+            idxs = [1, 2, 3, 0]  # czyx to zyxc
+            data = np.transpose(data, axes=idxs)
+            mo = Image(outpath, **props)
+            mo.create()
+            mo.write(data)
+            mo.close()
 
     def _get_info_dict(self, **kwargs):
 
@@ -574,6 +600,18 @@ class Deshad3r(Stapl3r):
             ax.axvline(i, ymin=yd[dim][0], ymax=yd[dim][1], color=c, linewidth=0.5, linestyle='-')
         ax.axvspan(min(z_sel), max(z_sel), alpha=0.1, color='k')
 
+    def view(self, channel=0, plane=0, stack=0):
+
+        import napari
+        viewer = napari.Viewer()
+        self.viewer = viewer
+
+        dstack = np.array(read_tiled_plane(self.image_in, channel, plane))
+        mask = dstack < self.noise_threshold
+
+        self.viewer.add_image(dstack, name=f'data_ch{channel}_pl{plane}')
+        self.viewer.add_labels(mask, name=f'data_ch{channel}_pl{plane}')
+
 
 def read_tiled_plane(image_in, channel, plane):
     """Read a plane of a tiled czi/lif file."""
@@ -601,6 +639,8 @@ def read_tiled_plane(image_in, channel, plane):
             for sbd in sbd_channel[plane::n_planes]:
                 dstack.append(np.squeeze(sbd.data_segment().data()))
 
+            czi.close()
+
     elif image_in.endswith('.lif'):
 
         m_idx = 3
@@ -627,9 +667,11 @@ def select_z_range(data, quant_thr=0.8, z_range=[]):
     if not z_range:
         dm = np.median(data, axis=1)
         dq = np.quantile(dm, quant_thr)
-        z_sel = np.where(dm>dq)[0]
+        z_sel = np.where(dm > dq)[0]
     else:
         z_sel = np.array(range(z_range[0], z_range[1]))
+        # FIXME: return dm?!
+
     data = data[z_sel, :]
 
     return data, dm, z_sel
@@ -650,7 +692,7 @@ def fit_profile(data, order=3):
 
     x = np.linspace(0, data.shape[0] - 1, data.shape[0])
 
-    p = np.poly1d(np.polyfit(x, data, order))
+    p = np.poly1d(np.polyfit(x, data, order))  # FIXME: SVD error, on all-zeros?
     data_fitted = p(x)
     data_fitted_norm = data_fitted / np.amax(data_fitted)
 
@@ -703,7 +745,31 @@ def get_image_info(image_in):
 
     # TODO: move to __init__.py function or Image class
 
+    # TODO: implement via:
+    # czi.filtered_subblock_directory[0].mosaic_index
+    # czi.filtered_subblock_directory[-1].mosaic_index
+
+    """
+    # map dimension character to description
+    DIMENSIONS = {
+        '0': 'Sample',  # e.g. RGBA
+        'X': 'Width',
+        'Y': 'Height',
+        'C': 'Channel',
+        'Z': 'Slice',  # depth
+        'T': 'Time',
+        'R': 'Rotation',
+        'S': 'Scene',  # contiguous regions of interest in a mosaic image
+        'I': 'Illumination',  # direction
+        'B': 'Block',  # acquisition
+        'M': 'Mosaic',  # index of tile for compositing a scene
+        'H': 'Phase',  # e.g. Airy detector fibers
+        'V': 'View',  # e.g. for SPIM
+    }
+    """
+
     iminfo = {}
+
 
     if image_in.endswith('.czi'):
 
@@ -713,19 +779,21 @@ def get_image_info(image_in):
             pat = r"{[^{}]+}"
             foo = re.sub(pat, mat, image_in)
             fps = sorted(glob(os.path.abspath(foo)))
-            image_in = fps[0]
             iminfo['nstacks'] = len(fps)
-
-        czi = czifile.CziFile(image_in)
+            czi = czifile.CziFile(fps[0])  # NOTE: should not overwrite image_in
+        else:
+            czi = czifile.CziFile(image_in)
 
         iminfo['dtype'] = czi.dtype
 
+        iminfo['nviews'] = czi.shape[czi.axes.index('V')]  # treated as stacks for now
         iminfo['nchannels'] = czi.shape[czi.axes.index('C')]
         iminfo['ntimepoints'] = czi.shape[czi.axes.index('T')]
         iminfo['nplanes'] = czi.shape[czi.axes.index('Z')]
         iminfo['ncols'] = czi.shape[czi.axes.index('Y')]
         iminfo['nrows'] = czi.shape[czi.axes.index('X')]
         n = iminfo['nchannels'] * iminfo['ntimepoints'] * iminfo['nplanes']
+        # * iminfo['nviews']
         if not '{f}' in image_in:
             iminfo['nstacks'] = len(czi.filtered_subblock_directory) // n
 
@@ -742,6 +810,8 @@ def get_image_info(image_in):
         iminfo['elsize_zyxc'] = czi_get_elsize(czi) + [1]
 
         iminfo['stack_offsets'] = czi_tile_offsets(czi, iminfo)
+
+        czi.close()
 
     elif image_in.endswith('.lif'):
 
@@ -823,6 +893,7 @@ def czi_tile_offsets(czi, iminfo):
     """Get the offset coordinates of a czi zstack."""
 
     # first dir of eacxh zstack: C[8]Z[84]M[286]
+    # FIXME: for views in lightsheet
     stack_stride = iminfo['nchannels'] * iminfo['ntimepoints'] * iminfo['nplanes']
     sbd_zstacks0 = [sbd for sbd in czi.subblock_directory[::stack_stride]]
     v_offsets = np.zeros([iminfo['nstacks'], 4])
@@ -864,9 +935,12 @@ def read_zstack(image_in, zstack_idx, out=None):
             subblock = directory_entry.data_segment()
             tile = subblock.data(resize=False, order=0)
             index = [slice(i-j, i-j+k) for i, j, k in zip(directory_entry.start, start, tile.shape)]
+            index[czi.axes.index('V')] = slice(0, tile.shape[czi.axes.index('V')], None)  # quickFIX for ligthsheet
             index[czi.axes.index('Y')] = slice(0, tile.shape[czi.axes.index('Y')], None)
             index[czi.axes.index('X')] = slice(0, tile.shape[czi.axes.index('X')], None)
             out[tuple(index)] = tile
+
+        czi.close()
 
     elif image_in.endswith('.lif'):
 
