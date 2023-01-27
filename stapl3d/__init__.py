@@ -3132,7 +3132,7 @@ class Stapl3r(object):
 
         return paths
 
-    def _get_arglist(self, parallelized_pars=[]):
+    def _get_arglist(self, parallelized_pars=[], step=''):
         """Generate a argument list for multiprocessing."""
 
         parallelized_pars = parallelized_pars or self._parallelization[self.step]
@@ -3156,10 +3156,14 @@ class Stapl3r(object):
 
             return par
 
-        imdims = ['stacks', 'channels', 'planes']
+        imdims = ['timepoints', 'stacks', 'channels', 'planes']
         if any(pp in imdims for pp in parallelized_pars):
-            first_step = list(self.inputpaths.keys())[0]
-            image_in = self.inputpaths[first_step]['data']
+#            if not step:
+#                step = list(self.inputpaths.keys())[0]
+            image_in = self.inputpaths[self.step]['data']
+
+            # TODO: check if this breaks things in other modules than biasfield
+            # it does break deshader => tmp workaround: copied 'data' entry for each step
             from stapl3d.preprocessing import shading  # TODO: without import
             iminfo = shading.get_image_info(image_in)
             pars = [getset(pp, iminfo[pp]) for pp in parallelized_pars]
@@ -3480,10 +3484,6 @@ class Stapl3r(object):
         outpaths = self._prep_paths(self.outputpaths[step_id], reps, abs)
 
         return inpaths, outpaths
-
-    # def _get_prevpath(self, suf, dir, ext):
-    #     stem = self.get_filestem(elements=[self.prefix, suf])
-    #     return os.path.join(self.datadir, dir, f'{stem}.{ext}')
 
     def _get_inpath(self, prev_path):
         """
