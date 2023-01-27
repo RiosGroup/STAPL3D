@@ -3032,6 +3032,29 @@ class Stapl3r(object):
         for step in steps:
             self._fun_selector[step]()
 
+    def my_parfun(self, *args, **kwargs):
+        """Generic user defined parallel stapl3d call.
+        
+        
+        """
+
+        arglist = self._prep_step('my_parfun', kwargs)
+        arglist = [(arg[0], args[0], args[1]) for arg in arglist]
+        with multiprocessing.Pool(processes=self._n_workers) as pool:
+            pool.starmap(self._my_parfun, arglist)
+
+    def _my_parfun(self, idx, mod_dir, fun_path, *args, **kwargs):
+        """"""
+
+        # import the specified function
+        if mod_dir:
+            sys.path.append(mod_dir)
+        from importlib import import_module
+        mod_name, fun_name = fun_path.rsplit('.', 1)
+        my_fun = getattr(import_module(mod_name), fun_name)
+
+        my_fun(idx, self)
+
     def _set_suffix_formats(self):
         """Set format strings for dimension suffixes."""
 
