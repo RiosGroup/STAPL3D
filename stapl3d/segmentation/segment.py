@@ -222,7 +222,6 @@ class Segment3r(Block3r):
             'seed': seed_volume,
             'segment': segment_volume,
             'filter': filter_segments,
-            'iterative_split': resegment_largelabels,  # TODO
             '_plotlayout': None,
         }
 
@@ -825,6 +824,7 @@ def filter_segments(pars: dict, block: Block) -> None:
         'max_size': filter_max_size,
         'expand': filter_expand_labels,
         'upsample': filter_upsample,
+        'iterative_split': filter_iterative_split,
     }
     inputs = {'im': 'ids_labels'}
     outputs = {'ods_labels': 'Label'}
@@ -1997,6 +1997,43 @@ def filter_upsample(p: dict, im: LabelImage, im2: Image) -> LabelImage:
     return write_image(im_us.ds[:], p, im_us)
 
 
+def filter_iterative_split(p: dict, im: LabelImage, im2: Image) -> LabelImage:
+    """Resegmentlabels large than a given size.
+    
+    thresholds : list of ints, default [50, 3000, 50000]
+        Size thresholds: ....
+    ero_distances_1 : 
+    ids_memb
+    ero_thresholds
+    dil_distances
+    ero_distances2
+    """
+
+    labels = im.ds[:]
+    data = im2.ds[:]
+
+    thresholds = p['thresholds'] if 'thresholds' in p.keys() else [50, 3000, 50000]
+
+    elsize = np.absolute(im.elsize)
+
+    if 'ero_distances' in p.keys():
+        ero_distances = p['ero_distances_1']
+        dil_distances = [ero_dist - elsize[im.axlab.index('z')] for ero_dist in ero_distances]
+        labels = iterative_label_splitter(labels, elsize, thresholds, ero_distances, dil_distances)
+
+    if 'ids_memb' in p.keys():
+        filepath = im.path.split('.h5')[0] + '.h5'  # tmp test
+        ids_memb = p['ids_memb']
+        ero_thresholds = p['ero_thresholds']
+        dil_distances = p['dil_distances']
+        labels = iterative_label_splitter(labels, elsize, thresholds, ero_thresholds, dil_distances, data)
+
+    if 'ero_distances_2' in p.keys():
+        ero_distances = p['ero_distances_2']
+        dil_distances = [ero_dist - elsize[im.axlab.index('z')] for ero_dist in ero_distances]
+        labels = iterative_label_splitter(labels, elsize, thresholds, ero_distances, dil_distances)
+
+    return write_image(labels, p, im)
 
 
 
@@ -2042,13 +2079,13 @@ def resegment_largelabels(filepath, step_key, pars):
     return im
 
 
-def iterative_label_splitter(labels, elsize, thresholds, ero_distances, dil_distances, filepath='', ids=''):
+def iterative_label_splitter(labels, elsize, thresholds, ero_distances, dil_distances, data=[]):
 
     for ero_dist, dil_dist in zip(ero_distances, dil_distances):
 
         labels, labels_large = split_labels(labels, thresholds[1], thresholds[2])
 
-        mask = reduced_mask(labels_large, elsize, ero_dist, filepath, ids)
+        mask = reduced_mask(labels_large, elsize, ero_dist, data)
         relabeled = ndi.label(mask)[0]
         relabeled = remove_small_objects(relabeled, thresholds[0])
         relabeled = expand_labels(relabeled, elsize, dil_dist)
@@ -2066,24 +2103,23 @@ def split_labels(labels, threshold_small, threshold_large):
     labels = remove_small_objects(labels, threshold_small)
     labels_large = remove_small_objects(labels, threshold_large)
     labels[labels_large.astype('bool')] = 0
+
     return labels, labels_large
 
 
-def reduced_mask(labels, elsize, ero_val, filepath='', ids=''):
-    if filepath:  # ero_val is membrane threshold
+def reduced_mask(labels, elsize, ero_val, data=[]):
 
-        im = Image('{}/{}'.format(filepath, ids), permission='r')
-        im.load()
-        vol = im.slice_dataset()
-        im.close()
+    if data:  # ero_val is membrane threshold
 
-        mask_memb = vol > ero_val
+        mask_memb = data > ero_val
         mask = np.logical_and(labels.astype('bool'), ~mask_memb)
+
     else:  # ero_val is distance
+
         fp_zyx = dist_to_extent(ero_val, elsize)
-        print('fp_extent', fp_zyx)
         selem = create_footprint(fp_zyx)
         mask = binary_erosion(labels.astype('bool'), selem=selem)
+
     return mask
 
 
