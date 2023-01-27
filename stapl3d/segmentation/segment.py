@@ -2282,10 +2282,10 @@ def smooth_channel(data, sigma=[3, 3, 3], filter='median'):
 
 def smooth_channel_inplane(data, sigma=3, filter='median'):
 
-    k = disk(sigma)
     data_smooth = np.zeros_like(data)
     for i, slc in enumerate(data):
         if filter == 'median':
+            k = disk(sigma[0])  # FIXME: forcing sigma to list now interferes with inplane median
             data_smooth[i, :, :] = median(slc, k)
         elif filter == 'gaussian':
             data_smooth[i, :, :] = gaussian(slc, sigma=sigma, preserve_range=True)
