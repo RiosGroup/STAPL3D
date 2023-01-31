@@ -1042,7 +1042,7 @@ class Registrat3r_LSD(Registrat3r):
         filestem = fpath_fixed.replace('.ims', '')
         output_h5 = outputs['h5'] or f'{filestem}_padded.h5/reg'
         output_ims = outputs['ims'] or f'{filestem}_reg.ims'
-
+ 
         # Get the number of channels and timepoints in the moving image.
         im = Image(fpath_moving)
         im.load()
@@ -1081,9 +1081,9 @@ class Registrat3r_LSD(Registrat3r):
         datas = np.stack(datas, axis=4)  # zyxct
 
         if output_h5:
-            self._write_h5(outputs['h5'], fpath_fixed, datas)
+            self._write_h5(output_h5, fpath_fixed, datas)
         if output_ims:
-            self._write_ims(outputs['ims'], fpath_fixed, datas)
+            self._write_ims(output_ims, fpath_fixed, datas)
 
     def _write_h5(self, filepath_out, filepath_ref, datas, axislabels_out='czyx'):
         """Write registration results to hdf5."""
