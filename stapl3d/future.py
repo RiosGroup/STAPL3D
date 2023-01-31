@@ -264,13 +264,15 @@ class Protrus3r(Block3r):
     def _init_paths_protruser(self):
         """...."""
 
+        blockfiles = self.outputpaths['blockinfo']['blockfiles']
+
         self._paths.update({
             'predict': {
                 'inputs': {
                     'data': self.inputpaths['blockinfo']['data'],
                     },
                 'outputs': {
-                    'blockfiles': self.outputpaths['blockinfo']['blockfiles'],
+                    'blockfiles': blockfiles,
                     },
                 },
             })
@@ -299,56 +301,131 @@ class Protrus3r(Block3r):
         inputs = self._prep_paths_blockfiles(self.inputs, block, key='data')
         outputs = self._prep_paths_blockfiles(self.outputs, block)
 
-        self.input_image = Image(inputs['data'], permission='r')
-        self.input_image.load()
+        block.create_dataset('data')
 
-        im = self.read_block(self.input_image, block)  # always return as inputlayout Image object
+        self.process_block(block)
 
-        mo = self.process_block(im)  # always return as inputlayout Image object (optionally with new dimensions added in)
-
-        self.write_block(
-            mo, block,
-            ods=self.ods,
-            squeeze=self.squeeze,
-            outlayout=self.outlayout,
-            remove_margins=self.remove_margins,
-            merged_output=self.merged_output,
-            )
-
-        self.input_image.close()
-
-    def process_block(self, im):
+    def process_block(self, block):
         """Process datablock."""
+
+        import tensorflow as tf
+        from tensorflow.keras import backend as K
+
+        def dice_coef(y_true, y_pred, smooth=1e-6):
+            y_true = tf.cast(y_true, tf.float32)
+            y_pred = tf.cast(y_pred, tf.float32)
+            intersection = K.sum(y_true * y_pred, axis=[1,2,3])
+            union = K.sum(y_true, axis=[1,2,3]) + K.sum(y_pred, axis=[1,2,3])
+            return K.mean( (2. * intersection + smooth) / (union + smooth), axis=0)
+
+        def dice_coef_loss(y_true, y_pred):
+            return 1-dice_coef(y_true, y_pred)
+
+        def tversky(y_true, y_pred, sample_weight=None, smooth=1e-6):
+            alpha = 0.3
+            beta = 0.7
+            y_true = tf.cast(y_true, tf.float32)
+            y_pred = tf.cast(y_pred, tf.float32)
+            y_true_pos = K.flatten(y_true)
+            y_pred_pos = K.flatten(y_pred)
+            tp = K.sum(y_true_pos * y_pred_pos)
+            fn = K.sum(y_true_pos * (1-y_pred_pos))
+            fp = K.sum((1-y_true_pos) * y_pred_pos)
+            return (tp + smooth)/(tp + alpha*fn + beta*fp + smooth)
+
+        def tversky_loss(y_true, y_pred, sample_weight=None):
+            return 1 - tversky(y_true, y_pred)
+
+        def focal_tversky_loss(y_true, y_pred, gamma=0.75):
+            tv = tversky(y_true, y_pred)
+            return K.pow((1 - tv), gamma)
+
+        block_ds_in = block.datasets['data']
+        block_ds_in.read(from_source=True)
+        im = block_ds_in.image
+        img_data = im.ds
+        img_data = np.expand_dims(img_data, axis=(0, -1))
+
+        model_filename = "./models/segm_model_hyperband_tv.h5"
+        model = tf.keras.models.load_model(
+            model_filename,
+            custom_objects={'tversky': tversky, 'tversky_loss': tversky_loss},
+            )
+        result = np.squeeze(model(img_data))
+
+        ods = 'result'
+        block.create_dataset(
+            ods,
+            dtype=block_ds_in.dtype,
+            axlab='zyx',
+            create_image=True,
+            )
+        block.datasets[ods].write(result)
+
+    def process_block_example(self, block):
+        """Process datablock."""
+
+        block_ds_in = block.datasets['data']
+        block_ds_in.image.ds[:] = block_ds_in.read(from_source=True)
+        im = block_ds_in.image
 
         ref_props = im.get_props2()
 
         data = im.ds
 
-        testcase = 'simple'  # 'simple', 'squeezed', 'channel', 'tensor'
-        axis = -1  # 0 or -1 for start and end
+        testcase = 'squeezed'  # 'simple', 'squeezed', 'channel', 'tensor'
+        axis = 0  # 0 or -1 for start and end
         C, M, N = 3, 3, 3
 
         if testcase == 'simple':
+            block.create_dataset(testcase, create_image=True)
             result = data
 
         elif testcase == 'squeezed':  # not prefered?, but will test anyway
-            im.slices[0] = slice(0, 1, None)
+
             result = im.slice_dataset(squeeze=True)
+            print(result.shape)
             ref_props = im.squeeze_props(ref_props, dim=im.axlab.index('t'))
+            ref_props = im.squeeze_props(ref_props, dim=im.axlab.index('c'))
             ref_props['axlab'] = ''.join(ref_props['axlab'])
             # FIXME: returned as list and tuples => choose the best option
-            # TODO: check if dim is indeed squeezable (ie is of size 1)
+
+            block.create_dataset(
+                testcase,
+                axlab=ref_props['axlab'],
+                elsize=dict(zip(ref_props['axlab'], ref_props['elsize'])),
+                slices=dict(zip(ref_props['axlab'], ref_props['slices'])),
+                create_image=True,
+                )
+
 
         elif testcase == 'channel':
             result = np.stack([data] * C, axis)
             ref_props = self._insert_dim(ref_props, {axis: {'axlab': 'c', 'elsize': 1, 'chunks': C}})
+            ref_props['axlab'] = ''.join(ref_props['axlab'])
+
+            axlab = ref_props['axlab']
+            blocker_info = {
+                'fullsize': {'c': C},
+                'blocksize': {'c': C},
+                'blockmargin': {'c': 0},
+                }
+            block.create_dataset(testcase, axlab=ref_props['axlab'], elsize={'c': 1}, slices={'c': slice(0, C)}, blocker_info=blocker_info, create_image=True)
 
         elif testcase == 'tensor':
             result = np.stack([np.stack([data] * M, axis) * N], axis)
             ref_props = self._insert_dim(ref_props, {axis: {'axlab': 'm', 'elsize': 1, 'chunks': M}})
             ref_props = self._insert_dim(ref_props, {axis: {'axlab': 'n', 'elsize': 1, 'chunks': N}})
 
-        return self._create_block_image(result, ref_props)
+            axlab = ref_props['axlab']
+            blocker_info = {
+                'fullsize': {'m': M, 'n': N},
+                'blocksize': {'m': M, 'n': N},
+                'blockmargin': {'m': 0, 'n': 0},
+                }
+            block.create_dataset(testcase, axlab=ref_props['axlab'], elsize={'m': 1, 'n': 1}, slices={'m': slice(0, M), 'n': slice(0, N)}, blocker_info=blocker_info, create_image=True)
+
+        block.datasets[testcase].write(result)
 
     def _insert_dim(self, props, insert={}):
         """Insert a dimension into props dict {pos: props}.
@@ -356,7 +433,7 @@ class Protrus3r(Block3r):
         TODO: move to Image class method
         """
 
-        propnames = ['axlab', 'elsize', 'chunks']  # , 'dims', 'shape', 'slices'
+        propnames = ['axlab', 'elsize'] #, 'chunks' # , 'dims', 'shape', 'slices'
         # NOTE: , 'dims', 'shape', 'slices' are reset in _create_block_image
         for pos, newprops in insert.items():
 

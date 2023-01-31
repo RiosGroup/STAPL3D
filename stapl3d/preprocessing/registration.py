@@ -1175,7 +1175,7 @@ class Registrat3r_LSD(Registrat3r):
             im.close
             viewer.add_image(data, channel_axis=channel_axis)
 
-class Registrat3r_CoAcq(Stapl3r):
+class Registrat3r_CoAcq(Registrat3r):
     """Co-acquisition image registration."""
 
     def __init__(self, image_in='', parameter_file='', **kwargs):
@@ -1183,7 +1183,7 @@ class Registrat3r_CoAcq(Stapl3r):
         if 'module_id' not in kwargs.keys():
             kwargs['module_id'] = 'registration_coacq'
 
-        super(Registrat3r, self).__init__(
+        super(Registrat3r_CoAcq, self).__init__(
             image_in, parameter_file,
             **kwargs,
             )
@@ -1230,9 +1230,9 @@ class Registrat3r_CoAcq(Stapl3r):
             'filepaths': [],
             'centrepoint': {},
             'centrepoints': {},
-            'margin': {'y': 20, 'x': 20},
+            'margin': {'z': 0, 'y': 20, 'x': 20},
             'tasks': 1,
-            'methods': {'affine': ''},
+            'methods': {'affine': 'affine'},
             'target_voxelsize': {},
             'volumes': [],
             '_empty_slice_volume': '',
@@ -1244,14 +1244,14 @@ class Registrat3r_CoAcq(Stapl3r):
         for step in self._fun_selector.keys():
             self.set_parameters(step)
 
-        self._init_paths()
+        self._init_paths_coacq()
 
         self._init_log()
 
         self._images = ['raw_nucl']
         self._labels = ['label_cell']
 
-    def _init_paths(self):
+    def _init_paths_coacq(self):
 
         self.set_filepaths()
 
@@ -1314,9 +1314,29 @@ class Registrat3r_CoAcq(Stapl3r):
         ch = self.channel
         tp = self.timepoint
 
-        fixed = load_itk_image(inputs['highres'], ch=ch, tp=tp)
+        tf = {
+            'theta': {'z': 0, 'y': 0, 'x': 0},
+            'pad': {'z': [0, 0], 'y': [0, 0], 'x': [0, 0]},
+            'translate': {'z': 0, 'y': 0, 'x': 0},
+        }
+        _, data, _, itk_props = self.read_image(
+            inputs['highres'],
+            channel=ch, timepoint=tp, transform=tf,
+            )  # FIXME: pad has to exist in transform ... make a default
+        fixed = self.data_to_itk(data, **itk_props)
+
         slc, pad = self._slc_lowres(inputs)
-        moving = load_itk_image(inputs['lowres'], ch=ch, tp=tp, slc=slc, padding=pad)
+
+        tf = {
+            'theta': {'z': 0, 'y': 0, 'x': 0},
+            'pad': pad,
+            'translate': {'z': 0, 'y': 0, 'x': 0},
+        }
+        _, data, _, itk_props = self.read_image(
+            inputs['lowres'],
+            channel=ch, timepoint=tp, slc=slc, transform=tf,
+            )
+        moving = self.data_to_itk(data, **itk_props)
 
         init_suffix = ''
         for method, parpath in self.methods.items():
@@ -1397,9 +1417,12 @@ class Registrat3r_CoAcq(Stapl3r):
                      for d in 'xyz'}
 
         # Reorder volumes to process _empty_slice_volume first.
+        # # confused here: skipping for now
+        # FIXME: volumes are lists in the parfiles, but dicts here
         a = self.volumes.pop(self._empty_slice_volume, {})
         b = {self._empty_slice_volume: a} if a else {}
         volumes = {**b, **self.volumes}
+        #volumes = {k, v for k, v in self.volumes.items()}
 
         # Perform transformation.
         for ods, vol in volumes.items():

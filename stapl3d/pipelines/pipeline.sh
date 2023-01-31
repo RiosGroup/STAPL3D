@@ -44,10 +44,42 @@ for blockstem in "${blockstems[@]}"; do
 done
 
 
+
+
+
+###==========================================================================###
+### analysis preparation: HFK16w
+
+source "${HOME}/.stapl3d.ini" && load_stapl3d_config
+
+projectdir='/hpc/pmc_rios/mkleinnijenhuis/1.projects/TEST'
+dataset='HFK16w'
+load_dataset "${projectdir}" "${dataset}"
+parfile="${dataset}.yml"
+load_parameters "${dataset}" -v "${parfile}"  # FIXME: dims not loaded
+
+C=2
+Z=106
+nb=64
+set_blockstems "$dataset"
+echo "${blockstems[@]}"
+# FIXME: '$dataset' not included in <>.sh => because image_in is not defined
+image_in='HFK16w.czi'
+
+
+idx=0
+image_in='HFK16w.czi'
+parfile='HFK16w.yml'
+from stapl3d.preprocessing import shading
+deshad3r = shading.Deshad3r(image_in, parfile)
+deshad3r.postprocess(channels=[idx])
+
+
 ###==========================================================================###
 ### preprocessing
 jid=''
 submit $( generate_script shading estimate ) $jid
+submit $( generate_script shading process ) $jid
 submit $( generate_script shading postprocess ) $jid
 submit $( generate_script shading apply ) $jid
 

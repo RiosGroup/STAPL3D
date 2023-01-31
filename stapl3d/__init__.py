@@ -3032,6 +3032,29 @@ class Stapl3r(object):
         for step in steps:
             self._fun_selector[step]()
 
+    def my_parfun(self, *args, **kwargs):
+        """Generic user defined parallel stapl3d call.
+        
+        
+        """
+
+        arglist = self._prep_step('my_parfun', kwargs)
+        arglist = [(arg[0], args[0], args[1]) for arg in arglist]
+        with multiprocessing.Pool(processes=self._n_workers) as pool:
+            pool.starmap(self._my_parfun, arglist)
+
+    def _my_parfun(self, idx, mod_dir, fun_path, *args, **kwargs):
+        """"""
+
+        # import the specified function
+        if mod_dir:
+            sys.path.append(mod_dir)
+        from importlib import import_module
+        mod_name, fun_name = fun_path.rsplit('.', 1)
+        my_fun = getattr(import_module(mod_name), fun_name)
+
+        my_fun(idx, self)
+
     def _set_suffix_formats(self):
         """Set format strings for dimension suffixes."""
 
@@ -3132,7 +3155,7 @@ class Stapl3r(object):
 
         return paths
 
-    def _get_arglist(self, parallelized_pars=[]):
+    def _get_arglist(self, parallelized_pars=[], step=''):
         """Generate a argument list for multiprocessing."""
 
         parallelized_pars = parallelized_pars or self._parallelization[self.step]
@@ -3156,10 +3179,14 @@ class Stapl3r(object):
 
             return par
 
-        imdims = ['stacks', 'channels', 'planes']
+        imdims = ['timepoints', 'stacks', 'channels', 'planes']
         if any(pp in imdims for pp in parallelized_pars):
-            first_step = list(self.inputpaths.keys())[0]
-            image_in = self.inputpaths[first_step]['data']
+#            if not step:
+#                step = list(self.inputpaths.keys())[0]
+            image_in = self.inputpaths[self.step]['data']
+
+            # TODO: check if this breaks things in other modules than biasfield
+            # it does break deshader => tmp workaround: copied 'data' entry for each step
             from stapl3d.preprocessing import shading  # TODO: without import
             iminfo = shading.get_image_info(image_in)
             pars = [getset(pp, iminfo[pp]) for pp in parallelized_pars]
@@ -3481,10 +3508,6 @@ class Stapl3r(object):
 
         return inpaths, outpaths
 
-    # def _get_prevpath(self, suf, dir, ext):
-    #     stem = self.get_filestem(elements=[self.prefix, suf])
-    #     return os.path.join(self.datadir, dir, f'{stem}.{ext}')
-
     def _get_inpath(self, prev_path):
         """
 
@@ -3693,6 +3716,14 @@ class Stapl3r(object):
                         zipsel = zipsels[i]
                         slices = self._get_additional_block_slices(block, zipsel, axlab)
                         block_ds = self.read_blockdata(block, zipsel, ids, axlab, slices)
+                    elif ids == 'raw':  # TMP for stacks
+                        from stapl3d import blocks
+                        block3r_raw = blocks.Block3r('{f}.czi')
+                        block_raw = block3r_raw._blocks[block.idx]
+                        block_raw.create_dataset('raw')
+                        block_ds = block_raw.datasets['raw']
+                        block_ds.read(from_source=True)  # TODO: read only required channels!
+                        slices = block_ds.slices  # TODO: CHECK!!!
                     else:
                         block.create_dataset(ids)
                         block_ds = block.datasets[ids]
@@ -3729,8 +3760,9 @@ class Stapl3r(object):
                         labelval=1, dtype='uint8', thickness=1,
                         )
                 else:
-                    name = f'{block.id}_{ids}'
-                    starts = [slc.start for al, slc in slices.items()]
+                    name = f'{block.id}_{ids}'  # TODO: name base as argument
+                    name = f'{ids}'
+                    starts = [slc.start for al, slc in slices.items() if al in 'zyx']
                     data = block_ds.image.ds
 
                 affine = np.copy(get_affine([0, 0, 0], elsize, starts))
@@ -3741,10 +3773,14 @@ class Stapl3r(object):
                 # plot
                 if ids in images:
                     #self.viewer.add_image(data, name=name, scale=elsize, affine=affine)
-                    self.viewer.add_image(data, name=name, affine=affine)
+                    if data.ndim == 4:
+                        for i in range(data.shape[3]):
+                            self.viewer.add_image(data[:, :, :, i], name=f'{name}_ch{i}', affine=affine)
+                    else:
+                        self.viewer.add_image(data, name=name, affine=affine)
                     # set equal clim
-                    clim = self.viewer.layers[f'{block0.id}_{ids}'].contrast_limits
-                    self.viewer.layers[f'{block.id}_{ids}'].contrast_limits = clim
+                    #clim = self.viewer.layers[f'{block0.id}_{ids}'].contrast_limits
+                    #self.viewer.layers[name].contrast_limits = clim
                 else:
                     #self.viewer.add_labels(data, name=name, scale=elsize, affine=affine)
                     self.viewer.add_labels(data, name=name, affine=affine)

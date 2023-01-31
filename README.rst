@@ -56,7 +56,7 @@ This software runs on Linux, MacOS and Windows. It has been tested on:
  - Windows: 10 Pro
 
 dependencies:
-Python (auto-installed through with conda or pip)
+Python (auto-installed through conda or pip)
 
  - python>=3.8
  - scikit-image
@@ -77,6 +77,11 @@ Other software packages:
  - `ACME <https://wiki.med.harvard.edu/SysBio/Megason/ACME>`_
  - `Ilastik <https://www.ilastik.org/documentation/basics/installation.html>`_ (optional)
  - `Fiji <https://imagej.net/downloads>`_ (optional)
+ - elastiX version of simpleitk
+ - Stardist
+ - PyTorch-3DUNET
+ - hyperopt (+ mongoDB)
+ - napari #pip install napari[all]
 
 
 Installation

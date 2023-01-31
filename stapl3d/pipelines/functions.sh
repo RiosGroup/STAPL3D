@@ -1013,6 +1013,7 @@ function set_submit_pars {
 
     # Generate array job specifier.
     #    Switch between parallelization modes.
+    # TODO: parallelization modes in plural to conform to Python pipeline
     case "${submit_pars[0]}" in
         'no')
             array_stop="1"
@@ -1211,7 +1212,7 @@ function get_py_general_LOCAL {
 function get_py_general_SLURM {
     get_py_header
     eval get_py_${stage}
-    echo "${stage}.${step}(blocks=[idx])"
+    echo "${stage}.${step}(${submit_pars[0]}=[idx])"
 }
 function get_py_general_SGE {
     get_py_header
@@ -1245,10 +1246,10 @@ function write_pyfile {
     pyfile="${datadir}/${jobname}.py"
     eval get_py_${stage}_${step} > "${pyfile}"
 }
-function write_pyfile {
-    pyfile="${datadir}/${jobname}.py"
-    eval get_py_general_${compute_env} > "${pyfile}"
-}
+# function write_pyfile {
+#     pyfile="${datadir}/${jobname}.py"
+#     eval get_py_general_${compute_env} > "${pyfile}"
+# }
 
 
 function echo_pyfile {
@@ -1295,8 +1296,8 @@ function get_py_header {
     echo 'parameter_file = sys.argv[2]'
     echo 'if len(sys.argv) > 3:'
     echo '    idx = int(sys.argv[3])'
-    # echo 'if len(sys.argv) > 4:'
-    # echo '    idx2 = int(sys.argv[4])'
+    echo 'if len(sys.argv) > 4:'
+    echo '    idx2 = int(sys.argv[4])'
 
 }
 
@@ -1304,27 +1305,31 @@ function get_py_header {
 function get_py_shading {
     echo ''
     echo "from stapl3d.preprocessing import shading"
-    echo "deshader = shading.Deshader(image_in, parameter_file)"
+    echo "deshad3r = shading.Deshad3r(image_in, parameter_file)"
 }
 function get_py_shading_estimate {
     get_py_header
     get_py_shading
-    # echo "deshader.${step}(channels=[idx], planes=[idx2])"
-    echo "deshader.${step}(planes=[idx])"
+    echo "deshad3r.${step}(planes=[idx])"
 }
-# FIXME: too much io overhead for plane*channel paralellization
-# function get_cmd_shading_estimate { get_cmd "\${ch_idx}" "\${pl_idx}" ; }
 function get_cmd_shading_estimate { get_cmd "\${idx}" ; }
 function get_py_shading_postprocess {
     get_py_header
     get_py_shading
-    echo "deshader.${step}(channels=[idx])"
+    echo "deshad3r.${step}(channels=[idx])"
 }
 function get_cmd_shading_postprocess { get_cmd "\${idx}" ; }
+function get_py_shading_postprocess {
+    get_py_header
+    get_py_shading
+    echo "deshad3r.${step}()"
+}
+function get_cmd_shading_postprocess { get_cmd "" ; }
+
 function get_py_shading_apply {
     get_py_header
     get_py_shading
-    echo "deshader.${step}(stacks=[idx])"
+    echo "deshad3r.${step}(stacks=[idx])"
 }
 function get_cmd_shading_apply { get_cmd "\${idx}" ; }
 
@@ -1872,6 +1877,17 @@ function get_py_stardist_merge {
 }
 function get_cmd_stardist_merge { get_cmd ; }
 
+
+function get_py_torch {
+    echo "from stapl3d import stapl3d_torch"
+    echo "torch3r = stapl3d_torch.Torch3r(image_in, parameter_file)"
+}
+function get_py_torch_train {
+    get_py_header
+    get_py_torch
+    echo "torch3r.${step}()"
+}
+function get_cmd_torch_train { get_cmd "" ; }
 
 
 
