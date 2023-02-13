@@ -1664,7 +1664,7 @@ def seed_seeds(p: dict, im: LabelImage, im2: Image) -> LabelImage:
     }
     p = {**p_def, **p}
 
-    mask = None if 'threshold' is None else data > p['threshold']
+    mask = None if p['threshold'] is None else data > p['threshold']
 
     if p['invert_data']:
         data = -data
