@@ -102,7 +102,6 @@ from stapl3d import parse_args, Stapl3r, Image, transpose_props
 
 logger = logging.getLogger(__name__)
 
-
 def main(argv):
     """Co-acquisition image registration."""
 
@@ -160,7 +159,7 @@ class Registrat3r(Stapl3r):
 
         self._images = []
         self._labels = []
-
+        
     def _init_paths(self):
 
         self._paths = {}
@@ -239,7 +238,7 @@ class Registrat3r(Stapl3r):
 
         im = Image(filepath, reslev=rl, permission='r')
         im.load()
-
+        
         tp = timepoint
         ch = channel
         pad = transform['pad']
@@ -418,7 +417,6 @@ class Registrat3r_LSD(Registrat3r):
     """mLSR3D to Live image coregistration."""
 
     def __init__(self, image_in='', parameter_file='', **kwargs):
-
         if 'module_id' not in kwargs.keys():
             kwargs['module_id'] = 'registration_lsd'
 
@@ -494,6 +492,7 @@ class Registrat3r_LSD(Registrat3r):
         }
         for k, v in default_attr.items():
             setattr(self, k, v)
+        #print(str(self.__dict__["_cfg"].keys()))
 
         for step in self._fun_selector.keys():
             self.set_parameters(step)
@@ -970,13 +969,12 @@ class Registrat3r_LSD(Registrat3r):
         # NOTE: ITK (transformix) is already multithreaded => n_workers = 1
         # self.n_threads = 1  # min(self.tasks, multiprocessing.cpu_count())
         self._n_workers = 1
-
+        
         with multiprocessing.Pool(processes=self._n_workers) as pool:
             pool.starmap(self._apply_channel_timepoint, arglist)
 
     def _apply_channel_timepoint(self, ch=0, tp=0):
         """Apply mLSR3D to Live registration parameters to 3D dataset."""
-
         inputs = self._prep_paths(self.inputs)
         outputs = self._prep_paths(self.outputs, reps={'c': ch, 't': tp})
         os.makedirs(outputs['regdir'], exist_ok=True)
@@ -988,6 +986,10 @@ class Registrat3r_LSD(Registrat3r):
         suffix = self._registration_step or list(self.registration_steps.keys())[-1]
         parpath = "TransformParameters.0.txt"  # f'{filestem}_transformix_{suffix}.txt
         # FIXME: write this file to {filestem}_transformix_{}.txt
+        
+        ## CHANGED TO NOT USE DEFAULT CHANNELS IN APPPLYING COREGISTRATION
+        self.prep_mLSR3D["image"]["channel"]=ch
+        self.prep_mLSR3D["image"]["timepoint"]=tp
 
         _, data, _, itk_props = self.read_image(
             fpath_moving,
@@ -1391,7 +1393,7 @@ class Registrat3r_CoAcq(Registrat3r):
 
         if 'bspline' in self.methods.keys():
             self._reg_dir = tempfile.mkdtemp(prefix='reg_', dir=self.directory)
-
+        
         arglist = self._prep_step('apply', kwargs)
         # NOTE: ITK is already multithreaded => n_workers = 1
         #self.n_threads = min(self.tasks, multiprocessing.cpu_count())
